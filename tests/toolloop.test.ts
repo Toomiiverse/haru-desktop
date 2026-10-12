@@ -7,8 +7,17 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, textToolCall } from '../electron/toolloop';
+import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, textToolCall, ToolLoopFailure, toolResultSucceeded } from '../electron/toolloop';
 import type { ChatMessage, ToolCall } from '../electron/provider';
+
+test('a standalone invited joke can contain fictional checking without an unnecessary factual disclaimer', async () => {
+  const h = harness([says('[smug] I checked the dictionary for gullible, but the page was blank.')], { canSearch: false });
+  h.conversation = [{ role: 'user', content: 'Tell me another joke.' }];
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.match(result.content, /dictionary/);
+  assert.equal(h.offered.length, 1);
+  assert.deepEqual(h.toolsRun, []);
+});
 
 const says = (content: string): ChatMessage => ({ role: 'assistant', content });
 const calls = (...names: string[]): ChatMessage => ({
@@ -16,7 +25,7 @@ const calls = (...names: string[]): ChatMessage => ({
   tool_calls: names.map((name, index) => ({ id: `call-${index}`, function: { name, arguments: {} } })),
 });
 
-test('tool loop preserves each parallel result ID, including missing provider IDs', async () => {
+test('tool loop preserves each result ID, including missing provider IDs', async () => {
   const h = harness([{ role: 'assistant', tool_calls: [
     { id: 'provided', function: { name: 'remember_about_user', arguments: { text: 'A' } } },
     { function: { name: 'remember_about_user', arguments: { text: 'B' } } },
@@ -75,7 +84,7 @@ function harness(script: ChatMessage[], options: Partial<{
       // fake one sets it the same way: during the round, not before it.
       if (name === options.pageReadAfter) pageRead = true;
       toolsRun.push(name);
-      return `${name} done`;
+      return JSON.stringify({ ok: true });
     },
     pageWasRead: () => pageRead,
     handsAllowed: () => hands,
@@ -149,7 +158,7 @@ test('a call written out as words runs like any other, and its words are taken b
   const h = harness([
     { role: 'assistant', content: 'adopt_interest(kind="game", title="Zenless Zone Zero")' },
     says('Fine. Zenless Zone Zero it is.'),
-  ], { runTool: async call => { seen.push(call.function?.arguments); return 'adopted'; } });
+  ], { runTool: async call => { seen.push(call.function?.arguments); return '{"saved":true}'; } });
   const result = await runToolLoop(h.conversation, h.deps);
   assert.equal(result.content, 'Fine. Zenless Zone Zero it is.');
   assert.deepEqual([...result.ran], ['adopt_interest']);
@@ -180,7 +189,10 @@ test('a tool call runs, its result goes back, and the next round settles', async
   // conversation, or the next round is answering a question it cannot see.
   assert.deepEqual(h.conversation.map(entry => entry.role), ['user', 'assistant', 'tool']);
   assert.equal(h.conversation.at(-1)?.tool_name, 'search_web');
-  assert.equal(h.conversation.at(-1)?.content, 'search_web done');
+  const receipt = JSON.parse(h.conversation.at(-1)!.content!);
+  assert.equal(receipt.tool, 'search_web');
+  assert.equal(receipt.outcome, 'succeeded');
+  assert.deepEqual(receipt.data, { ok: true });
   assert.equal(h.resets, 1, 'the discarded round should take its words back');
 });
 
@@ -197,6 +209,21 @@ test('calls in one round keep their order however they finish', async () => {
   await runToolLoop(h.conversation, h.deps);
   assert.deepEqual(h.conversation.filter(entry => entry.role === 'tool').map(entry => entry.tool_name),
     ['search_web', 'get_gpu_info']);
+});
+
+test('calls in one round execute sequentially before observing the next state', async () => {
+  const sequence: string[] = [];
+  const h = harness([calls('first', 'second'), says('Both.')], {
+    runTool: async call => {
+      const name = call.function?.name ?? '';
+      sequence.push(`${name}:started`);
+      await Promise.resolve();
+      sequence.push(`${name}:finished`);
+      return '{"ok":true}';
+    },
+  });
+  await runToolLoop(h.conversation, h.deps);
+  assert.deepEqual(sequence, ['first:started', 'first:finished', 'second:started', 'second:finished']);
 });
 
 test('the last round is offered no tools, so something always gets said', async () => {
@@ -253,10 +280,10 @@ test('a claim is not retried when the tool actually ran', async () => {
   assert.equal(result.content, "I've opened Spotify for you.");
 });
 
-test('a claim is not retried when she has no hands to do it with', async () => {
+test('an unsupported desktop claim is rejected when no action was permitted', async () => {
   const h = harness([says("I've opened Spotify for you.")], { handsAllowed: false });
-  const result = await runToolLoop(h.conversation, h.deps);
-  assert.equal(result.rounds, 1, 'pressing a tool she was never offered would only waste a round');
+  await assert.rejects(runToolLoop(h.conversation, h.deps), error => error instanceof ToolLoopFailure && error.code === 'unsupported_action');
+  assert.equal(h.offered.length, 1, 'pressing a tool she was never offered would only waste a round');
 });
 
 test('claiming a tick-off without calling anything is retried once', async () => {
@@ -275,9 +302,8 @@ test('a tick-off claim is left alone when there is nothing on the list to mean',
 test('each retry fires at most once, so a stubborn model is reported not looped', async () => {
   // She claims it three times running and never calls anything.
   const h = harness([says('Ticked off, then.'), says('Ticked off, then.'), says('Ticked off, then.')]);
-  const result = await runToolLoop(h.conversation, h.deps);
-  assert.equal(result.rounds, 2, 'one retry, then her answer stands whatever it says');
-  assert.equal(result.ran.size, 0);
+  await assert.rejects(runToolLoop(h.conversation, h.deps), error => error instanceof ToolLoopFailure && error.code === 'unsupported_tickoff');
+  assert.equal(h.offered.length, 2, 'one repair attempt, then a typed failure instead of an unsupported claim');
 });
 
 test('her deliberation in front of the reply is cut, and the reply behind it stands', async () => {
@@ -396,7 +422,158 @@ test('a claim to have checked, with nothing called, is sent to look once', async
   const looked = harness([calls('look_up_knowledge'), says(claim)]);
   assert.equal((await runToolLoop(looked.conversation, looked.deps)).content, claim, 'she looked, so the claim stands');
   const twice = harness([says(claim), says(claim)]);
-  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, claim, 'asked once, then taken at her word');
+  await assert.rejects(runToolLoop(twice.conversation, twice.deps), error => error instanceof ToolLoopFailure && error.code === 'unsupported_lookup');
   const cannot = harness([says(claim)], { canSearch: false });
   assert.equal(cannot.resets, 0);
+});
+
+test('structured calls with tools withheld are never executed', async () => {
+  const h = harness([calls('open_app'), says('I have not opened it.')]);
+  h.deps.pageWasRead = () => true;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.deepEqual(h.toolsRun, []);
+  assert.equal(result.ran.size, 0);
+  assert.match(h.conversation.find(turn => turn.role === 'tool')?.content ?? '', /not executed/);
+  assert.deepEqual(h.offered, [false, false]);
+});
+
+test('a page read prevents later same-round calls from executing', async () => {
+  const h = harness([calls('read_web_page', 'open_app'), says('The page says Tuesday.')], { pageReadAfter: 'read_web_page' });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.deepEqual(h.toolsRun, ['read_web_page']);
+  assert.deepEqual([...result.ran], ['read_web_page']);
+  assert.equal(h.deps.handsAllowed(), false);
+  assert.match(h.conversation.find(turn => turn.tool_name === 'open_app')?.content ?? '', /not executed/);
+});
+
+test('failed and uncertain JSON outcomes are not successful operation evidence', async () => {
+  for (const outcome of [
+    { error: 'not permitted' }, { ok: false }, { done: false }, { saved: false }, { success: false },
+    { status: 'failed' }, { state: 'cancelled' }, { outcome: 'unknown' }, { pending: true }, { confirm: true },
+  ]) {
+    const h = harness([calls('open_app'), says('It did not open.')], { runTool: async () => JSON.stringify(outcome) });
+    const result = await runToolLoop(h.conversation, h.deps);
+    assert.equal(result.ran.size, 0, JSON.stringify(outcome));
+  }
+  assert.equal(toolResultSucceeded('{"ok":true}'), true);
+  assert.equal(toolResultSucceeded('[]'), true, 'an empty lookup result still proves the lookup happened');
+  assert.equal(toolResultSucceeded('Unknown tool: invented_tool'), false);
+  assert.equal(toolResultSucceeded(''), false);
+});
+
+test('failed actions cannot support a claim after its repair attempt', async () => {
+  const h = harness([calls('open_app'), says("I've opened Spotify for you."), says("I've opened Spotify for you.")], {
+    runTool: async () => '{"error":"permission denied"}',
+  });
+  const checks: string[] = [];
+  h.deps.onCheckFailure = failure => { checks.push(failure.code); };
+  await assert.rejects(runToolLoop(h.conversation, h.deps), error => error instanceof ToolLoopFailure && error.code === 'unsupported_action');
+  assert.deepEqual(checks, ['unsupported_action', 'unsupported_action']);
+  assert.equal(h.offered.length, 3);
+});
+
+test('successful operations from a handoff remain evidence without replaying them', async () => {
+  const initial = new Set(['open_app']);
+  const h = harness([says("I've opened Spotify for you.")]);
+  h.deps.initialRan = initial;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.deepEqual([...result.ran], ['open_app']);
+  assert.equal(result.rounds, 1);
+  assert.deepEqual(h.toolsRun, []);
+  result.ran.add('another');
+  assert.deepEqual([...initial], ['open_app'], 'the caller retains ownership of the prior evidence set');
+});
+
+test('cancellation before asking and after a late provider result stops execution', async () => {
+  for (const before of [true, false]) {
+    const controller = new AbortController();
+    const h = harness([calls('open_app')]);
+    h.deps.signal = controller.signal;
+    const ask = h.deps.ask;
+    h.deps.ask = async (...args) => {
+      const message = await ask(...args);
+      controller.abort();
+      return message;
+    };
+    if (before) controller.abort();
+    await assert.rejects(runToolLoop(h.conversation, h.deps), error => error instanceof Error && error.name === 'AbortError' && !(error instanceof ToolLoopFailure));
+    assert.deepEqual(h.toolsRun, []);
+    assert.equal(h.offered.length, before ? 0 : 1);
+  }
+});
+
+test('cancellation during a tool records its result and prevents the next action', async () => {
+  const controller = new AbortController();
+  const executed: string[] = [];
+  const h = harness([calls('open_app', 'power')], {
+    runTool: async call => {
+      executed.push(call.function?.name ?? '');
+      controller.abort();
+      return '{"ok":true}';
+    },
+  });
+  h.deps.signal = controller.signal;
+  await assert.rejects(runToolLoop(h.conversation, h.deps), { name: 'AbortError' });
+  assert.deepEqual(executed, ['open_app']);
+  assert.equal(h.conversation.at(-1)?.tool_name, 'open_app');
+});
+
+test('empty terminal responses have a typed quality failure and diagnostic hooks are optional', async () => {
+  const h = harness([says(''), says('')]);
+  h.deps.onCheckFailure = () => { throw new Error('diagnostic sink unavailable'); };
+  await assert.rejects(runToolLoop(h.conversation, h.deps), error => error instanceof ToolLoopFailure && error.code === 'empty_response');
+});
+
+test('queued and merely acknowledged operations are not completed-action evidence', () => {
+  for (const status of ['queued', 'accepted', 'scheduled', 'started', 'in_progress', 'running']) {
+    assert.equal(toolResultSucceeded(JSON.stringify({ ok: true, status })), false, status);
+  }
+  assert.equal(toolResultSucceeded('{"ok":true,"status":"completed"}'), true);
+});
+
+test('checking claims must be repaired even with search disabled', async () => {
+  const h = harness([says('I checked your files. Everything is fine.'), says('I have not checked your files.')], { canSearch: false });
+  assert.equal((await runToolLoop(h.conversation, h.deps)).content, 'I have not checked your files.');
+  assert.equal(h.resets, 1);
+  const stubborn = harness([says('I checked your files.'), says('I checked your files.')], { canSearch: false });
+  await assert.rejects(runToolLoop(stubborn.conversation, stubborn.deps), error => error instanceof ToolLoopFailure && error.code === 'unsupported_lookup');
+});
+
+test('a successful memory write does not authorize a claim to have checked the machine', async () => {
+  const h = harness([calls('remember_about_user'), says('I checked the GPUs. All idle.'), says('I saved your note, but have no GPU readings.')]);
+  assert.equal((await runToolLoop(h.conversation, h.deps)).content, 'I saved your note, but have no GPU readings.');
+  assert.ok(h.resets >= 2);
+});
+
+test('an actual prior tool receipt can still support a checking claim', async () => {
+  const h = harness([says('I checked the GPU. The recorded temperature was 54 degrees.')], { canSearch: false });
+  h.conversation.unshift(calls('get_gpu_info'), { role: 'tool', tool_call_id: 'call-0', tool_name: 'get_gpu_info', content: '{"temperature_c":54}' });
+  assert.equal((await runToolLoop(h.conversation, h.deps)).rounds, 1);
+});
+
+test('denying a check is not a claim; a later affirmative check still is', async () => {
+  const { claimsChecked } = await import('../electron/reply');
+  for (const reply of ['I have not checked your files.', "I haven't checked the vault.", 'I never searched your notes.', 'I should have checked your files.']) assert.equal(claimsChecked(reply), false, reply);
+  assert.equal(claimsChecked("I haven't checked your files, but I checked the GPU."), true);
+});
+
+test('reading a different domain cannot support a checking claim', async () => {
+  const h = harness([calls('get_gpu_info'), says('I checked your vault. No notes found.'), says('I only have a GPU reading, not a vault search.')]);
+  assert.equal((await runToolLoop(h.conversation, h.deps)).content, 'I only have a GPU reading, not a vault search.');
+  const { hasCheckingEvidence } = await import('../electron/toolloop');
+  assert.equal(hasCheckingEvidence('I checked the GPU.', new Set(['get_gpu_info'])), true);
+  assert.equal(hasCheckingEvidence('I checked the GPU.', new Set(['search_web'])), false);
+  assert.equal(hasCheckingEvidence('I checked your notes. I have no GPU readings.', new Set(['vault_read'])), true);
+});
+
+test('mental arithmetic does not need a lookup receipt', async () => {
+  const h = harness([says('I checked the addition: 23 plus 19 is 42.')], { canSearch: false });
+  assert.equal((await runToolLoop(h.conversation, h.deps)).rounds, 1);
+});
+
+test('explicitly requested fiction may describe fictional checks without real tools', async () => {
+  const h = harness([says('I checked the fingerprints on the safe. The ghost had left none.')], { canSearch: false });
+  h.conversation[0].content = 'Write a fictional detective scene in first person.';
+  assert.equal((await runToolLoop(h.conversation, h.deps)).rounds, 1);
+  assert.deepEqual(h.toolsRun, []);
 });

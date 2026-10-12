@@ -1,20 +1,136 @@
+import {naturalTurn,naturalSelection} from './core-natural-turn';
+import {supplement,supplementOwned,coreRefreshShelf,coreShelfLine,coreReadOverheard} from './core-context-supplement';
+
+async function runCoreProviderFallback(conversation:OllamaMessage[],config:ProviderConfig,options:PostOptions){
+ let packet=naturalPolicy<any>('awayStart',[config,homeTwin(config),trimEndpoint(config.endpoint),[...awayDown],Date.now()]);
+ let firstError:unknown,lastError:unknown,value:OllamaMessage|undefined;
+ for(let step=0;step<3;step++){
+  activeTask.getStore()?.signal.throwIfAborted();options.signal?.throwIfAborted();
+  for(const event of packet.events??[]){if(event.kind==='delete')awayDown.delete(event.key);else if(event.kind==='set')awayDown.set(event.key,event.value);else if(event.kind==='log')console.log(event.message);else if(event.kind==='warn')console.warn(event.message);else if(event.kind==='broadcast')sendToWindows(event.channel,event.message);else throw Error('core_provider_event_protocol');}
+  if(packet.result)return value!;
+  if(packet.error){const error=packet.error.source==='original'?firstError:lastError;throw packet.error.attribute?attribute(config,error):error;}
+  if(packet.command?.kind!=='send'||!packet.state)throw Error('core_provider_continuation_protocol');
+  let observation:any;
+  try{value=await sendToProvider(conversation,packet.command.config,options);observation={ok:true,absent:false};}
+  catch(error){activeTask.getStore()?.signal.throwIfAborted();options.signal?.throwIfAborted();lastError=error;if(firstError===undefined)firstError=error;observation={ok:false,absent:isAbsent(error)};}
+  packet=naturalPolicy<any>('awayObserved',[packet.state,observation,[...awayDown],Date.now()]);
+ }
+ throw Error('core_provider_continuation_bound');
+}
+import {naturalError} from './core-natural-policy';
+
+async function runCoreNaturalLocal(args:any,roundOptions:PostOptions){
+ let packet=naturalPolicy<any>('localStart',[args]);
+ for(let step=0;step<4;step++){
+  activeTask.getStore()?.signal.throwIfAborted();
+  if(Object.hasOwn(packet,'result'))return packet.result;
+  if(packet.error)naturalError(packet.error,VoiceReplyNeedsReview);
+  const command=packet.command;if(!command||!packet.state)throw Error('core_local_conversation_protocol');
+  let observation:any;
+  try{
+   const ask=(messages:OllamaMessage[])=>sendToProvider(messages,command.config,command.options);
+   let value:any;
+   if(command.kind==='grounded')value=await composeLocalReply(command.messages,command.latest,command.evidence,ask,command.character);
+   else if(command.kind==='direct')value=await composeConversationalReply(command.messages,command.latest,command.evidence,command.character,ask,command.aside??undefined);
+   else if(command.kind==='local-natural')value=await answerLocalNaturalConversation(command.sources,command.latest,command.voice,ask,command.recentReplies);
+   else if(command.kind==='draft')value=await ollamaPost(command.messages,command.config,{...roundOptions,tools:command.tools,onChunk:undefined});
+   else if(command.kind==='finish')value=await finishLocalReply(command.draft,command.messages,command.latest,command.evidence,ask,undefined,command.character);
+   else throw Error('core_local_conversation_command');
+   observation={ok:true,value};
+  }catch(error){activeTask.getStore()?.signal.throwIfAborted();observation={ok:false,error:{kind:error instanceof VoiceReplyNeedsReview?'VoiceReplyNeedsReview':error instanceof ToolLoopFailure?'ToolLoopFailure':'Error',...(error instanceof ToolLoopFailure?{code:error.code}:{}),message:error instanceof Error?error.message:String(error)}}}
+  activeTask.getStore()?.signal.throwIfAborted();packet=naturalPolicy<any>('localObserved',[packet.state,observation]);
+ }
+ throw Error('core_local_conversation_bound');
+}
+import {naturalPolicy} from './core-natural-policy';
+import {coreSweepPictures,corePictureMutation} from './core-picture-maintenance';
+import {navigationPolicy,runCoreDirections,startCoreTrafficWatch,runCoreTrafficWatch,runCorePlaceSearch} from './core-navigation-policy';
+import {conversationProgram,conversationCommit} from './core-conversation-policy';
+
+function conversationPolicyFacts(){return {config:remainingStore(app.getPath('userData')).get('config',{}),now:Date.now(),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),mood:getMood(),character:getActiveCharacter(),local:store.get('ai.config')??null,route:conversationRoute(),sideNumCtx:sideNumCtx()};}
+function conversationApply(packet:any){conversationCommit(app.getPath('userData'),packet);}
+function conversationRun(kind:string,args:any,onChunk?: (text:string)=>void){
+  return conversationProgram(kind,args,conversationPolicyFacts,async command=>{
+    if(command.kind==='random')return Math.random();
+    const options={...command.options};if(options.stream){delete options.stream;options.onChunk=onChunk;}
+    return ollamaPost(command.messages,command.config,options);
+  });
+}
+
+function conversationRevoiceFacts(){return {...conversationPolicyFacts(),busy:revoicing,retryAt:revoiceRetryAt,archive:store.getArchive(),today:localDateKey(zonedNow(CHAT_TIMEZONE)),profile:getProfile(),herName:herNameFrom(getActiveCharacter().identity)};}
+function conversationSecondFacts(){return {...conversationPolicyFacts(),asleep:herAsleepNow(),knocked:herKnockedAwakeNow(),lastUser:lastUserActivityAt,silenced:isSilenced(store.get('pushback') as Pushback|undefined,Date.now()),quiet:inQuietHours(getPush().prefs,zonedNow(CHAT_TIMEZONE))};}
+import {hearingPolicy,applyCoreHearing} from './core-hearing-policy';
+import {coreEveryday,coreProactiveRecall,coreRefreshRecall,recallFrames} from './core-final-recall';
+import {runCorePicture} from './core-final-picture';
+import {coreSessionLink} from './core-final-sessions';
+import {LOCAL_DIRS} from './claudesession';
+import {runCoreShell} from './core-final-shell';
+import {locationPolicy,locationFlow,locationClock,applyCoreLocation} from './core-location-policy';
+import {devicePolicy,deviceFlow,deviceMutation,handleCoreHelper,reactCoreActivity,reactCoreFullscreen,tieCorePlace} from './core-device-activity';
+import {retireCoreVaultMemories} from './core-knowledge';
+import {agendaClock,agendaFacts,applyAgendaPlan,mutateAgenda,syncAgendaGoogle} from './core-agenda-lifecycle';
+import {executeGoogleCommand} from './google';
+import {gamePolicy,bootCoreGame} from './core-games';
+import {screenPolicy,runCoreScreen,commitPerceptionPlan} from './core-screen-policy';
+import {attachmentPolicy,attachmentURLFacts,attachmentCapability,attachmentFileSource,readCoreAttachment,openCoreAttachment,foldCoreAttachments} from './core-attachments';
+import {runCoreMemoryTool,runCoreMemoryAdmin,runCoreMemoryReset} from './core-memory-tools';
+import {runSyncedCaptions} from './core-shot-captions';
+import {coreAsideMutation} from './core-asides';
+import {runChatSummary,runChatRollover,runManualChat,appendChatArchive,runArchiveMerge,pruneLifecycleRecords,runChatFormation,commitLifecyclePlan} from './core-chat-lifecycle';
+import {runOwnedHands} from './core-hands-policy';
+import {remainingStore,applyRemainingPlan} from './core-remaining';
+import {graphFingerprint,graphJob,graphFailure,graphPolicy,assertGraphCounter} from './graph-job';
+import {corePolicySync} from './core-policy-sync';
+import {coreStoreFor} from './core-store';
+import {runCoreContinuation,runCoreDayNight,bindDayNightProject,boundDayNightProject} from './core-day-night';
+import {runCoreWeek,runCoreStanding} from './core-own-time';
+import {coreEntropyPolicy} from './core-policy-observations';
+import {runCoreProjectStep,runCoreProjectBirth,runCoreReadingOutcome,runCoreProjectSettlement} from './core-projects';
+import {appendPhoneTurn,type PhoneTurn} from './core-brain-history';
+import { ProviderAvailability } from './provider-availability';
+import {coreChatPrompt,corePrepareNaturalConversation} from './core-prompts';
+import { markTurn, timeTurnReview } from './turn-timing';
+import { conversationReplyIssue } from './conversation-contract';
+import { veniceRegistryEntries } from './model-catalog';
+import { runDreamLearning, learningNote } from './dream-learning';
+import { runDreamNotebook, followupQuery, imaginationNote } from './dream-notebook';
+import { DIRECT_MODELS, directCatalogEntry, nanoGptPricing, abliterationPricing, refreshDirectEntries } from './direct-catalog';
+import { directCredentialName, directProviderKey, isDirectProvider, isAllowedTaskProvider } from './direct-providers';
+import { taskIntent, selectTaskModel, nextTaskRole, routingTextHistory } from './task-router';
+import { readOpenAIStream } from './openai-stream';
+import { toResponsesBody, fromResponsesReply, streamResponses } from './responses-provider';
+import { toAnthropicBody, fromAnthropicReply, streamAnthropic } from './anthropic-provider';
+import { TaskBridge } from './task-bridge';
+import { TaskController, activeTask } from './task-controller';
+import {coreLook} from './core-perception';
+import {noteCoreUserActivity,noteCoreGame} from './core-live-state';
+import {coreLocalBudget} from './core-local-budget';
+import {coreCloudFetch} from './core-cloud-provider';
+import {coreModelFetch,coreModelCapabilities} from './core-model-provider';
+import {coreHandsWhyNotAct,runCoreHands} from './core-hands';
+import {coreTaskIntent,coreSelectTaskModel,coreInputProfile,coreFastConversationModel,coreNextTaskRole} from './core-router';
+import { ReplyGate } from './reply-gate';
+import { readModelRegistry, readTaskPolicy, isLocalConfig, type ModelEntry, type ModelRole, type RouteRequest } from './model-registry';
+import {callRegistry,selectCallModel,CALL_ROUTE_ID} from './call-route';
+import { assertOutboundSafe, guardedRequest } from './outbound';
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
-import { installConsole } from './console';
+import { installConsole, broadcastConsole, consolePort } from './console';
 installConsole();
 import path from 'node:path';
 import os from 'node:os';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
+import { CoreWorkWorld, workWorldAssets } from './core-work-world';
 import { AttentionExperiment, readAttentionMode } from './attention';
 import { ActivityObservations, idleWithoutEyes, type ActivityObservation } from './activity-observation';
 import { ActivityReporter } from './activity-reporter';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
+import { afterCooldown, afterEgoCooldown, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Lean, type Vitals } from './vitals';
 import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
@@ -33,6 +149,7 @@ import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } fro
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
 import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
+import { DOWNTIME_NOTICE_MS, backMessage, readLivenessFile } from './liveness';
 import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS, SECOND_THOUGHT_ODDS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
@@ -50,6 +167,7 @@ import { exchangesFrom, pickRecalled, recallNote, RECALL_FLOOR, RECALL_LIMIT, ty
 import { buildChatIndex, chatHitsNote, embedFormat, embedText, mentionsAny, rareTerms, searchChats, type ChatIndex } from './chatsearch';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
+import {createCoreScheduler,activeScheduledJob} from './core-scheduler';
 import { describeGap, emptyThoughtState, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
 import { vitalsInstruction } from './vitals';
 import { activeCards, loreNote, parseLorePage, LORE_PAGE, type LoreCard } from './lore';
@@ -61,8 +179,8 @@ import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from 
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_A_DAY, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
-import { HANGING_COOLDOWN_MS, isClosing, judgeInput, judgePrompt, leftHanging, readJudgement, saidTheyWereLeaving, type Hanging } from './hanging';
-import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './awake';
+import { leftHanging } from './hanging';
+import { theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
@@ -72,11 +190,12 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
+import { BackgroundInferenceDeferred, InferencePriority } from './inference-priority';
 import { CAPTION_MAX_CHARS, captionsSince, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook, shotsSince } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { LAYER, compileLog, type Candidate } from './compile';
 import { normFrom, charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
-import { apologyOdds, muteLean, sway, type Sway } from './dice';
+import { muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
@@ -86,18 +205,21 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
+import { composeLocalReply, finishLocalReply as finishLocalReplyUntimed, localReplyEvidence, GROUNDED_REPLY_SCHEMA } from './local-reply';
+import { canReplyDirectly, directReplyKind, directReplyAsideAllowed, composeConversationalReply, CONVERSATIONAL_REPLY_SCHEMA, VoiceReplyNeedsReview, directReplyEvidence, requestContextSize } from './reply-latency';
 import { createTurnContext, type TurnContext } from './turncontext';
 import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
-import { describeMyself, describeSettings, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
+import { describeMyself, describeSettings, explicitModeOn, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
-import { captureCorePromptComparison, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims } from './core-memory';
+import { captureCorePromptComparison, prefetchCoreMemory, prepareCoreMemory, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims, type CoreMemoryRequest } from './core-memory';
 import { createKnowledgeStore } from './knowledgestore';
 import { behaviourOf, chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
-import { hearVoice, readHumeConfig, readingFrom } from './hume';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL, planVoice } from './voice';
+import { readHumeConfig } from './hume';
+import { voiceSense, analyzeLocalVoice, fromHume } from './voice-sense';
 import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
 import { readCallConfig, pickFiller } from './call';
 import { openLocalCall, withoutWavHeader, oneChunk, wavSampleRate } from './localcall';
@@ -105,19 +227,23 @@ import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
-import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
-import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
+import { ShellGate, SERVER_NOTE, DIAGNOSTIC_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { readWhatsAppConfig, readHeard, isForHer, asTurn, asOverheard, chatLabel, splitForWhatsApp, gapBefore, sendThroughWorker, type WhatsAppConfig, type Heard as WhatsAppHeard } from './whatsapp';
 import { Overheard, isLoopback, overheardPrompt, overheardInput, OVERHEARD_SCHEMA, readPlans, keepable, asKept, factsFor } from './overheard';
 import { HANDS_TURN, HER_HANDS_TOOLS, didNothing, handsInstruction, handsNote, handsToday, keepHands, readHands, readHandsConfig, whyNotAct } from './herhands';
-import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter, SPITE_ODDS } from './suwayomi';
+import { withToolContract } from './tool-contract';
+import { receivedProviderMessage } from './provider-state';
+import {runMangaFetch} from './manga-fetch';
+import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, SPITE_ODDS } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
-import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
+import { conversationMayLeave, mayLeaveTheMachine, outboundNamesFrom } from './sensitivity';
+import { makePicture, PictureRefused } from './venice-image';
+import {commitUserRecord,runOwnedJournal} from './core-user-records';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
 import { herFrom } from './her';
@@ -129,12 +255,19 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { ageNote, openingsToAvoid, pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { coreComposeNudge } from './core-nudge-composer';
+import { coreSourceNudges, coreNudgeContext, sameSourceSnapshot, type SourceSnapshot } from './core-nudge-context';
+import { nudgeMetadata,coreReserveDelivery, coreFinishDelivery, sameCoreDelivery, corePublishNudge, corePickNudge, coreSelectPhoneNudge, claimCorePhoneNudge, coreScanPhoneNudges, sameCorePhoneScan, coreRateNudge, coreLearnNudgeResponse, sameCoreFeedback } from './core-nudges';
+import { interestTopic, nudgeContentProblem, nudgeContinuity, nudgeMood, nudgePrompt, nudgeReviewTurns, NUDGE_REVIEW_SCHEMA, NUDGE_REVIEW_MAX_TOKENS, ownNudgeCandidates, pickNudgeCandidate, publishNudge, readNudge, readNudgeReview, recentNudgeTopics, type NudgeCandidate, type NudgeDraft, type NudgeFeedback } from './nudges';
+import { PHONE_NUDGE_GAP_MS, PHONE_NUDGE_LIMIT, PHONE_SCAN_MS, finishPhoneDelivery, learnPhoneReply, migratePhoneDeliveries, phoneCandidateRelevant, phoneDeliveryAllowed, readPhoneNudges, reservePhoneDelivery, scanPhoneOpportunities, selectPhoneOpportunity } from './nudge-schedule';
+import { isNudgeAside, learnNudgeResponse, nudgeAffinity, nudgeKeywords, rateNudge, readNudgeLearning, validNudgePreference, type NudgeMessage } from './nudge-learning';
+import { chooseNudgeDelivery, connectNudgeCandidates, conversationNudgeCandidates, relationshipNudgeCandidate, taskNudgeCandidates } from './nudge-context';
 import { resolveReply, withReplyContext } from './replyto';
-import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
+import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
-import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
-import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise, NIGHT_ODDS } from './nightlife';
-import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
+import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, type DayVerdict } from './nightfall';
+import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, NIGHT_ODDS } from './nightlife';
+import { chooseGuide, gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, DREAMS_FILE, recentEntries, type Dream, type Entry } from './diary';
@@ -146,18 +279,12 @@ import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from
 import { describeMerge } from './memorysync';
 import { describeShot, mergeActivity, noteActivity, noteScreenshot, summariseDay } from './activitylog';
 import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX_SHOT_BYTES } from './shotstore';
-import { MinecraftLink, describeEvent, readMinecraftConfig, worthLogging, type MinecraftConfig, type MinecraftEvent } from './minecraft';
 import { AnimeLink, apiKeyFrom, readAnimeConfig, type Fetch as AnimeFetch } from './anime';
 import { ANIME_FETCH_KIND, FETCH_EVERY_MS, FETCH_FOR_MS, fetchJob, fetchState, gaveUpFallback as fetchGaveUpFallback, gaveUpPrompt as fetchGaveUpPrompt, GONE_AFTER_MISSES, importPlan, LANDING_EVERY_MS, landedFallback, landedPrompt, queueLineFor } from './animefetch';
-import { describePlan, minecraftNote, planInstruction, readPlan } from './minecraftplan';
-import { heardInGame, newSession, noteTick, readPlayConfig, shouldAsk as shouldAskBody, summarise, wantsToStart, whyNotJoinHim, whyNotStart, whyStop, windDown, type PlayConfig, type Session, type Situation } from './minecraftlife';
-import { aboutHim, chatTurn, CHAT_AWAY, describeTogether, farewellCue, greetingCue, heArrived, noteDidTogether, noteExchange as noteChatExchange, quickCommand, statusLine, togetherMemory, type Together } from './minecraftchat';
-import type { MinecraftStatus } from './minecraft';
 import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
-import { afterReading, alreadyFinished, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, readFinished, readToTheEnd, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, withFinished, type ChapterRef, type Reading } from './manga';
 import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery, MOOD_ALIASES } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { DeedFeelings } from './deed-feelings';
@@ -168,12 +295,16 @@ import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, doze
 import { parseBalances, balanceWarning } from './venicebalance';
 import { dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, readDays, readRecs, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantOutcome, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, DAY_ODDS } from './ownlife';
 import { admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, judgeAttemptInput, judgeAttemptPrompt, DAY_PROJECT_SHARE, hersOwn, keepProjects, needsHim, needsSomethingNew, newProjectInstruction, nowItStings, pickProject, projectInstruction, projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, settleFromRead, roomForNew, siblingOf, spawnInstruction, staleSpawns, standingIn, stepInstruction, stripProject, type Outcome as NightOutcome, type Project, type Worked } from './projects';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, settingCommand, type AgendaLine } from './quick';
 import { newTrace } from './trace';
+import { ToolLoopFailure } from './toolloop';
+import { ConversationPreferenceCache } from './conversation-continuity';
+import { needsGroundedConversationReview } from './local-reply';
+import { naturalConversationKind, naturalConversationEligible, naturalCallAllowed, conversationCallAllowed, prepareNaturalConversation, type NaturalConversationSources, answerNaturalConversation, answerLocalNaturalConversation, selectFastConversationModel, NATURAL_GROUNDED_REPLY_SCHEMA, NATURAL_MAX_TOKENS, NATURAL_FIRST_WORD_MS } from './natural-conversation';
 import { emptyKnowledge, KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCategory } from './knowledge';
 import type { IngestResult } from './ingestion';
 import type { Embedder } from './embeddings';
@@ -321,8 +452,44 @@ const SHOT_LOOK_PROMPT = [
 // third of them repeating a shot looked at in the previous twelve — and the
 // pairs disagreed, because a model asked the same picture twice answers twice.
 let lookingAtShots = false;
+const inferencePriority = new InferencePriority({ timing: event => console.log(`[inference-priority] ${JSON.stringify(event)}`) });
+
+function protectedInferenceEndpoint(): string {
+  const brain = store.get('ai.config') as ProviderConfig | undefined;
+  if(process.env.HARU_CORE_INFERENCE_PRIORITY==='on')return corePolicySync<string>('inference-priority.protectedEndpoint',[brain?.endpoint??null,Boolean(brain&&isLocalConfig(brain)),LOCAL_MODELS]);
+  return brain && isLocalConfig(brain) ? brain.endpoint : LOCAL_MODELS;
+}
+
+async function backgroundLook(...args: Parameters<typeof look>): ReturnType<typeof look> {
+  const [image, vision, endpoint, headers, fetcher, options = {}] = args;
+  return inferencePriority.runBackground(endpoint, protectedInferenceEndpoint(), signal =>
+    ownedLook(image, vision, endpoint, headers, fetcher, { ...options, signal,
+      ...(process.env.HARU_CORE_LIVE_STATE==='on'?{priority:'background' as const}:{}) } as typeof options));
+}
+
+function ownedLook(...args:Parameters<typeof look>):ReturnType<typeof look> {
+  return coreLook(args,{rpc:taskBridge.call,policy:()=>readTaskPolicy(store.get('ai.taskPolicy')),
+    registry:()=>readModelRegistry(store.get('ai.modelRegistry'),{
+      local:(store.get('ai.config') as ProviderConfig|undefined)??{provider:'ollama',model:args[1].model,endpoint:args[2],temperature:.2},
+      conversation:store.get('ai.conversation') as ProviderConfig|undefined,specialist:store.get('escalate.provider') as ProviderConfig|undefined,
+      vision:{...args[1],endpoint:args[2]},
+    })});
+}
 
 async function lookAtSyncedShots() {
+  if (process.env.HARU_CORE_SHOT_CAPTIONS === 'on') {
+    const core=remainingStore(app.getPath('userData')); const root=shotStoreRoot();
+    await runSyncedCaptions({core,held:()=>existsSync(root)?heldShots(root):{},exists:()=>existsSync(root),
+      busy:()=>lookingAtShots,lock:on=>{lookingAtShots=on},
+      urls:()=>{const cfg=core.get('config',{}),values=[cfg.vision?.endpoint,cfg.ai?.config?.endpoint,'http://localhost:11434'];
+        return Object.fromEntries(values.filter(v=>typeof v==='string').map(value=>{const endpoint=String(value).trim();try{const u=new URL(endpoint);return [endpoint,{hostname:u.hostname,href:u.toString()}]}catch{return [endpoint,{}]}}));},
+      addresses:()=>Object.values(os.networkInterfaces()).flatMap(rows=>(rows??[]).map(row=>row.address)),
+      read:shot=>readShot(root,shot.day,shot.name),
+      look:(bytes,request)=>backgroundLook(bytes.toString('base64'),request.vision,request.endpoint,modelHeaders(request.endpoint),net.fetch,request.options),
+      deferred:error=>error instanceof BackgroundInferenceDeferred,
+    });return;
+  }
+
   const vision = readVisionConfig(store.get('vision'));
   if (!vision.enabled) return;
   if (lookingAtShots) return;
@@ -330,7 +497,6 @@ async function lookAtSyncedShots() {
   // backlog runs around the clock, and a page costs about a hundred seconds —
   // so a twenty-minute sitting queued behind old screenshots is an hour and a
   // half of nothing. The backlog has waited three weeks; it can wait an hour.
-  if (readingMangaNow) return;
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
   // Only the days she was there for (seen.ts). A reset clears her captions, and
@@ -375,9 +541,10 @@ async function lookAtSyncedShots() {
       const bytes = readShot(root, shot.day, shot.name);
       if (!bytes) continue;
       try {
-        const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
+        const sighting = await backgroundLook(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
           ask: SHOT_LOOK_PROMPT,
           keepAlive,
+          numCtx: visionNumCtx(vision, endpoint),
         });
         const text = readShotDescription(sighting.description).slice(0, CAPTION_MAX_CHARS);
         // Nothing usable said about it. Counted as a failure rather than skipped, or
@@ -398,6 +565,7 @@ async function lookAtSyncedShots() {
         if (attached !== store.getActivityLog()) store.setActivityLog(attached);
         console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
       } catch (error) {
+        if (error instanceof BackgroundInferenceDeferred) break;
         const why = whyItFailed(error);
         console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, why);
         // A refusal about this picture — too large for the window, a format it
@@ -439,6 +607,34 @@ try {
 }
 store.migrate();
 store.hardenPermissions();
+console.log(`[memory-authority] ${store.memoryBackend()} storage ready`);
+
+// Her own model names are long, mixed-case and full of separators ? the exact
+// shape the outbound entropy rule hunts for. One of them sitting in a tool
+// result (describe_myself, above all) was refusing the whole conversation, so
+// they are cut out of the text before the patterns run. Read live from the
+// store: a changed brain needs nothing re-registered.
+outboundNamesFrom(() => {
+  const names: string[] = [];
+  const models = [
+    (store.get('ai.config') as { model?: string } | undefined)?.model,
+    (store.get('ai.conversation') as { model?: string } | undefined)?.model,
+    (store.get('ai.nudge') as { model?: string } | undefined)?.model,
+    (store.get('ai.awayConfig') as { model?: string } | undefined)?.model,
+  ];
+  for (const model of models) {
+    if (typeof model !== 'string' || model.length < 8) continue;
+    names.push(model);
+    // She names it by the tail ? "Qwen3.8-27B-Heretic-?", without the path ?
+    // and the tail alone is its own long mixed-case run.
+    const tail = model.split('/').pop() ?? '';
+    if (tail.length >= 8) {
+      names.push(tail);
+      if (tail.length > 48) names.push(tail.slice(0, 45)); // shortModelName's cut
+    }
+  }
+  return names;
+});
 
 // The reset, fired where her brain actually is (blankslate.ts). An environment
 // variable and not a route: this destroys a year of her, and the one thing it
@@ -677,17 +873,18 @@ function stepAsideForFullscreen() {
 }
 
 function broadcastLive2DChange(model: Live2DModel | null) {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('live2d:changed', model);
+  sendToWindows('live2d:changed', model);
 }
 
 function broadcastChatReset() {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('chat:reset');
+  sendToWindows('chat:reset');
 }
 
 // The "chat day" runs from CHAT_RESET_HOUR to CHAT_RESET_HOUR the next day, not
 // midnight to midnight — chatting with Haru at 1am shouldn't get wiped by a plain
 // date rollover mid-conversation.
 function currentChatDayKey(): string {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on')return corePolicySync('chat-lifecycle.dayKey',[Date.now(),CHAT_TIMEZONE,CHAT_RESET_HOUR]);
   const now = zonedNow(CHAT_TIMEZONE);
   if (now.getHours() < CHAT_RESET_HOUR) now.setDate(now.getDate() - 1);
   return localDateKey(now);
@@ -708,12 +905,19 @@ function currentChatDayKey(): string {
  * produced nothing, because nothing had been said about it.
  */
 function activityDigest(day: string): string {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on')return corePolicySync('chat-lifecycle.activityDigest',[store.get('activityLog',true),store.getActivityLog()[day]??[]]);
   if (store.get('activityLog', true) !== true) return '';
   const digest = summariseDay(store.getActivityLog()[day] ?? []);
   return digest ? `What they had open that day, longest first: ${digest}` : '';
 }
 
 function summariseSession(messages: { role?: string; content?: string }[], day: string, { replace = false, attempt = 0 } = {}) {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    void runChatSummary('day',day,messages,replace,{core:remainingStore(app.getPath('userData')),
+      model:r=>ollamaPost(r.messages,r.config,r.options),
+      form:c=>{void formDayMemories(c.lines,c.doing,c.day,c.config,c.messageCount);}})
+      .catch(error=>console.warn('[memory] Core summary refused:',error instanceof Error?error.message:'failed'));return;
+  }
   const config = store.get('ai.config') as ProviderConfig | undefined;
   const doing = activityDigest(day);
   // A day is worth distilling if it was talked through or worked through. The
@@ -773,6 +977,11 @@ const MONTH_NOTES_KEPT = 24;
  * prompt reads for anything older than the recent-day window.
  */
 function foldMonth(month: string, config: ProviderConfig, { attempt = 0 } = {}) {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    void runChatSummary('month',month,[],true,{core:remainingStore(app.getPath('userData')),
+      model:r=>ollamaPost(r.messages,r.config,r.options),form:()=>{}})
+      .catch(error=>console.warn('[memory] Core month fold refused:',error instanceof Error?error.message:'failed'));return;
+  }
   const notes = getSessions()
     .filter(session => session.day.slice(0, 7) === month)
     .map(session => session.summary.trim())
@@ -808,6 +1017,7 @@ function foldMonth(month: string, config: ProviderConfig, { attempt = 0 } = {}) 
  * user is the word its lines already carry.
  */
 function dayLines(messages: { role?: string; content?: string }[]): string[] {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on')return corePolicySync('chat-lifecycle.dayLines',[messages]);
   return foldAsleepExchanges(messages)
     .filter(message => message.role === 'user' || message.role === 'assistant')
     .map(message => `${message.role === 'user' ? 'They' : 'Haru'}: ${String(message.content ?? '').slice(0, 300)}`);
@@ -815,6 +1025,12 @@ function dayLines(messages: { role?: string; content?: string }[]): string[] {
 
 /** Sort notes into categories on this machine's own model (categories.ts): new memories, and a day's formed notes as a second opinion. */
 async function sortNotes(notes: SortNote[]): Promise<Map<string, Sorted> | null> {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    const request=corePolicySync<any>('chat-lifecycle.sortStart',[notes,store.get('ai.config')??null,getProfile().nickname,notes.map(n=>localDateKey(zonedNow(CHAT_TIMEZONE,new Date(n.createdAt))))]);
+    if(!request)return null;
+    const message=await ollamaPost(request.messages,request.config,request.options);
+    return new Map(corePolicySync('chat-lifecycle.sortRead',[message.content??'',notes]));
+  }
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model || !notes.length) return null;
   const message = await ollamaPost(
@@ -832,6 +1048,19 @@ async function sortNotes(notes: SortNote[]): Promise<Map<string, Sorted> | null>
  * the same quiet background rhythm — never urgent.
  */
 async function formDayMemories(lines: string[], doing: string, day: string, config: ProviderConfig, messageCount: number) {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    const action=corePolicySync<string>('chat-lifecycle.formAdmission',[forming,lines,doing]);
+    if(action==='busy')return;
+    if(action==='mark'){markFormed(day,messageCount);return;}
+    if(action!=='begin')throw Error('core_form_admission_protocol');
+    forming=true;
+    try{
+      const success=await formFrom(lines,doing,day,config),core=remainingStore(app.getPath('userData'));
+      const outcome=corePolicySync<any>('chat-lifecycle.formFinish',[core.get('config',{}),day,messageCount,success,Object.fromEntries(formRetries),Date.now()]);
+      if(outcome.plan)commitLifecyclePlan(core,outcome.plan);
+      formRetries.clear();for(const [key,value] of Object.entries(outcome.retries))formRetries.set(key,value as {tries:number;until:number});
+    }finally{forming=false;}return;
+  }
   if (forming) return;
   if (lines.length < 4 && !doing) { markFormed(day, messageCount); return; }
   forming = true;
@@ -856,6 +1085,10 @@ const formRetries = new Map<string, { tries: number; until: number }>();
 const FORMING_RETRY_CAP_MS = 24 * 3_600_000;
 
 function noteFormingFailed(day: string): void {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    const result=corePolicySync<any>('chat-lifecycle.formRetry',[day,Object.fromEntries(formRetries),Date.now()]);
+    formRetries.clear();for(const [key,value] of Object.entries(result.retries))formRetries.set(key,value as {tries:number;until:number});return;
+  }
   const tries = (formRetries.get(day)?.tries ?? 0) + 1;
   const wait = Math.min(FORMING_RETRY_CAP_MS, FORMING_TICK_MS * 2 ** tries);
   formRetries.set(day, { tries, until: Date.now() + wait });
@@ -864,11 +1097,15 @@ function noteFormingFailed(day: string): void {
 
 /** Days already read for memories, with how many messages they had: a day that has grown is read again. */
 function formedDays(): Record<string, number> {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on')return corePolicySync('chat-lifecycle.readFormed',[remainingStore(app.getPath('userData')).get('config',{})]);
   const saved = store.get('memory.formed');
   return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as Record<string, number> : {};
 }
 
 function markFormed(day: string, messageCount: number): void {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    const core=remainingStore(app.getPath('userData'));commitLifecyclePlan(core,corePolicySync('chat-lifecycle.markFormed',[core.get('config',{}),day,messageCount]));return;
+  }
   store.set('memory.formed', { ...formedDays(), [day]: messageCount });
 }
 
@@ -886,6 +1123,13 @@ const FORMING_QUIET_MS = 10 * 60_000;
  * what she is most likely to be asked about. The same pass as the roll's.
  */
 async function formingTick(): Promise<void> {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    const archive=store.getArchive(),config=store.get('ai.config') as ProviderConfig|undefined;
+    const day=corePolicySync<string|null>('chat-lifecycle.formChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),Object.fromEntries(Object.entries(archive).map(([k,v])=>[k,v.length])),formedDays(),Object.fromEntries(formRetries),Date.now()]);
+    if(!day)return;
+    const messages=(archive[day]??[]) as {role?:string;content?:string}[];
+    await formDayMemories(dayLines(messages),activityDigest(day),day,config!,messages.length);return;
+  }
   if (forming) return;
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
@@ -904,6 +1148,10 @@ async function formingTick(): Promise<void> {
 
 /** One day's windows, gated, second-guessed and kept. False when the model could not be reached, so the day is tried again. */
 async function formFrom(lines: string[], doing: string, day: string, config: ProviderConfig): Promise<boolean> {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on')return runChatFormation([lines,doing,day,config,getMemories(),getProfile().nickname,Date.now()],{core:remainingStore(app.getPath('userData')),day,
+    model:r=>ollamaPost(r.messages,r.config,r.options),sort:notes=>sortNotes(notes),
+    add:c=>addMemory(c.text,c.memoryKind,undefined,c.options)});
+
   const userName = getProfile().nickname;
   // A rule for her from more than a week back is not taken from the transcript:
   // his Preferences page says what he wants now, and a rule he has since taken
@@ -957,7 +1205,7 @@ async function formFrom(lines: string[], doing: string, day: string, config: Pro
     if (category === 'person' && !namesSomeoneElse(note.note, userName)) continue;
     const when = category === 'plan' || category === 'event' ? opinion?.when ?? note.when : undefined;
     const saved = addMemory(note.note, LEGACY_KIND[category as keyof typeof LEGACY_KIND], undefined, {
-      source: 'conversation', evidenceDetail: `from ${day}'s conversation`, category, when,
+      source: 'inferred', evidenceDetail: `model extraction from ${day}'s conversation`, category, when,
       emotion: localEmotion(note.note), emotionIntensity: readTone(note.note).heat,
     });
     if (!saved?.record) continue;
@@ -975,6 +1223,9 @@ async function formFrom(lines: string[], doing: string, day: string, config: Pro
  * tick; a day without a summary is never touched.
  */
 function pruneOldArchives() {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    pruneLifecycleRecords(remainingStore(app.getPath('userData')),'archive',Date.now(),Intl.DateTimeFormat().resolvedOptions().timeZone);pruneOldActivity();return;
+  }
   const archive = store.getArchive();
   const cutoff = localDateKey(new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 86_400_000));
   const sessions = getSessions();
@@ -1000,11 +1251,12 @@ function pruneOldArchives() {
  * it — the more so for this file, which is the one holding raw titles.
  */
 function pruneOldActivity() {
+  const ownedRetention=process.env.HARU_CORE_CHAT_LIFECYCLE==='on'?pruneLifecycleRecords(remainingStore(app.getPath('userData')),'activity',Date.now(),Intl.DateTimeFormat().resolvedOptions().timeZone):null;
   const log = store.getActivityLog();
-  const cutoff = localDateKey(new Date(Date.now() - ACTIVITY_RETENTION_DAYS * 86_400_000));
+  const cutoff = ownedRetention?ownedRetention.cutoff:localDateKey(new Date(Date.now() - ACTIVITY_RETENTION_DAYS * 86_400_000));
   const sessions = getSessions();
   let dropped = 0;
-  for (const day of Object.keys(log)) {
+  for (const day of (ownedRetention?[]:Object.keys(log))) {
     if (day >= cutoff) continue;
     // A day that was never distilled is kept, exactly as the archive keeps it:
     // dropping it would lose the day outright rather than compressing it.
@@ -1025,6 +1277,7 @@ function pruneOldActivity() {
   // And what she made of them, on the same clock. The list is capped at 400 so
   // this was never a leak, but a caption whose picture and whose day are both
   // gone is a note about nothing.
+  if(ownedRetention){const core=remainingStore(app.getPath('userData'));const plan=corePolicySync<any>('chat-lifecycle.captionPlan',[core.get('config',{}),cutoff]);if(plan)commitLifecyclePlan(core,plan);return;}
   const captions = readCaptions(store.get('shots.captions'));
   const kept = forgetCaptions(captions, cutoff);
   if (kept.length !== captions.length) {
@@ -1046,6 +1299,7 @@ function pruneOldActivity() {
  * actually finished.
  */
 function archiveMessages(messages: unknown[], dayKey: string) {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){appendChatArchive(remainingStore(app.getPath('userData')),dayKey,messages);return;}
   const archive = store.getArchive();
   archive[dayKey] = [...(archive[dayKey] ?? []), ...messages];
   store.setArchive(archive);
@@ -1062,6 +1316,13 @@ function archiveMessages(messages: unknown[], dayKey: string) {
  * orphaned, so this is recoverable rather than merely preventable.
  */
 function mergeArchiveFragments() {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    runArchiveMerge(remainingStore(app.getPath('userData')),localDateKey(zonedNow(CHAT_TIMEZONE)).slice(0,7),command=>{
+      if(command.kind==='summary')summariseSession((store.getArchive()[command.day]??[]) as {role?:string;content?:string}[],command.day,{replace:command.replace});
+      else if(command.kind==='fold')foldMonth(command.month,store.get('ai.config') as ProviderConfig);
+      else throw Error('core_chat_backfill_protocol');
+    });return;
+  }
   const archive = store.getArchive();
   const fragmented = Object.keys(archive).filter(key => key.includes('#'));
   if (fragmented.length) {
@@ -1119,6 +1380,9 @@ function mergeArchiveFragments() {
 }
 
 function startNewConversation() {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    runManualChat(remainingStore(app.getPath('userData')),currentChatDayKey());stopSpeaking();broadcastChatReset();return;
+  }
   const messages = store.get('chat.messages') as unknown[] | undefined;
   const hadMessages = Boolean(messages?.length);
   if (hadMessages) archiveMessages(messages!, currentChatDayKey());
@@ -1134,6 +1398,16 @@ function startNewConversation() {
 }
 
 function performChatResetIfDue() {
+  if(process.env.HARU_CORE_CHAT_LIFECYCLE==='on'){
+    runChatRollover(remainingStore(app.getPath('userData')),currentChatDayKey(),command=>{
+      if(command.kind==='summary')summariseSession(command.messages,command.day,{replace:command.replace});
+      else if(command.kind==='fold')foldMonth(command.month,store.get('ai.config') as ProviderConfig);
+      else if(command.kind==='grow')growAtFold(command.month);
+      else if(command.kind==='tally')settleTally(command.day,command.messages);
+      else if(command.kind==='broadcast')broadcastChatReset();
+      else throw Error('core_chat_rollover_protocol');
+    },getAsides);return;
+  }
   const key = currentChatDayKey();
   const previousKey = store.get('chat.dayKey') as string | undefined;
   if (previousKey === key) return;
@@ -1225,17 +1499,70 @@ function setWardrobeValue(id: string, value: number): Record<string, number> {
 // Kept items live in the main process because the chat tool loop runs here —
 // the model's tool calls write straight to the store, and every window is told
 // to re-read rather than each keeping its own copy.
+
+// The facade carries observations; Core returns policy and atomic plans.
+
+function ownedReminderFacts(phone:boolean,idleSeconds:number){return {phone,idleSeconds,asleep:herAsleepNow(),chasing,lastRemindedAt,now:Date.now(),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),zone:CHAT_TIMEZONE,mood:getMood(),character:getActiveCharacter(),told:phone?toldNow():''};}
+async function ownedReminder(phone:boolean,idleSeconds:number):Promise<any>{
+ const core=ownedAgendaCore();
+ const packet=corePolicySync<any>('agenda-life.reminderStart',[agendaFacts(core),ownedReminderFacts(phone,idleSeconds)]);
+ if(!packet.run)return packet.result;
+ applyAgendaPlan(core,packet,()=>{});chasing=true;lastRemindedAt=packet.at;
+ try{
+  const line=await ollamaQuip(packet.request.system,packet.request.user,packet.request.provider);
+  if(!corePolicySync<boolean>('agenda-life.reminderCurrent',[packet.source,agendaFacts(core),ownedReminderFacts(phone,idleSeconds)]))return phone?null:false;
+  if(phone){recordBrief(`reminder ${packet.tier}`,packet.request.system,line);return {line,about:packet.item.title,eventId:packet.item.id};}
+  sendToWindows('voice:insistence',packet.volume);
+  const emotion=classifyEmotion(line,packet.request.provider);
+  if(interject(line,{source:'reminder',about:packet.item.title}))void speak(line,emotion);
+  return true;
+ }catch(error){console.warn('[remind]',error instanceof Error?error.message:'failed');return phone?null:false;}
+ finally{chasing=false;}
+}
+function ownedOpeningFacts(){const now=zonedNow(CHAT_TIMEZONE);return {now:Date.now(),clock:agendaClock(now),weekday:new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(now),zone:CHAT_TIMEZONE,chatday:currentChatDayKey(),asleep:herAsleepNow(),goodnight:herHasSaidGoodnight(),up:theyAreUpNow(),brainWorker:process.env.HARU_CORE_BRAIN_WORKER==='on',idleSeconds:powerMonitor.getSystemIdleTime(),mood:getMood(),character:getActiveCharacter(),archive:store.getArchive(),asides:getAsides(),hasHistory:getSessions().length>0,random:Math.random(),profile:profileSummary(''),following:summariseFollowing(getFollowing(),Date.now()),unprompted:unpromptedContext(),slateOpening:blankSlateOpening(getSlate(),knownSinceSlate())};}
+async function ownedComposeOpening():Promise<string|null>{
+ try{
+  const core=ownedAgendaCore(),packet=corePolicySync<any>('agenda-life.openingStart',[agendaFacts(core),ownedOpeningFacts()]);
+  applyAgendaPlan(core,packet,()=>{});if(!packet.run)return null;
+  const message=await ollamaPost([{role:'system',content:packet.request.system}],packet.request.provider,packet.request.options);
+  const result=corePolicySync<any>('agenda-life.openingResult',[agendaFacts(core),packet.source,ownedOpeningFacts(),message.content??'',new Date().toISOString()]);
+  applyAgendaPlan(core,result,()=>{});if(!result.result)return null;
+  noteSheAsked(result.result);void speak(result.result,classifyEmotion(result.result,packet.request.provider));return result.result;
+ }catch(error){console.warn('[chat] opening',error instanceof Error?error.message:'failed');return null;}
+}
+
+function ownedAgendaCore(){return remainingStore(app.getPath('userData'));}
+function ownedAgendaChanged(packet:any){
+  if(packet.plan){sendToWindows('kept:changed',corePolicySync<any>('agenda-life.get',[packet.plan.config.kept?.items??[]]));broadcastGoogleStatus();}
+  if(packet.memoryChanged){memoryStore.scheduleVectorRefresh();memoryStore.scheduleSort();sendToWindows('memory:changed',packet.plan.memory.memories);}
+}
+function ownedAgendaMutation(kind:string,args:unknown){
+  const result=mutateAgenda(ownedAgendaCore(),kind,args,ownedAgendaChanged);
+  void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
+  return result;
+}
+function ownedAgendaSpoken(kind:string,said:string){
+  const packet=corePolicySync<any>('agenda-life.spoken',[kind,said,agendaFacts(ownedAgendaCore()),getAsides(),agendaClock(zonedNow(CHAT_TIMEZONE)),Date.now(),new Date().toISOString(),randomUUID()]);
+  applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+  movedJustNow=packet.moved;
+  if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
+  return packet.result;
+}
+
 function getKept(): KeptItem[] {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<KeptItem[]>('agenda-life.get',[store.get('kept.items')??[]]);
   const saved = (store.get('kept.items') as (KeptItem & { kind?: string })[] | undefined) ?? [];
   return saved.map(item => ({ ...item, kind: item.kind === 'event' ? 'event' : 'task' }));
 }
 
 function setKept(items: KeptItem[]) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('agenda_direct_write_requires_core_plan');
   store.set('kept.items', items);
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('kept:changed', items);
+  sendToWindows('kept:changed', items);
 }
 
 function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaMutation('add',{item});
   // The same ask can arrive twice — read from the message and then called for
   // by the model's tool, or a retry of the same turn — and is still one item.
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -1264,6 +1591,7 @@ function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
  * there is no field to push it to; what it settles is whether she keeps asking.
  */
 function toggleKept(id: string, force?: boolean) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaMutation('toggle',{id,force});
   const target = getKept().find(item => item.id === id);
   if (!target) return null;
   const done = force ?? !target.done;
@@ -1290,6 +1618,7 @@ function toggleKept(id: string, force?: boolean) {
 }
 
 function removeKept(id: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaMutation('remove',{id});
   const removed = getKept().find(item => item.id === id);
   if (!removed) return null;
   setKept(getKept().filter(item => item.id !== id));
@@ -1301,6 +1630,7 @@ function removeKept(id: string) {
 }
 
 function updateKept(id: string, changes: Partial<Pick<KeptItem, 'title' | 'date' | 'time' | 'underway'>>) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaMutation('update',{id,changes});
   const target = getKept().find(item => item.id === id);
   if (!target) return null;
   const updated = { ...target, ...changes };
@@ -1310,6 +1640,7 @@ function updateKept(id: string, changes: Partial<Pick<KeptItem, 'title' | 'date'
 }
 
 async function syncItemToGoogle(item: KeptItem) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return syncFromGoogle();
   const status = googleStatus(store);
   if (!status.connected) return;
   // Tasks and events live in different Google products, so which API an item
@@ -1385,8 +1716,10 @@ const appStartedAt = Date.now();
  * message left it.
  */
 function observeEnvironment(now = Date.now()): { host: ReturnType<typeof readHostEnvironment>; observation: ActivityObservation; environment: Environment } {
-  const host = readHostEnvironment();
-  const eyes = seesItsOwnScreen();
+  const worker = process.env.HARU_CORE_BRAIN_WORKER === 'on';
+  // An absent desktop is unknown evidence, never a fabricated idle reading.
+  const host = worker ? {hour:zonedNow(CHAT_TIMEZONE).getHours(),idleSeconds:Number.NaN,onBattery:false,windowFocused:false} : readHostEnvironment();
+  const eyes = !worker && seesItsOwnScreen();
   const observation = activityObservations.read(now, eyes ? host : undefined);
   const idleSeconds = idleWithoutEyes(observation, eyes, now, Math.max(lastUserActivityAt, appStartedAt));
   return { host, observation, environment: { hour: host.hour, idleSeconds, windowFocused: observation.windowFocused, onBattery: observation.onBattery } };
@@ -1398,7 +1731,7 @@ function readEnvironment(): Environment {
 
 function broadcastLife(action: string | null, environment: Environment) {
   const payload = { vitals, action, night: environment.hour >= 23 || environment.hour < 6 };
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('life:tick', payload);
+  sendToWindows('life:tick', payload);
 }
 
 // The weather of her day and what is left of the last thing that happened
@@ -1407,6 +1740,7 @@ let wander: Lean = {};
 let bruise: Lean = {};
 
 function getTemperament(): Temperament | null {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on')return corePolicySync('mood.currentTemperament',[store.get('her.temperament')??null,currentChatDayKey()]);
   const saved = store.get('her.temperament') as Temperament | undefined;
   return saved && saved.day === currentChatDayKey() ? saved : null;
 }
@@ -1416,6 +1750,12 @@ function getTemperament(): Temperament | null {
  * so it is decided at her wake, not at the 05:00 roll she sleeps through.
  */
 function ensureTemperament() {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on'){
+    const saved=store.get('her.temperament')??null,mood=getMood(),sleepState=getHerSleepSchedule(),day=currentChatDayKey();
+    const decision=corePolicySync<Temperament|null>('mood.ensureTemperament',[{...publicationSnapshot(),saved,mood,sleepState,day,draws:[Math.random(),Math.random()]}]);
+    if(decision)store.transaction(()=>{if(JSON.stringify(store.get('her.temperament')??null)!==JSON.stringify(saved)||JSON.stringify(getMood())!==JSON.stringify(mood)
+      ||JSON.stringify(getHerSleepSchedule())!==JSON.stringify(sleepState)||currentChatDayKey()!==day)throw Error('core_temperament_state_changed');store.set('her.temperament',decision);});return;
+  }
   if (getTemperament() || herAsleepNow()) return;
   const before = store.get('her.temperament') as Temperament | undefined;
   const mood = getMood();
@@ -1430,7 +1770,7 @@ function ensureTemperament() {
   console.log(`[temperament] ${rolled.day}: ${rolled.kind} ${rolled.intensity}${rolled.because ? ` — ${rolled.because}` : ''}`);
 }
 
-function lifeTick() {
+async function lifeTick() {
   const now = Date.now();
   const { host, observation, environment } = observeEnvironment(now);
   const seconds = (now - lastTickAt) / 1000;
@@ -1450,15 +1790,18 @@ function lifeTick() {
   observeAttention(environment, observation, tickId, now);
   // Keep existing delivery gates on their established host readings until the
   // live nudge pilot. Corrected observations already feed mood and shadow state.
-  void considerReminding(host).then(reminded => {
+  const attentionWork = considerReminding(host).then(reminded => {
     if (reminded) attention.baseline(tickId, false, true, 'reminder-priority');
     else return considerPipingUp(host, tickId);
   }, () => { attention.baseline(tickId, false, true, 'reminder-error'); })
     .catch(error => { console.warn('[attention] baseline tick failed', error); });
-  if (seesItsOwnScreen() && store.get('activityLog', true) === true) {
-    void activityReporter.report(readCheckInSource(store.get('checkinSource')), readHostEnvironment);
+  const reportWork = seesItsOwnScreen() && store.get('activityLog', true) === true
+    ? activityReporter.report(readCheckInSource(store.get('checkinSource')), readHostEnvironment) : undefined;
+  const revoiceWork = considerRevoicing();
+  if (corePeriodic) {
+    await Promise.allSettled([attentionWork, reportWork, revoiceWork]);
+    return vitals.sleepiness;
   }
-  considerRevoicing();
   // Rescheduled each time rather than set on an interval, so the gap itself
   // varies with how alert she is.
   tickTimer = setTimeout(lifeTick, nextTickDelayMs(vitals));
@@ -1485,31 +1828,64 @@ function persistVitals(force = false) {
   savedVitalsAt = Date.now();
 }
 
+/**
+ * What the watchdog saw while she was gone, said to his phone on the way back
+ * up. This is the half of the outage alert that only she can send: the watchdog
+ * can say "I have gone quiet" while the machine is up, but if the machine
+ * itself was off there was nothing running to say anything at all — so she
+ * reads back the watchdog's last note and tells him how long the gap was.
+ *
+ * Her own `her.lastAliveAt` is written only when her state moves, up to five
+ * minutes stale, so on its own it would read a fifteen-second deploy as a five
+ * minute outage. The watchdog's note is at most half a minute old, which is
+ * what makes the number a fact rather than the shape of the file.
+ */
+function mentionDowntime() {
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on'){const watched=readLivenessFile();const own=Date.parse(String(store.get('her.lastAliveAt')??''));const p=corePolicySync<any>('startup-context.downtime',[watched?.lastAliveAt??0,Number.isFinite(own)?own:null,Date.now()]);if(p)void pushToPhone(p.source,p.text,p.url,p.silent,p.tag,undefined,undefined,p.force);return;}
+
+  const watched = readLivenessFile();
+  let lastAliveAt = watched?.lastAliveAt ?? 0;
+  if (!lastAliveAt) {
+    // No watchdog has run yet (it is not installed, or this is the first boot
+    // after): trust her own stamp only for a gap no deploy could have made.
+    const own = Date.parse(String(store.get('her.lastAliveAt') ?? ''));
+    if (Number.isFinite(own) && Date.now() - own >= 30 * 60_000) lastAliveAt = own;
+  }
+  if (!lastAliveAt) return;
+  const goneMs = Date.now() - lastAliveAt;
+  if (goneMs < DOWNTIME_NOTICE_MS) return;
+  void pushToPhone('system', backMessage(goneMs), '/', false, 'haru-system', undefined, undefined, true);
+}
+
 function startLifeLoop() {
   const saved = store.get('vitals') as Vitals | undefined;
   // Resuming where she left off means closing and reopening the app does not
   // hand back a factory-fresh mood.
-  if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')vitals=corePolicySync('startup-context.initial',[saved??null,vitals]);
+  else if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
   const weather = store.get('her.weather') as { wander?: Lean; bruise?: Lean } | undefined;
   backfillMonths();
   // What she missed. A deploy is seconds and a crash that took her out for half
   // a day is not, and the difference is the whole point.
   const aliveAt = Date.parse(String(store.get('her.lastAliveAt') ?? ''));
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on'){const p=corePolicySync<any>('startup-context.resumed',[storeWasRecovered,Number.isFinite(aliveAt)?aliveAt:null,Date.now()]);if(p){feelNow(p.event);console.log(`[feelings] ${p.reason}`);}}else{
   const goneHours = Number.isFinite(aliveAt) ? (Date.now() - aliveAt) / 3_600_000 : 0;
   if (storeWasRecovered || goneHours >= GONE_TOO_LONG_HOURS) {
     feelNow('lost-time');
     console.log(`[feelings] ${storeWasRecovered ? 'her files came back damaged and were replaced from a backup' : `${goneHours.toFixed(1)}h she cannot account for`}`);
   }
-  wander = weather?.wander ?? {};
-  bruise = weather?.bruise ?? {};
+  }
+  mentionDowntime();
+  const restored=process.env.HARU_CORE_STARTUP_CONTEXT==='on'?corePolicySync<any>('startup-context.restored',[saved??null,vitals,weather??null]):null;
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on'){wander=restored.wander;bruise=restored.bruise;}else{wander=weather?.wander??{};bruise=weather?.bruise??{};}
   lastTickAt = Date.now();
   // What is on disk right now, so the first tick is measured against it rather
   // than against nothing and written out immediately. Null when there was
   // nothing saved, which is the one case where the first tick should write.
-  savedVitals = saved ? { ...vitals } : null;
+  savedVitals = process.env.HARU_CORE_STARTUP_CONTEXT==='on' ? restored.savedVitals : saved ? { ...vitals } : null;
   savedVitalsAt = Date.now();
   clearTimeout(tickTimer);
-  tickTimer = setTimeout(lifeTick, 4_000);
+  if (!corePeriodic) tickTimer = setTimeout(lifeTick, 4_000);
 }
 
 function nudgeVitals(event: Parameters<typeof applyEvent>[1]) {
@@ -1543,7 +1919,7 @@ let lastPraiseWasSmug = false;
  */
 function broadcastBeat(emotion: Emotion, gesture?: 'nod' | 'shake' | 'stare') {
   currentEmotion = emotion;
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('emotion:changed', { emotion, gesture });
+  sendToWindows('emotion:changed', { emotion, gesture });
 }
 
 // Still fire-and-forget as far as the reply is concerned — it is already on
@@ -1555,6 +1931,8 @@ const recentClassifications = new Map<string, { at: number; result: Promise<Emot
 const CLASSIFY_MEMO_MS = 2 * 60_000;
 
 function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion | null> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.classifyMemo',[reply,[...recentClassifications].map(([key,v])=>({key,at:v.at})),Date.now()]);if(p.hit)return recentClassifications.get(p.key)!.result;const result=classifyEmotionNow(reply,config);recentClassifications.set(p.key,{at:p.at,result});for(const key of p.drop)recentClassifications.delete(key);return result;}
+
   const key = reply.slice(0, 600);
   const cached = recentClassifications.get(key);
   if (cached && Date.now() - cached.at < CLASSIFY_MEMO_MS) return cached.result;
@@ -1565,6 +1943,8 @@ function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion
 }
 
 function classifyEmotionNow(reply: string, config: ProviderConfig): Promise<Emotion | null> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return conversationRun('classify',{reply,config}).then(packet=>{if(!packet)return null;broadcastBeat(packet.emotion,packet.gesture??undefined);if(packet.pose)sendToWindows('companion:pose',packet.pose);broadcastLife(null,readEnvironment());return packet.emotion;}).catch(error=>{console.warn('[emotion]',error instanceof Error?error.message:'failed');return null;});
+
   const system = classificationPrompt(getMood());
   return ollamaPost(
     [{ role: 'system', content: system }, { role: 'user', content: `The line she just said: "${reply.slice(0, 600)}"` }],
@@ -1603,6 +1983,10 @@ let speechTurn = 0;
 let openingInFlight: Promise<string | null> | null = null;
 
 function sendToWindows(channel: string, payload?: unknown) {
+  if (process.env.HARU_CORE_BRAIN_WORKER === 'on' && channel === 'chat:fromPhone') {
+    store.set('chat.messages', appendPhoneTurn((store.get('chat.messages') ?? []) as any[], payload as PhoneTurn, randomUUID(), new Date().toISOString()));
+  }
+  if (process.env.HARU_CORE_BRAIN_WORKER === 'on') broadcastConsole(channel,[payload]);
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload);
 }
 
@@ -1677,27 +2061,69 @@ let lastInterjectionAt = 0;
  * Every one of these is written here, so there is nothing for the window to own;
  * it is handed each line as it happens and shows the log it is given.
  */
+function coreAside(action:string,args:unknown):any {
+  const now=new Date();return coreAsideMutation(action,args,remainingStore(app.getPath('userData')),{now:now.getTime(),at:now.toISOString(),day:localDateKey(zonedNow(CHAT_TIMEZONE,now)),timeZone:CHAT_TIMEZONE});
+}
 function getAsides(): Aside[] {
   return readAsides(store.get('chat.asides'));
 }
 
-/** Everything she says without having been spoken to is written here. */
-/** Set by boredNudge when the line it composed is a question about their day; stamped on the aside as it is recorded. */
-let pendingAsk: string | null = null;
+function getNudgeLearning() { return readNudgeLearning(store.get('chat.nudgeLearning'), Date.now()); }
 
-function noteAside(text: string, source: AsideSource, about = ''): Aside | null {
+function nudgeConversation(): NudgeMessage[] {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on'){const archive=store.getArchive();const days=corePolicySync<string[]>('context-preparation.nudgeDays',[Object.keys(archive)]);return corePolicySync<any>('context-preparation.nudgeConversation',[Object.fromEntries(days.map(day=>[day,archive[day]])),store.get('chat.messages')??[]]);}
+
+  const archive = store.getArchive();
+  const messages = [...Object.keys(archive).sort().slice(-2).flatMap(day => archive[day] as NudgeMessage[]),
+    ...((store.get('chat.messages') as NudgeMessage[] | undefined) ?? [])];
+  const seen = new Set<string>();
+  return messages.filter(message => {
+    const key = `${message.role}:${message.id ?? `${message.at}:${message.content}`}`;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+
+async function saveNudgePreference(id: unknown, choice: unknown): Promise<Aside | null> {
+  if (typeof id !== 'string' || !validNudgePreference(choice)) return null;
+  const asides = getAsides(), learning = getNudgeLearning();
+  const result = await coreRateNudge(asides, learning, id, choice, Date.now());
+  if (!result) return null;
+  if (!sameCoreFeedback(asides, learning, getAsides(), getNudgeLearning())) throw new Error('core_nudge_state_changed');
+  store.set({ 'chat.asides': result.asides, 'chat.nudgeLearning': result.learning });
+  sendToWindows('chat:asidesChanged', result.asides);
+  return result.aside;
+}
+
+type NudgeDetail = Partial<Pick<NudgeDraft, 'topic' | 'kind' | 'asked' | 'keywords' | 'revision' | 'eventAt' | 'tone' | 'phoneOpportunity'>>;
+
+/** Everything she says without having been spoken to is written here. */
+function noteAside(text: string, source: AsideSource, about = '', nudge?: NudgeDetail, scheduledPush = false): Aside | null {
+  if(process.env.HARU_CORE_ASIDES==='on') {
+    const made=coreAside('note',{text,source,about,nudge});if(!made)return null;
+    const aside=made.aside as Aside;
+    attention.event('aside',{id:aside.id,source});
+    if(made.asked)console.log(`[push] she asked ${made.asked} — the next thing they say answers it`);
+    sendToWindows('chat:aside',aside);
+    void forwardAsideToPush(aside,nudge?.phoneOpportunity,scheduledPush).catch(error=>console.warn('[push] aside forwarding failed:',error));
+    return aside;
+  }
   const line = text.trim();
   if (!line) return null;
-  const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about);
+  const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about, nudge?.topic, nudge?.kind,
+    { nudgeKeywords: nudge?.keywords, nudgeEvent: nudge?.revision, nudgeEventAt: nudge?.eventAt, nudgeTone: nudge?.tone });
   const aside = made.aside;
   if (aside) attention.event('aside', { id: aside.id, source });
-  const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
-  if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
+  const asked = source === 'idle' && /\?/.test(line) ? nudge?.asked : undefined;
+  const asides = asked ? markAsked(made.asides, aside.id, asked) : made.asides;
+  if (asked) console.log(`[push] she asked ${asked} — the next thing they say answers it`);
   store.set('chat.asides', asides);
   sendToWindows('chat:aside', aside);
   // Fire-and-forget: a push hiccup must not hold up the desk or the phone over
   // a line that has already been said there.
-  void forwardAsideToPush(aside);
+  void forwardAsideToPush(aside, nudge?.phoneOpportunity, scheduledPush).catch(error => {
+    console.warn('[push] aside delivery failed:', error instanceof Error ? error.message : error);
+  });
   return aside;
 }
 
@@ -1735,6 +2161,7 @@ const UNPROMPTED_CONTEXT_TURNS = 10;
  * morning is its own kind of wrong.
  */
 function spokenOn(day: string, today: string): { role?: string; content?: string }[] {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.spokenOn',[ownedAgendaCore().get('config',{}),store.getArchive(),day,today]);
   const archived = (store.getArchive()[day] ?? []) as { role?: string; content?: string }[];
   // The live list is whatever has not been archived yet, which is always today.
   const live = day === today ? ((store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? []) : [];
@@ -1742,6 +2169,7 @@ function spokenOn(day: string, today: string): { role?: string; content?: string
 }
 
 function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.todaySoFar',[ownedAgendaCore().get('config',{}),store.getArchive(),localDateKey(zonedNow(CHAT_TIMEZONE)),limit]);
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
   const render = (spoken: { role?: string; content?: string; at?: string }[]) => foldAsleepExchanges(spoken).slice(-limit).map(message =>
@@ -1767,6 +2195,7 @@ function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
  * thing she should notice rather than cheerfully starting a new subject.
  */
 function stillWaiting(): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.stillWaiting',[lastInterjectionAt,Date.now()]);
   if (!lastInterjectionAt) return '';
   const minutes = Math.round((Date.now() - lastInterjectionAt) / 60_000);
   if (minutes < 1) return '';
@@ -1788,6 +2217,7 @@ function stillWaiting(): string {
  * not mention it at all, which is what you want from a remark about a game.
  */
 function rightNow(): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.rightNow',[agendaClock(zonedNow(CHAT_TIMEZONE))]);
   const now = zonedNow(CHAT_TIMEZONE);
   return `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}. Do not guess at the time or imply it is late unless that is actually what the clock says.`;
 }
@@ -1799,12 +2229,18 @@ function rightNow(): string {
  * guard survives here.
  */
 function nightRaisedAlready(recentLines: string[]): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.nightRaised',[getNights(),lastNightKey(),recentLines]);
   const nights = nightsOn(getNights(), lastNightKey());
   if (!nights.length) return '';
   return nightsToDrawOn(nights, recentLines) ? '' : 'You have already told them about your night today — do not bring it up again unless they ask.';
 }
 
 function unpromptedContext(subjectNow?: string): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){
+    const today=localDateKey(zonedNow(CHAT_TIMEZONE)),asides=getAsides(),at=Date.parse(getMood().lastMessageAt??'');
+    const parts=[summariseFollowing(getFollowing(),Date.now()),todaySoFar(),alreadySaidRecently(asides,CHAT_TIMEZONE,Date.now(),Number.isFinite(at)?at:undefined,undefined,subjectNow),stillWaiting(),toldNow(),arrivalNote(),unansweredAsksNote(asides,CHAT_TIMEZONE,Date.now()),weatherToDrawOn(getWeather().last,weatherWhere(),asides.map(a=>a.text),Date.now(),getWeather().disputedAt),nightRaisedAlready(asides.map(a=>a.text)),sleepNote(getHerSleepSchedule(),zonedNow(CHAT_TIMEZONE)),openingsToAvoid(asides,Date.now())];
+    return corePolicySync<string>('agenda-life.unpromptedFacts',[parts,subjectNow??null,blankSlateInstruction(getSlate(),knownSinceSlate()),blankSlateOpening(getSlate(),knownSinceSlate()),spokenOn(today,today).length,asidesOn(asides,today).length]);
+  }
   // What they are partway through, on every path where she speaks first. Added
   // here rather than at each call site because there are four of them and the
   // one that was missed is exactly where the complaint came from — she remarked
@@ -1894,7 +2330,19 @@ function unpromptedContext(subjectNow?: string): string {
  * measured doing exactly that, six seconds of GPU during a game for a sentence
  * nobody ever saw. Asking first is free.
  */
+/** Raw policy inputs. Latest activity ordering reports a device fact. */
+function publicationSnapshot(aboutTheGame=false) {
+  const log=store.getActivityLog(),days=Object.keys(log).sort();
+  const latest=days.length?(log[days[days.length-1]]??[]).map(entry=>entry.until??entry.at).sort().at(-1):undefined;
+  return {now:Date.now(),local:zonedNow(CHAT_TIMEZONE),aboutTheGame,lastInterjectionAt,lastUserActivityAt,lastRemindedAt,chasing,
+    sleepPrefs:store.get('her.sleep')??null,sleepState:store.get('her.sleepState')??null,explicit:explicitModeNow(),
+    quietGaming:readGamingConfig(store.get('gaming')).quiet,gameRunning:gameIsRunning(),prefs:getPush().prefs,
+    pushback:store.get('pushback')??null,webReady:Boolean(webServer),hasDevices:canReachPhone(),lastReachedAt:getPush().lastReachedAt,
+    phoneState:getPhoneNudges(),signs:{lastMessageAt:(store.get('mood') as any)?.lastMessageAt,lastOpenedAt:store.get('web.lastOpenedAt'),lastActivityAt:latest}};
+}
+
 function whyNotInterject({ aboutTheGame = false } = {}): string | null {
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on')return corePolicySync('publication.whyNotInterject',[publicationSnapshot(aboutTheGame)]);
   const now = Date.now();
   const since = now - lastInterjectionAt;
   if (since < INTERJECT_GAP_MS) return `she spoke unprompted ${Math.round(since / 1000)}s ago`;
@@ -1924,8 +2372,12 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
  * not butt in; a version of it that silences only the written half prevents
  * nothing and loses the record.
  */
-function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource, about = '' } = {}): boolean {
+function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource, about = '', nudge = undefined as NudgeDetail | undefined } = {}): boolean {
   const now = Date.now();
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on') {
+    const decision=corePolicySync<any>('publication.interject',[publicationSnapshot(aboutTheGame),line,getKept(),store.get('chat.messages')??[],getAsides()]);
+    if(!decision.ok){if(decision.reason==='repeat-blocked')attention.event('repeat-blocked');console.log('[core-nudge] '+JSON.stringify({op:'interject',reason:decision.reason}));return false;}
+  } else {
   if (herAsleepNow()) { console.log('[interject] dropped — she is asleep'); return false; }
   if (herKnockedAwakeNow()) { console.log('[interject] dropped — she was got up, she is not making conversation'); return false; }
   const refusal = whyNotInterject({ aboutTheGame });
@@ -1962,17 +2414,19 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
     console.log('[interject] dropped — it repeats a line she already said');
     return false;
   }
-  lastInterjectionAt = now;
+  }
+  if(!(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'))lastInterjectionAt = now;
   // Before it goes out, so that whatever she has just demanded an account of is
   // on record by the time they reply.
-  noteSheAsked(line);
+  if(!(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'))noteSheAsked(line);
   // Into her own log, not the transcript. This function is the definition of an
   // unprompted line — it exists to rate-limit exactly the things nobody asked
   // for — so it is also the right and only place to decide where they are
   // written. Anything that reaches the conversation instead does so by not
   // coming through here, which is a short and deliberate list: see the two
   // "hold on, I'm looking" sites, which answer a button the user just pressed.
-  noteAside(line, source, about);
+  const storedAside=noteAside(line, source, about, nudge);
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){if(!storedAside)return false;lastInterjectionAt=now;noteSheAsked(line);}
   expectAnswerWhenDone();
   return true;
 }
@@ -1996,6 +2450,8 @@ let lastUserActivityAt = 0;
 const QUIET_AFTER_USER_MS = 3 * 60_000;
 
 function noteUserSpoke() {
+  noteCoreUserActivity();
+  inferencePriority.interaction();
   attention.event('interaction');
   activityObservations.conversation(Date.now());
   // Zeroed so she is free to follow up on her own next line; see stillWaiting,
@@ -2075,13 +2531,36 @@ const LOCAL_MODELS = 'http://localhost:11434';
  * keep-forever, and after a manga read or a game scene the next thing she said
  * paid a twenty-second cold load of the 27B.
  */
+/** Literal I/O facts and already-owned service primitives for Core attachment plans. */
+function attachmentFacts(extra:string[]=[]){
+ const brain=store.get('ai.config') as ProviderConfig|undefined,vision=readVisionConfig(store.get('vision'));
+ const endpoints=[brain?.endpoint??'',vision.endpoint??'','http://localhost:11434',...extra];
+ return {...attachmentURLFacts(endpoints.flatMap(e=>[e,e.trim(),trimEndpoint(e)]),Object.values(os.networkInterfaces()).flatMap(rows=>(rows??[]).map(a=>a.address))),brain:brain??null,chatSize:chatNumCtx(),sideSize:sideNumCtx(),keepAlive:OLLAMA_KEEP_ALIVE};
+}
+function attachmentAdapters(vision:VisionConfig,provider:ProviderConfig){
+ const tools=findFfmpeg();
+ return {facts:()=>attachmentFacts([provider.endpoint,vision.endpoint??'']),source:(a:Attachment)=>({file:attachmentFileSource(a.saved),vision,provider,brain:store.get('ai.config')}),hasTools:()=>Boolean(tools),
+ pdf:readPdf,text:readText,image:imageForSending,eyes:eyesForReading,
+ look:(images:string|string[],command:any)=>ownedLook(images,command.config,command.endpoint,modelHeaders(command.endpoint),net.fetch,command.options),
+ frames:(file:string)=>extractFrames(file,tools!),readFrame:(file:string)=>readFileSync(file).toString('base64'),audio:(file:string,seconds:number)=>extractAudio(file,tools!,seconds),transcribe:transcribeFile,
+ waiting:(line:string)=>{sendToWindows('chat:interject',line);void speak(line);},discard};
+}
+
 function eyesHold(vision: VisionConfig, wanted: string): string | number {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('hold',[vision,wanted,attachmentFacts()]);
   const brain = store.get('ai.config') as ProviderConfig | undefined;
   if (!brain?.model || vision.model !== brain.model) return wanted;
   return trimEndpoint(visionEndpoint(brain, vision)) === trimEndpoint(brain.endpoint ?? '') ? OLLAMA_KEEP_ALIVE : wanted;
 }
 
+function visionNumCtx(vision: VisionConfig, endpoint: string): number {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('context',[vision,endpoint,attachmentFacts([endpoint])]);
+  return requestContextSize({ provider: 'ollama', model: vision.model, endpoint, temperature: 0.2 },
+    store.get('ai.config') as ProviderConfig | undefined, chatNumCtx(), sideNumCtx());
+}
+
 function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionConfig): string {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('endpoint',[provider,vision,attachmentFacts([provider?.endpoint??'',vision?.endpoint??''])]);
   // Her own address first, when she has been given one — a second Ollama on
   // another card, say. Held to the same rule as the chat model below it: a
   // vision endpoint that is not this machine is refused, not obeyed, because
@@ -2109,6 +2588,7 @@ const GAME_BOOT_GAP_MS = 60 * 60_000;
 function gamesRoot() { return path.join(app.getPath('userData'), 'games'); }
 /** Her notes on the game, while it is running. */
 function gameMemoryNow(): string {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('currentMemory',[currentGame,gameIsRunning()]);
   return currentGame && gameIsRunning() ? gameMemoryForPrompt(currentGame.memory) : '';
 }
 
@@ -2121,6 +2601,7 @@ function gameMemoryNow(): string {
  * line, so the rules about when she may speak still hold.
  */
 async function bootGame(name: string) {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){try{await bootCoreGame(name,{core:remainingStore(app.getPath('userData')),facts:()=>{const character=getActiveCharacter();return {current:currentGame,last:lastGamingPollAt,now:Date.now(),nights:getNights(),provider:store.get('ai.config'),refusal:whyNotInterject({aboutTheGame:true}),following:getFollowing(),today:localDateKey(zonedNow(CHAT_TIMEZONE)),context:[character.identity,character.style,rightNow()]};},stamp:(at:number)=>{lastGamingPollAt=at;},opened:(game:any)=>{currentGame=game;},quip:(request:any)=>ollamaQuip(request.system,request.prompt,request.provider),publish:(publication:any,provider:any)=>{if(interject(publication.line,publication.options))void speak(publication.line,classifyEmotion(publication.line,provider));}});}catch(error){console.warn('[game] no welcome:',error);}return;}
   const now = Date.now();
   const booted = currentGame?.name !== name || now - lastGamingPollAt > GAME_BOOT_GAP_MS;
   lastGamingPollAt = now;
@@ -2157,6 +2638,7 @@ let watchTimer: ReturnType<typeof setInterval> | null = null;
  * up, which happens on some drivers.
  */
 function activeScreen<T extends { display_id: string }>(sources: T[]): T | undefined {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){let cursor:string|null=null;try{cursor=String(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id);}catch{}const index=screenPolicy<number|null>('active',[sources.map(s=>s.display_id),cursor]);return index===null?undefined:sources[index];}
   if (sources.length <= 1) return sources[0];
   try {
     const here = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -2192,7 +2674,24 @@ function gameNow(): string {
  * without them choosing the moment, is the last thing that should be posted to a
  * company — the same reasoning as screenshots, and equally not a setting.
  */
+function screenFacts(kind:string,shot?:{path:string;at:number}){
+ const character=getActiveCharacter();
+ const context=screenPolicy<string[]>('context',[kind,{character,rightNow:rightNow(),following:getFollowing(),activity:currentActivity,game:gameNow(),now:Date.now()}]);
+ return {...attachmentFacts(),vision:store.get('vision'),provider:store.get('ai.config'),watching:store.get('watching'),screenshots:store.get('screenshots'),now:Date.now(),lastLookAt,lastSceneSeen,lastSceneAt,screenshotSpokeAt,gameOn:gameIsRunning(),speaking:speakingNow,blocked:whyNotInterject({aboutTheGame:true}),gameTitle:gameNow(),watchingTitle,activity:currentActivity,context,name:shot?path.basename(shot.path):'',day:currentChatDayKey(),logEnabled:store.get('activityLog',true)===true};
+}
+function screenAdapters(kind:string,shot?:{path:string;at:number}){
+ return {core:remainingStore(app.getPath('userData')),facts:()=>screenFacts(kind,shot),update:(values:any)=>{if(Object.hasOwn(values,'lastLookAt'))lastLookAt=values.lastLookAt;if(Object.hasOwn(values,'lastSceneSeen'))lastSceneSeen=values.lastSceneSeen;if(Object.hasOwn(values,'lastSceneAt'))lastSceneAt=values.lastSceneAt;if(Object.hasOwn(values,'screenshotSpokeAt'))screenshotSpokeAt=values.screenshotSpokeAt;},
+ capture:async(options:any)=>{const sources=await desktopCapturer.getSources(options),frame=activeScreen(sources)?.thumbnail;return frame&&!frame.isEmpty()?frame.toPNG():null;},
+ read:(file:string)=>readFileSync(file),settle:settled,
+ look:(bytes:Buffer,request:any)=>backgroundLook(bytes.toString('base64'),request.config,request.endpoint,modelHeaders(request.endpoint),net.fetch,request.options),
+ quip:(request:any)=>ollamaQuip(request.system,request.prompt,request.provider),
+ publish:(line:string,options:any,provider:any)=>{if(interject(line,options))void speak(line,classifyEmotion(line,provider));},
+ game:()=>currentGame,gameUpdated:(text:string)=>{if(currentGame)currentGame.memory=text;},deferred:(error:unknown)=>error instanceof BackgroundInferenceDeferred,
+ pending:()=>pendingShot,retry:(shot:any,delay:number)=>{pendingShot=shot;if(settleTimer)clearTimeout(settleTimer);settleTimer=setTimeout(()=>void remarkOnScreenshot(),delay);}};
+}
+
 async function glanceAtScreen() {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){try{await runCoreScreen('glance',screenAdapters('glance'));}catch(error){console.warn('[watch] could not look:',error instanceof Error?error.message:error);}return;}
   const config = readWatchingConfig(store.get('watching'));
   const vision = readVisionConfig(store.get('vision'));
   if (!vision.enabled) return;
@@ -2222,9 +2721,10 @@ async function glanceAtScreen() {
     // The eyes report game state, plainly; she reacts to the report in her own
     // voice with the chat model, and the report stays in her context so a
     // question about the fight is answered from the screen. See sceneAsk.
-    const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
+    const sighting = await backgroundLook(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
       ask: sceneAsk(title),
       keepAlive: eyesHold(vision, '30m'),
+      numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)),
       numPredict: 160,
     });
     const scene = sighting.description;
@@ -2255,6 +2755,7 @@ async function glanceAtScreen() {
     // Spoken only if it was also written down — see interject.
     if (interject(line, { aboutTheGame: true, source: 'screen' })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
+    if (error instanceof BackgroundInferenceDeferred) { lastLookAt = 0; return; }
     console.warn('[watch] could not look at the screen:', error instanceof Error ? error.message : error);
   }
 }
@@ -2284,6 +2785,7 @@ function screenshotFolder() {
  * half a picture, or nothing at all.
  */
 async function settled(file: string): Promise<boolean> {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){let last=-1,command=screenPolicy('settleStart',[]);for(let attempt=1;;attempt++){await new Promise(done=>setTimeout(done,command.delayMs));let size:number|null=null;try{size=statSync(file).size;}catch{}const next=screenPolicy('settle',[attempt,last,size]);if(next.done)return next.value;last=next.last;command=next;}}
   let last = -1;
   for (let tries = 0; tries < SETTLE_TRIES; tries++) {
     await new Promise(resolve => setTimeout(resolve, SETTLE_MS));
@@ -2300,6 +2802,7 @@ async function settled(file: string): Promise<boolean> {
  * — see screenshots.ts for why that is not a setting.
  */
 async function remarkOnScreenshot() {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const shot=pendingShot;pendingShot=null;if(!shot)return;try{await runCoreScreen('screenshot',screenAdapters('screenshot',shot),shot);}catch(error){console.warn('[screenshots]',whyItFailed(error));}return;}
   const shot = pendingShot;
   pendingShot = null;
   if (!shot) return;
@@ -2324,7 +2827,7 @@ async function remarkOnScreenshot() {
     // asked as a screen rather than as a picture — the same SHOT_LOOK_PROMPT
     // the server pass uses, so a shot described here and one described there
     // come back in the same shape.
-    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT });
+    const sighting = await backgroundLook(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT, numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)), keepAlive: eyesHold(vision, '5m') });
     const name = path.basename(shot.path);
     console.log(`[shot] ${name} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars${mayRemark ? '' : ', quiet hours — noted not said'}`);
     // Written down whether or not she says anything, and here rather than only
@@ -2354,6 +2857,15 @@ async function remarkOnScreenshot() {
     // Spoken only if it was also written down — see interject.
     if (interject(line, { source: 'screenshot' })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
+    if (error instanceof BackgroundInferenceDeferred) {
+      // Keep the newest screenshot in a burst; a conversation is not a failed read.
+      if (!pendingShot) {
+        pendingShot = shot;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(() => { void remarkOnScreenshot(); }, 60_000);
+      }
+      return;
+    }
     console.warn('[shot] could not react:', whyItFailed(error));
   }
 }
@@ -2367,6 +2879,7 @@ function watchScreenshots() {
   if (!existsSync(folder)) { console.warn(`[shot] no folder at ${folder} — nothing to watch`); return; }
   try {
     screenshotWatcher = watch(folder, (event, name) => {
+      if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const file=path.join(folder,String(name??''));let birth:number|null=null;try{birth=statSync(file).birthtimeMs;}catch{}const command=screenPolicy('watchEvent',[name?String(name):'',birth,Date.now()]);if(!command.accept)return;pendingShot={path:file,at:Date.now()};const core=remainingStore(app.getPath('userData'));commitPerceptionPlan(core,screenPolicy('screenshotNote',[core.get('activity',{}),currentChatDayKey(),String(name),currentActivity,new Date().toISOString(),store.get('activityLog',true)===true]));if(settleTimer)clearTimeout(settleTimer);settleTimer=setTimeout(()=>void remarkOnScreenshot(),command.delayMs);return;}
       if (!name || !looksLikeScreenshot(String(name))) return;
       const file = path.join(folder, String(name));
       // Only genuinely new ones: the watcher also fires for renames and for
@@ -2394,7 +2907,41 @@ function watchScreenshots() {
   }
 }
 
+function speechBoundary<T = any>(name:string,args:unknown[]):T {
+  return corePolicySync<T>('speech-boundary.'+name,args);
+}
+function speechClipObservation(clip:{audio:Uint8Array}|null|undefined){
+  return clip ? {length:clip.audio.length,rate:wavSampleRate(clip.audio)} : null;
+}
 let saidDesktopIsMute = false;
+
+voiceSense.configure((audio, mime, words) => {
+  if(process.env.HARU_CORE_VOICE_SENSE==='on')return analyzeLocalVoice(audio,mime,net.fetch as unknown as typeof fetch,process.env.HARU_AFFECT_ENDPOINT,words);
+  return process.env.HARU_VOICE_AFFECT==='0'?Promise.resolve(null):analyzeLocalVoice(audio,mime,net.fetch as unknown as typeof fetch,process.env.HARU_AFFECT_ENDPOINT,words);
+});
+
+/**
+ * What she says while a tool runs, said as her rather than as a progress bar.
+ *
+ * The line itself is Core's: it is asked for per tool, and asked again with
+ * what has already been said this turn so she never says the same filler
+ * twice running. This only puts it on the screen and in her mouth — the same
+ * seam `waiting:` already uses. Nothing is said when Core has nothing to say,
+ * and a policy that will not answer must not cost her the turn.
+ */
+function narrateTool(name: string, already: string[]) {
+  if (process.env.HARU_CORE_CONVERSATION_POLICY !== 'on') return;
+  try {
+    const packet = corePolicySync<{ line?: string }>('conversation-program.toolNarration', [name, already]);
+    const line = (packet?.line ?? '').trim();
+    if (!line || already.includes(line)) return;
+    already.push(line);
+    sendToWindows('chat:interject', line);
+    void speak(line);
+  } catch (error) {
+    console.warn('[ai] no narration for that tool:', error instanceof Error ? error.message : error);
+  }
+}
 
 async function speak(reply: string, mood?: Promise<Emotion | null>) {
   const config = getVoiceConfig();
@@ -2423,8 +2970,8 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
   // mood fell back to the neutral clip — flat delivery no matter how she said
   // it. localEmotion reads the line itself (no model call), so the clip still
   // matches the mood even when classification never landed.
-  const emotion = classified ?? { emotion: localEmotion(text), confidence: 0, energy: 0.5, intent: 'reply' as const, focus: 'user' as const };
-  const reference = referenceFor(config, emotion.emotion);
+  const emotion = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('desktopEmotion',[text,classified]) : classified ?? { emotion: localEmotion(text), confidence: 0, energy: 0.5, intent: 'reply' as const, focus: 'user' as const };
+  const reference = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[config,emotion.emotion]) : referenceFor(config, emotion.emotion);
   const turnStillCurrent = turn === speechTurn;
   if (!turnStillCurrent) return;
   const chunks = splitForSpeech(text);
@@ -2447,7 +2994,7 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
       // spelling it — the two do different halves of the same job.
       const shouting = hasShout(chunk);
       if (shouting) shoutedChunks++;
-      const voice = shouting ? shoutReference(config, reference) : reference;
+      const voice = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[config,emotion.emotion,shouting]) : shouting ? shoutReference(config, reference) : reference;
       let clip;
       const prepStarted = Date.now();
       const say = spokenCase(chunk);
@@ -2467,7 +3014,7 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
         //
         // Not retried for anything else: a bad reference path or a rejected
         // request will fail identically the second time and only doubles the wait.
-        if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
+        if (!(process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('timeoutRetry',[first instanceof Error ? first.message : String(first)]) : /timeout|aborted/i.test(first instanceof Error ? first.message : String(first)))) throw first;
         console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
         clip = await synthesise(say, config, voice, voiceAuth(config), emotion.emotion);
       }
@@ -2483,7 +3030,7 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
       // the text is already in the chat, so there is nothing to tell the user
       // that a voice was even attempted, and "she has gone quiet" is
       // indistinguishable from her choosing not to speak.
-      sendToWindows('voice:failed', /timeout|aborted/i.test(detail)
+      sendToWindows('voice:failed', process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('failureText',[detail]) : /timeout|aborted/i.test(detail)
         ? 'The voice server took too long — she is on screen but not out loud.'
         : `The voice server could not speak that: ${detail.slice(0, 120)}`);
       return;
@@ -2515,6 +3062,8 @@ const POKE_LINE_COOLDOWN_MS = 4500;
  * produces nothing feels broken, and escalates across a bout of them.
  */
 async function handlePoke(kind: PokeKind) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.poke',[{...conversationPolicyFacts(),poke:{count:pokeCount,lastAt:pokeLastAt,speaking:pokeSpeaking,lastLineAt:pokeLastLineAt},speakingNow,speakingLine},kind]);conversationApply(p);pokeCount=p.count;pokeLastAt=p.lastAt;broadcastBeat(p.reading,p.gesture);sendToWindows('companion:pose',p.pose);nudgeVitals('criticised');sendToWindows('mood:changed',getMood());if(!p.run)return;pokeSpeaking=true;pokeLastLineAt=p.lineAt;try{const line=await ollamaQuip(p.system,p.user,store.get('ai.config') as ProviderConfig);noteAside(line,'poke');noteSheAsked(line);void speak(line);}catch(error){console.warn('[poke]',error instanceof Error?error.message:'failed');}finally{pokeSpeaking=false;}return;}
+
   const now = Date.now();
   pokeCount = nextPokeCount(pokeCount, pokeLastAt, now);
   pokeLastAt = now;
@@ -2755,7 +3304,19 @@ async function reviveVoiceServer() {
   console.warn('[voice] the speech server did not come up within 45s');
 }
 
+function deviceFacts(withContext=false){
+ const core=remainingStore(app.getPath('userData')),now=new Date(),character=withContext?getActiveCharacter():null;
+ return {config:core.get('config',{}),activityLog:core.get('activity',{}),now:now.getTime(),at:now.toISOString(),day:currentChatDayKey(),ducked,watchingTitle,steamIndex:[...steamGames],reacting:reactingToActivity,activitySpokenAt,placeSpokenAt,irritation:withContext?getMood().irritation:0,sleepiness:vitals.sleepiness,speaking:speakingNow,gameName:gameNow(),identity:character?.identity??'',style:character?.style??'',rightNow:withContext?rightNow():'',fullscreenSpokenAt,currentPlace};
+}
+function deviceStateAdapter(){return {core:remainingStore(app.getPath('userData')),facts:deviceFacts};}
+function coreHelperAdapter(){return {...deviceStateAdapter(),update:(u:any)=>{
+ for(const [key,value] of Object.entries(u)){switch(key){case 'systemVolume':systemVolume=value as number;break;case 'currentActivity':currentActivity=value as Activity;break;case 'foregroundProcess':foregroundProcess=value as string;break;case 'evictedFor':evictedFor=value as string|null;break;case 'watchingTitle':watchingTitle=value as string|null;break;case 'watchingScreen':watchingScreen=value as typeof watchingScreen;break;default:throw Error('core_device_state_field_invalid');}}
+ },execute:(c:any)=>{switch(c.kind){case 'volume':setSystemVolume(c.level);break;case 'volume-set-observed':{const pending=afterVolumeSet;afterVolumeSet=null;if(pending){clearTimeout(pending.timer);pending.run();}break;}case 'game-observation':noteCoreGame(c.value);break;case 'release-game-model':void releaseModelForGame(c.provider);break;case 'boot-game':void bootGame(c.name);break;case 'react-activity':void reactToActivity(c.activity,c.url);break;case 'watching-off':sendToWindows('companion:watching',null);break;case 'broadcast-watching':broadcastWatching();break;case 'react-fullscreen':void reactToFullscreen(c.title);break;case 'step-aside':stepAsideForFullscreen();break;default:throw Error('core_device_command_invalid');}}};}
+function coreActivityAdapter(){return {...deviceStateAdapter(),facts:()=>deviceFacts(true),place:(p:string|null)=>{currentPlace=p;},defer:(held:any,delay:number)=>{deferredActivity=held;clearTimeout(deferredRelease);deferredRelease=setTimeout(releaseDeferred,delay);},started:(kind:ActivityKind,place:string|null,at:number)=>{reactingToActivity=true;activitySpokenAt[kind]=at;if(place)placeSpokenAt[place]=at;},finished:()=>{reactingToActivity=false;},quip:(r:any)=>ollamaQuip(r.system,r.prompt,r.provider),publish:(r:any)=>{const emotion=classifyEmotion(r.line,r.provider);if(interject(r.line,r.options))void speak(r.line,emotion);}};}
+function coreFullscreenAdapter(){return {...deviceStateAdapter(),facts:()=>deviceFacts(true),defer:(title:string,delay:number)=>{deferredFullscreen=title;clearTimeout(deferredRelease);deferredRelease=setTimeout(releaseDeferred,delay);},stamp:(at:number)=>{fullscreenSpokenAt=at;},quip:(r:any)=>ollamaQuip(r.system,r.prompt,r.provider),publish:(r:any)=>{broadcastBeat(r.beat,r.animation);nudgeVitals(r.event);feelNow(r.event);sendToWindows('companion:pose',r.pose);if(interject(r.line,r.options))void speak(r.line);}};}
+
 function handleHelperLine(line: string) {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{handleCoreHelper(line,coreHelperAdapter());}catch(error){console.warn('[helper] Core event refused:',error);}return;}
   if (!line) return;
   // Proves the pipe end to end. Its absence was how a silently buffered stdout
   // looked from this side: a helper that had started, was alive, and said nothing.
@@ -2811,6 +3372,7 @@ function handleHelperLine(line: string) {
     // the answer was assembled only on the path she speaks from — so asked
     // directly she had nothing and said so.
     currentActivity = activity;
+    noteCoreGame(activity.kind==='gaming' ? steamName || activity.label : null);
     // Steam's own name for it, where Steam has one. The process is called "wdc"
     // and the window says "Telltale Games"; neither is the game.
     foregroundProcess = process;
@@ -3099,6 +3661,7 @@ function getSelfHostedKey(): string {
  * address and a bearer token, not a second code path to keep working.
  */
 async function transcribeFile(wav: string): Promise<string> {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on'){const key=getOpenAIKey(),command=attachmentPolicy('transcriber',[readListenConfig(store.get('listen')),Boolean(key)]);if(command.error)throw Error(command.error);return transcribe(readFileSync(wav),'audio/wav',command.config,net.fetch as never,command.auth==='openai'?{Authorization:`Bearer ${key}`}:remoteAuth(command.config.endpoint));}
   const key = getOpenAIKey();
   const listen = readListenConfig(store.get('listen'));
   // 'local' is the engine's name for "a server that speaks this shape", which
@@ -3119,6 +3682,7 @@ async function transcribeFile(wav: string): Promise<string> {
 
 /** She notices what they have opened. */
 async function reactToActivity(activity: Activity, url = '') {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{await reactCoreActivity(activity,url,coreActivityAdapter());}catch(error){console.warn('[activity] could not react:',error);}return;}
   if (!isNotable(activity) || reactingToActivity) return;
   const now = Date.now();
   if (now - (activitySpokenAt[activity.kind] ?? 0) < ACTIVITY_COOLDOWN_MS) return;
@@ -3213,6 +3777,7 @@ function getHaunts() {
  * week, telemetry-shaped keys after a day, so the list holds places, not noise.
  */
 function runHauntHygiene() {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){deviceMutation('hygiene',[],deviceStateAdapter());return;}
   const haunts = getHaunts();
   const cleaned = expireHaunts(haunts, Date.now());
   if (cleaned !== haunts) {
@@ -3234,6 +3799,7 @@ function getFollowing() {
  * page is reloaded.
  */
 function noteFollowing(activity: Activity, gameName: string) {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){deviceMutation('follow',[activity,gameName],deviceStateAdapter());return;}
   const work = identifyWork(activity, gameName);
   if (!work) return;
   const before = getFollowing()[work.key];
@@ -3272,6 +3838,7 @@ let deferredRelease: ReturnType<typeof setTimeout> | undefined;
 const DEFERRED_LIMIT_MS = 20_000;
 
 function releaseDeferred() {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){clearTimeout(deferredRelease);deferredRelease=undefined;const command=deviceFlow('deferred',[deferredActivity,deferredFullscreen]);deferredActivity=null;deferredFullscreen=null;if(command?.kind==='activity')void reactToActivity(command.activity,command.url);else if(command?.kind==='fullscreen')void reactToFullscreen(command.title);return;}
   clearTimeout(deferredRelease);
   deferredRelease = undefined;
   const held = deferredActivity;
@@ -3288,6 +3855,7 @@ function releaseDeferred() {
 }
 
 function holdUntilQuiet() {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){clearTimeout(deferredRelease);deferredRelease=setTimeout(releaseDeferred,deviceFlow<number>('deferDelay',[]));return;}
   clearTimeout(deferredRelease);
   deferredRelease = setTimeout(releaseDeferred, DEFERRED_LIMIT_MS);
 }
@@ -3315,8 +3883,10 @@ function photoFolder() {
  * the part they cannot redo.
  */
 function stageAttachment(source: string, name = path.basename(source)): Attachment {
+  const command=process.env.HARU_CORE_ATTACHMENTS==='on'?attachmentPolicy('stageCheck',[name,path.basename(name),path.extname(name),true,'single']):null;
+  if(command?.error)throw Error(command.error);
   const kind = classify(name);
-  if (kind === 'unreadable') throw new Error(`${path.extname(name) || 'that'} is not something I can open. Pictures, sound, video, text and data files all work.`);
+  if (!(process.env.HARU_CORE_ATTACHMENTS==='on') && kind === 'unreadable') throw new Error(`${path.extname(name) || 'that'} is not something I can open. Pictures, sound, video, text and data files all work.`);
   const folder = photoFolder();
   mkdirSync(folder, { recursive: true });
   // photoName sanitises and keeps only a basename, so nothing here can be talked
@@ -3354,8 +3924,10 @@ function stageAll(paths: string[], tools: { ffmpeg: string; ffprobe: string } | 
     const kind = classify(source);
     // Refused here rather than at send time, so it is said while the file is
     // still in front of them and not after they have typed a question about it.
+    if(process.env.HARU_CORE_ATTACHMENTS==='on'){const command=attachmentPolicy('stageCheck',[source,path.basename(source),path.extname(source),Boolean(tools),'all']);if(command.error){refused.push(command.error);continue;}}else{
     if (kind === 'unreadable') { refused.push(`${path.basename(source)} is not something I can open`); continue; }
     if ((kind === 'audio' || kind === 'video') && !tools) { refused.push(`${path.basename(source)} needs ffmpeg, which is not installed`); continue; }
+    }
     try {
       staged.push(stageAttachment(source));
     } catch (error) {
@@ -3365,7 +3937,7 @@ function stageAll(paths: string[], tools: { ffmpeg: string; ffprobe: string } | 
   if (staged.length) console.log(`[attach] staged ${staged.map(file => `${file.name} (${file.kind})`).join(', ')}`);
   // Only when nothing at all got through, so one bad file among four is a log
   // line and four bad files is an error the user actually sees.
-  if (!staged.length && refused.length) throw new Error(refused.join('; '));
+  if(process.env.HARU_CORE_ATTACHMENTS==='on'){const command=attachmentPolicy('stageSummary',[staged,refused]);if(command.error)throw Error(command.error);}else if (!staged.length && refused.length) throw new Error(refused.join('; '));
   if (refused.length) console.warn(`[attach] skipped: ${refused.join('; ')}`);
   return staged;
 }
@@ -3416,6 +3988,7 @@ function discardStaged(attachment: { saved?: string }) {
 const SEND_WIDTH = 1536;
 
 function imageForSending(file: string): string {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on'){const bytes=readFileSync(file),picture=nativeImage.createFromPath(file),empty=picture.isEmpty(),command=attachmentPolicy('imageSend',[empty,empty?0:picture.getSize().width]);return command.resize?picture.resize({width:command.width,quality:command.quality}).toPNG().toString('base64'):bytes.toString('base64');}
   const bytes = readFileSync(file);
   const picture = nativeImage.createFromPath(file);
   // Chromium decodes png/jpg/webp/gif/bmp and not much else — heic, avif and
@@ -3469,6 +4042,7 @@ const failedOpens = new Map<string, number>();
 const FAILED_OPEN_MEMORY_MS = 10 * 60_000;
 
 async function readAttachment(attachment: Attachment, vision: VisionConfig, provider: ProviderConfig): Promise<string> {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return readCoreAttachment(attachment,vision,provider,attachmentAdapters(vision,provider));
   const already = openedFiles.get(attachment.id);
   if (already !== undefined) return already;
   const failedAt = failedOpens.get(attachment.id);
@@ -3491,12 +4065,19 @@ async function readAttachment(attachment: Attachment, vision: VisionConfig, prov
 const modelEyes = new Map<string, boolean>();
 
 async function localModelSees(config: ProviderConfig): Promise<boolean> {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentCapability(config,attachmentFacts([config.endpoint]),async command=>{if(process.env.HARU_CORE_MODEL_PROVIDER==='on')return coreModelCapabilities(config);const response=await net.fetch(`${command.endpoint}/api/show`,{method:'POST',headers:modelHeaders(command.endpoint),body:JSON.stringify({model:command.model}),signal:AbortSignal.timeout(command.timeoutMs)});if(!response.ok)return {available:false,vision:null};const body=await response.json() as {capabilities?:string[]};return {available:true,vision:Array.isArray(body.capabilities)&&body.capabilities.includes('vision')};});
   const endpoint = trimEndpoint(config.endpoint);
   if (!config.model || isRemote(endpoint) || isOpenAIShaped(config.provider)) return false;
   const key = `${endpoint} ${config.model}`;
   const known = modelEyes.get(key);
   if (known !== undefined) return known;
   try {
+    if(process.env.HARU_CORE_MODEL_PROVIDER==='on'){
+      const capabilities=await coreModelCapabilities(config);
+      if(!capabilities.available||capabilities.vision===null)return false;
+      modelEyes.set(key,capabilities.vision);
+      return capabilities.vision;
+    }
     const response = await net.fetch(`${endpoint}/api/show`, { method: 'POST', headers: modelHeaders(endpoint), body: JSON.stringify({ model: config.model }), signal: AbortSignal.timeout(5_000) });
     if (!response.ok) { console.warn(`[attach] ${endpoint} would not say whether ${config.model} can see: ${response.status}`); return false; }
     const body = await response.json() as { capabilities?: string[] };
@@ -3534,12 +4115,13 @@ const IN_TURN_LOOK_MS = 45_000;
 const IN_TURN_READ_TOKENS = 450;
 
 async function eyesForReading(vision: VisionConfig, provider: ProviderConfig): Promise<{ config: VisionConfig; endpoint: string; numCtx?: number }> {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on'){const local=store.get('ai.config') as ProviderConfig|undefined;return attachmentPolicy('eyes',[vision,provider,attachmentFacts([provider.endpoint,vision.endpoint??'']),local?await localModelSees(local):false]);}
   const local = store.get('ai.config') as ProviderConfig | undefined;
   if (local && await localModelSees(local)) {
-    // A look at a picture is a side job on the same model: the shared runner, not the chat's window.
-    return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: sideNumCtx() };
+    // The same model keeps the same window when it reads a picture.
+    return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: chatNumCtx() };
   }
-  return { config: vision, endpoint: visionEndpoint(provider, vision) };
+  return { config: vision, endpoint: visionEndpoint(provider, vision), numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)) };
 }
 
 /**
@@ -3550,6 +4132,7 @@ async function eyesForReading(vision: VisionConfig, provider: ProviderConfig): P
  * with no conversation, no tools and no memory behind it. The chat answers now.
  */
 async function openFile(attachment: Attachment, vision: VisionConfig, provider: ProviderConfig): Promise<string> {
+ if(process.env.HARU_CORE_ATTACHMENTS==='on')return openCoreAttachment(attachment,vision,provider,attachmentAdapters(vision,provider));
   const source = attachment.saved;
   const name = attachment.name;
   const tools = findFfmpeg();
@@ -3574,7 +4157,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // eyesFor. A far fuller read than the glance prompt, because this text is
       // now the only thing standing in for the image.
       const eyes = await eyesForReading(vision, provider);
-      const sighting = await look(imageForSending(source), eyes.config, eyes.endpoint, modelHeaders(eyes.endpoint), net.fetch, { ask: READ_IT_ALL_PROMPT, timeoutMs: IN_TURN_LOOK_MS, numPredict: IN_TURN_READ_TOKENS, ...(eyes.numCtx ? { numCtx: eyes.numCtx } : {}) });
+      const sighting = await ownedLook(imageForSending(source), eyes.config, eyes.endpoint, modelHeaders(eyes.endpoint), net.fetch, { ask: READ_IT_ALL_PROMPT, timeoutMs: IN_TURN_LOOK_MS, numPredict: IN_TURN_READ_TOKENS, ...(eyes.numCtx ? { numCtx: eyes.numCtx } : {}) });
       console.log(`[attach] ${eyes.config.model} read ${name} into ${sighting.description.length} chars in ${Math.round((Date.now() - started) / 1000)}s`);
       return sighting.description;
     }
@@ -3595,10 +4178,10 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // against 1109ms for the same four frames, and it reads better too: asked
       // about them together the model can say the video does not change between
       // frames, which is a fact about the video that no single frame contains.
-      const sighting = await look(
+      const sighting = await ownedLook(
         frames.map(frame => readFileSync(frame).toString('base64')),
         vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch,
-        { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
+        { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.`, numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)), keepAlive: eyesHold(vision, '5m') },
       );
       parts.push(sighting.description);
       console.log(`[attach] ${name} — ${frames.length} frames read in one pass`);
@@ -3633,6 +4216,7 @@ export type GamingConfig = {
 const DEFAULT_GAMING: GamingConfig = { enabled: false, model: 'llama3.1:8b', quiet: true };
 
 function readGamingConfig(saved: unknown): GamingConfig {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('gaming',[saved]);
   if (!saved || typeof saved !== 'object') return DEFAULT_GAMING;
   const record = saved as Partial<GamingConfig>;
   return {
@@ -3646,6 +4230,7 @@ function readGamingConfig(saved: unknown): GamingConfig {
  *  gone fullscreen is still a game, and a fullscreen thing the process list does
  *  not recognise is still taking the GPU. */
 function gameIsRunning() {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('running',[seesItsOwnScreen(),currentActivity,watchingTitle]);
   // Only ever true where she is looking at her own screen. Both sources below
   // are fed by the Windows helper, so this is already false anywhere else — but
   // it is false on purpose now rather than by accident, because the desk's
@@ -3667,6 +4252,7 @@ function gameIsRunning() {
 let gamingSwapAnnounced = false;
 
 function modelForNow(config: ProviderConfig): ProviderConfig {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const command=gamePolicy('swap',[config,store.get('gaming'),gameIsRunning(),gamingSwapAnnounced]);gamingSwapAnnounced=command.announced;if(command.log)console.log(command.log);return command.config;}
   // Only ever applies to a model running on this machine. The whole point is to
   // free VRAM the game wants, and a model on someone else's servers uses none of
   // it — so swapping the name on a remote request achieves nothing and asks xAI
@@ -3706,6 +4292,7 @@ let evictedFor: string | null = null;
  * put one down immediately.
  */
 async function releaseModelForGame(config: ProviderConfig) {
+ if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const command=gamePolicy('release',[config,store.get('gaming'),seesItsOwnScreen(),evictedFor]);if(!command)return;evictedFor=command.evicted;try{await net.fetch(command.url,{method:'POST',headers:modelHeaders(config.endpoint),body:JSON.stringify(command.body)});}catch(error){console.warn('[gaming] could not release the model:',error);}return;}
   // Guarded again here, where the eviction actually happens: this one throws
   // 11 GB out of VRAM, and the settings that switch it on can arrive from the
   // desk in a config sync without anybody deciding they should apply here.
@@ -3760,6 +4347,7 @@ async function releaseModelForGame(config: ProviderConfig) {
  * doing there, which is the sort of thing she is expected to bring up unasked.
  */
 async function tieToPlace(said: string, replied: string, config: ProviderConfig) {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{await tieCorePlace(said,replied,config,{...deviceStateAdapter(),facts:()=>({...deviceFacts(),memories:getMemories()}),quip:(r:any)=>ollamaQuip(r.system,r.prompt,r.provider),remember:(r:any)=>addMemory(r.text,r.kind,r.label,{source:r.source,emotion:localEmotion(r.text),emotionIntensity:readTone(r.text).heat})});}catch(error){console.warn('[familiar] could not write the memory:',error);}return;}
   const place = currentPlace;
   if (!place) return;
   const haunts = getHaunts();
@@ -3813,6 +4401,13 @@ let tickedOffAt = 0;
 const TICK_OFF_COOLDOWN_MS = 90_000;
 
 async function remarkOnTickOff(item: KeptItem) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){
+    const packet=corePolicySync<any>('agenda-life.remarkPrepare',[item,{now:Date.now(),lastAt:tickedOffAt,provider:store.get('ai.config')??{},irritation:getMood().irritation,today:localDateKey(zonedNow(CHAT_TIMEZONE)),character:getActiveCharacter()}]);
+    if(!packet.run)return;tickedOffAt=packet.at;
+    const line=await ollamaQuip(packet.system,packet.user,packet.provider);
+    if(!corePolicySync<boolean>('agenda-life.remarkResult',[packet.source,getKept(),store.get('ai.config')??{},getActiveCharacter()]))return;
+    noteAside(line,'kept');noteSheAsked(line);void speak(line,classifyEmotion(line,packet.provider));return;
+  }
   const now = Date.now();
   if (now - tickedOffAt < TICK_OFF_COOLDOWN_MS) return;
   const config = store.get('ai.config') as ProviderConfig | undefined;
@@ -3850,6 +4445,7 @@ const FULLSCREEN_COOLDOWN_MS = 5 * 60_000;
 
 /** She notices when something takes over the screen. */
 async function reactToFullscreen(title: string) {
+ if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{await reactCoreFullscreen(title,coreFullscreenAdapter());}catch(error){console.warn('[helper] could not react to fullscreen:',error);}return;}
   const now = Date.now();
   // Nothing to react to. Plenty of windows report no usable title — launchers,
   // splash screens, anything mid-startup — and there is no interesting remark to
@@ -3933,6 +4529,7 @@ function reminderStates(): Record<string, ReminderState> {
 
 /** Minutes until an item is due. Negative once its time has passed. */
 function minutesUntil(item: KeptItem, now: Date, todayKey: string): number {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const value=corePolicySync<number|null>('agenda-life.minutesUntil',[item,agendaClock(now),todayKey]);return value===null?Infinity:value;}
   if (item.date > todayKey) return Number.POSITIVE_INFINITY;
   if (item.date < todayKey) return -Number.MAX_SAFE_INTEGER;
   const intoDay = now.getHours() * 60 + now.getMinutes();
@@ -3965,6 +4562,7 @@ function chaseTarget(
   minutesSinceUserSpoke: number,
   idleSeconds: number,
 ) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<{item:KeptItem;due:number}|null>('agenda-life.chaseTarget',[getKept(),agendaClock(now),todayKey,states,Number.isFinite(minutesSinceUserSpoke)?minutesSinceUserSpoke:null,idleSeconds,Date.now()]);
   // Only tasks: an event happens whether or not they are reminded of it, and
   // there is nothing for them to have done about it.
   return getKept()
@@ -3984,6 +4582,7 @@ function chaseTarget(
 }
 
 async function considerReminding(environment: ReturnType<typeof readHostEnvironment>): Promise<boolean> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedReminder(false,environment.idleSeconds);
   if (herAsleepNow()) return false;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return false;
   // Silencing only the chat prompt would leave this loop chasing them anyway,
@@ -4056,6 +4655,7 @@ async function considerReminding(environment: ReturnType<typeof readHostEnvironm
 const REPLY_TO_CHASE_MS = 20 * 60_000;
 
 function acknowledgeReminders() {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const packet=corePolicySync<any>('agenda-life.acknowledge',[agendaFacts(ownedAgendaCore()),agendaClock(zonedNow(CHAT_TIMEZONE)),Date.now()]);applyAgendaPlan(ownedAgendaCore(),packet,()=>{});sendToWindows('voice:insistence',packet.result.volume);return;}
   let states = reminderStates();
   // A reply within minutes of a chase is a reply to that chase, whether or
   // not the item had a record yet: "I finish at 4:30 and go straight after"
@@ -4118,7 +4718,15 @@ function observeAttention(environment: Environment, observation: ActivityObserva
   });
 }
 
+/** Final admission in Core; content grounding and actual publication remain synchronous in interject. */
+async function publishOwnedNudge(draft: NudgeDraft, publish: (draft: NudgeDraft) => boolean): Promise<boolean> {
+  return corePublishNudge(draft,()=>({asleep:herAsleepNow(),knockedAwake:herKnockedAwakeNow(),interjectionBlocked:Boolean(whyNotInterject()),
+    expiresAt:draft.phoneOpportunity?.expiresAt??null}),publish);
+}
+
 async function considerPipingUp(environment: ReturnType<typeof readHostEnvironment>, tickId: number) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const facts={...conversationPolicyFacts(),busy:pipingUp,lastAt:lastPipedUpAt,idleSeconds:environment.idleSeconds,vitals,feelings:getFeelings(),whyNot:whyNotInterject(),odds:sway('pipe-up',PIPE_UP_CHANCE,swayNow())};let p=corePolicySync<any>('conversation-program.pipeAdmission',[facts,[]]);if(p.draws)p=corePolicySync<any>('conversation-program.pipeAdmission',[facts,[Math.random()]]);attention.baseline(tickId,p.result.ready,p.result.blocked,p.result.reason);if(!p.result.run)return;pipingUp=true;lastPipedUpAt=p.result.at;attention.outcome(tickId,'attempted');try{const draft=await composeSpontaneousNudge(new Map());if(!draft){attention.outcome(tickId,'suppressed');return;}const accepted=await publishOwnedNudge(draft,nudge=>interject(nudge.line,{source:'idle',nudge}));attention.outcome(tickId,accepted?'accepted':'suppressed');if(accepted)void speak(draft.line,classifyEmotion(draft.line,store.get('ai.config') as ProviderConfig));}catch(error){attention.outcome(tickId,'failed');console.warn('[idle]',error instanceof Error?error.message:'failed');}finally{pipingUp=false;}return;}
+
   if (pipingUp) { attention.baseline(tickId, false, true, 'composing'); return; }
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) { attention.baseline(tickId, false, true, 'no-model'); return; }
@@ -4139,60 +4747,22 @@ async function considerPipingUp(environment: ReturnType<typeof readHostEnvironme
   // Observe the actual random decision; never draw another baseline coin flip.
   const refusal = whyNotInterject();
   attention.baseline(tickId, ready, refusal !== null, refusal ? 'interjection-gate' : null);
-  if (!ready) return;
+  if (!ready || refusal) return;
 
   pipingUp = true;
   lastPipedUpAt = Date.now();
   attention.outcome(tickId, 'attempted');
   try {
-    const now = zonedNow(CHAT_TIMEZONE);
-    const todayKey = localDateKey(now);
-    const items = getKept();
-    const statuses = items.map(item => itemStatus(item, now, todayKey));
-    // The same angles her openings use. Being left alone is not a different
-    // personality, so it should not be a different set of things to talk about.
-    const angle = pickAngle(openingAngles({
-      hour: now.getHours(),
-      irritation: mood.irritation,
-      ego: mood.ego,
-      // Only the ones she is still entitled to ask about — see chaseableOverdue.
-      overdue: chaseableOverdue(items, now, todayKey),
-      dueToday: dueTodayCount(items, statuses, todayKey, raisedRecently(herLinesLastDay(Date.now()), openItems(items, todayKey))),
-      doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
-      hasHistory: getSessions().length > 0,
-      knowsThings: getMemories().length > 0,
-      kind: 'return',
-    }));
-    const character = getActiveCharacter();
-    const system = [
-      character.identity,
-      // The weekday, same as every other prompt. Without it she is holding a
-      // date on her list and no idea where today sits against it, which is how
-      // Thursday became "tomorrow" in a line she started herself.
-      `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
-      profileSummary(''),
-      keptSummary(now),
-      character.style,
-      moodInstruction(mood.irritation),
-      egoInstruction(mood.ego),
-      'The user is at their machine but has not said anything to you for a while. You are breaking the silence yourself, unprompted.',
-      NO_ABANDON_THREAD,
-      NO_INVENTED_HISTORY,
-      unpromptedContext(),
-      'One or two short lines. Do not greet them, do not ask if they are still there, and do not point out how long it has been — you are starting a thought, not filing a complaint about being ignored.',
-      // Silent while she is a stranger, the same as the daily opener: every angle
-      // in the picker assumes a history with him — the overdue task, the
-      // callback, the unprovoked jab — and she has none.
-      blankSlateOpening(getSlate(), knownSinceSlate()) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
-    ].filter(Boolean).join(' ');
-
-    const line = await ollamaQuip(system, 'Say something.', config);
-    console.log(`[idle] piped up (angle: ${angle?.name ?? 'none'}) after ${Math.round(minutes(mood.lastMessageAt ? Date.parse(mood.lastMessageAt) : null))} quiet minutes`);
-    const emotion = classifyEmotion(line, config);
-    // Spoken only if it was also written down — see interject.
-    const accepted = interject(line, { source: 'idle' });
+    // Desktop and phone share the subject, continuity and review. Otherwise a
+    // desktop line bypasses every grounding rule on the phone's composer.
+    const draft = await composeSpontaneousNudge(new Map());
+    if (!draft) { attention.outcome(tickId, 'suppressed'); return; }
+    const accepted = await publishOwnedNudge(draft, nudge => interject(nudge.line, { source: 'idle', nudge }));
     attention.outcome(tickId, accepted ? 'accepted' : 'suppressed');
-    if (accepted) void speak(line, emotion);
+    if (accepted) {
+      console.log(`[idle] piped up about ${draft.topic}`);
+      void speak(draft.line, classifyEmotion(draft.line, config));
+    }
   } catch (error) {
     attention.outcome(tickId, 'failed');
     console.warn('[idle] could not pipe up:', error instanceof Error ? error.message : error);
@@ -4203,7 +4773,7 @@ async function considerPipingUp(environment: ReturnType<typeof readHostEnvironme
 
 function broadcastGoogleStatus() {
   const status = googleStatus(store);
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('google:changed', status);
+  sendToWindows('google:changed', status);
 }
 
 let inFlightSync: Promise<ReturnType<typeof googleStatus>> | null = null;
@@ -4217,6 +4787,7 @@ function syncFromGoogle() {
 }
 
 async function runSync() {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return performSync();
   try {
     return await performSync();
   } catch (error) {
@@ -4228,6 +4799,7 @@ async function runSync() {
 }
 
 async function performSync() {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return syncAgendaGoogle({core:ownedAgendaCore(),today:localDateKey(zonedNow(CHAT_TIMEZONE)),zone:CHAT_TIMEZONE,execute:(command,fence)=>executeGoogleCommand(store,command,fence),changed:ownedAgendaChanged});
   const status = googleStatus(store);
   if (!status.connected) throw new Error('Haru is not connected to Google Calendar.');
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
@@ -4335,8 +4907,9 @@ async function performSync() {
 // Scheduled syncs are best-effort: a laptop that was asleep or offline should
 // retry on the next tick, not surface a dialog or leave the timer dead.
 function backgroundSync() {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const admitted=corePolicySync<boolean>('agenda-google.background',[agendaFacts(ownedAgendaCore())]);if(!admitted)return;return syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));}
   if (!googleStatus(store).connected) return;
-  syncFromGoogle().catch(error => console.error('[google] background sync failed:', whyItFailed(error)));
+  return syncFromGoogle().catch(error => console.error('[google] background sync failed:', whyItFailed(error)));
 }
 
 function scheduleBackgroundSync() {
@@ -4350,6 +4923,7 @@ let lastFocusSync = 0;
 // waiting out the rest of the interval to see a change made seconds ago on a
 // phone reads as broken. Rate-limited so alt-tabbing does not sync repeatedly.
 function syncOnFocus() {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const decision=corePolicySync<any>('agenda-google.focus',[Date.now(),lastFocusSync]);if(!decision.run)return;lastFocusSync=decision.at;backgroundSync();return;}
   if (Date.now() - lastFocusSync < GOOGLE_FOCUS_SYNC_MIN_GAP_MS) return;
   lastFocusSync = Date.now();
   backgroundSync();
@@ -4369,7 +4943,7 @@ type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown }
 // rather than left to arrive implicitly through a spread, because provider.ts
 // has to translate it for the OpenAI dialect and a field nothing names is a
 // field the next person deletes.
-type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string; images?: string[] };
+type OllamaMessage = import('./provider').ChatMessage;
 
 // Ollama's default context reserves a KV cache big enough to push a 14B model
 // partly onto the CPU on a 16GB card — measured at 10 tok/s vs 54 tok/s once it
@@ -4390,31 +4964,30 @@ type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; 
  * was a quarter of it.
  */
 function historyBudgetChars(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['historyBudgetChars',store.get('ai.historyChars')??null]);
+
   const wanted = store.get('ai.historyChars');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 500 ? Math.round(wanted) : HISTORY_BUDGET_CHARS;
 }
 
 function chatNumCtx(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['chatNumCtx',store.get('ai.numCtx')??null]);
+
   const wanted = store.get('ai.numCtx');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 2048 ? Math.min(Math.round(wanted), 262144) : 8192;
 }
 
 /**
- * The context every side job on the local model runs in — the emotion
- * classifier, quips, the second thought, the diary, memory extraction, saying
- * a hosted answer as herself. One size, on purpose: Ollama keeps one runner
- * per model and context size, and the classifier at 2048 next to everything
- * else at the chat's 20480 meant a full reload on every switch — 76 reloads in
- * 22 hours on 2026-09-06, with the big runner never fitting next to Breeze on
- * the card (25 evictions, most loads with 26–31 of 34 layers on the GPU, an
- * 8–21 s wait for a face). The prompts those jobs actually sent were at most
- * 5,986 tokens; 8192 holds them all in one runner that stays resident. Only the
- * conversation itself — the local brain answering when the hosted one cannot —
- * asks for the chat's full context, and pays one reload for it.
+ * Default window for separate side-job models. Requests sharing the chat
+ * model are aligned to chatNumCtx at the provider boundary. Switching the
+ * same 27B model between 8192 and 20480 cost about 8 seconds PER switch on
+ * 2026-09-29, including the mood check immediately following every reply.
  */
 const SIDE_NUM_CTX = 8192;
 
 function sideNumCtx(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['sideNumCtx',store.get('ai.numCtx')??null]);
+
   return Math.min(chatNumCtx(), SIDE_NUM_CTX);
 }
 // How long the local model is kept resident after a request. Without this, an
@@ -4451,6 +5024,8 @@ const AWAY_MAX_TOKENS = 240;
 const AWAY_TURNS = 40;
 
 function awayTurns(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['awayTurns',store.get('ai.turns')??null]);
+
   const wanted = store.get('ai.turns');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 8 ? Math.round(wanted) : AWAY_TURNS;
 }
@@ -4465,6 +5040,8 @@ function awayTurns(): number {
 const AWAY_MEMORY_SCALE = 0.6;
 
 function awayMemoryScale(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['awayMemoryScale',store.get('ai.memoryScale')??null]);
+
   const wanted = store.get('ai.memoryScale');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 0.2 && wanted <= 1 ? wanted : AWAY_MEMORY_SCALE;
 }
@@ -4478,6 +5055,8 @@ function awayMemoryScale(): number {
 const SUMMARY_DAYS = 7;
 
 function summaryDays(): number {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<number>('contextDefault',['summaryDays',store.get('ai.summaryDays')??null]);
+
   const wanted = store.get('ai.summaryDays');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 1 && wanted <= 60 ? Math.round(wanted) : SUMMARY_DAYS;
 }
@@ -4495,7 +5074,9 @@ function keptSummary(now: Date) {
  * see vocabulary.ts. Built per take rather than cached: it is a few string
  * scans, and the conversation it reads from changes with every message.
  */
+function coreHearing(op:string,args:unknown[]){return applyCoreHearing(op,args,remainingStore(app.getPath('userData')));}
 function wordsToListenFor(): string[] {
+ if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync('speech-context.listen',[getActiveCharacter().identity,getProfile(),readHearing(store.get('hearing')),getWhereabouts().places,getKept(),store.get('chat.messages')??[]]);
   const herName = herNameFrom(getActiveCharacter().identity);
   const chat = ((store.get('chat.messages') as { content?: string }[] | undefined) ?? []).slice(-40).map(message => message.content ?? '');
   return spokenVocabulary({
@@ -4510,7 +5091,10 @@ function wordsToListenFor(): string[] {
   });
 }
 
+function coreMemoryAdmin(action:string,args:Record<string,unknown>={}){return runCoreMemoryAdmin(action,args,{core:remainingStore(app.getPath('userData')),sources:()=>blockSources(''),publish:events=>memoryStore.notifyCommitted(events)});}
+
 function getProfile(): Profile {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.profile',[store.get('profile')]);
   const saved = store.get('profile') as Partial<Profile> | undefined;
   return { nickname: saved?.nickname ?? '', occupation: saved?.occupation ?? '', about: saved?.about ?? '' };
 }
@@ -4564,6 +5148,7 @@ async function syncVaultAndRetire(): Promise<void> {
 }
 
 function retireGoneVaultBullets(): void {
+ if(process.env.HARU_CORE_KNOWLEDGE==='on'){retireCoreVaultMemories(knowledge.vaultPath(),{core:remainingStore(app.getPath('userData')),publish:events=>memoryStore.notifyCommitted(events)});return;}
   const vault = knowledge.vaultPath();
   if (!vault) return;
   const admitted = readAdmitted(store.get('vault.admitted'));
@@ -4608,8 +5193,9 @@ const reindexKnowledge = knowledge.reindex;
 
 const memoryStore = createMemoryStore({
   store,
-  broadcast: (channel, payload) => { for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload); },
+  broadcast: (channel, payload) => { sendToWindows(channel, payload); },
   embedder: getKnowledgeEmbedder,
+  embeddingTiming: event => console.log(`[query-embedding-timing] ${JSON.stringify(event)}`),
   character: getCharacter,
   profile: getProfile,
   following: () => Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
@@ -4637,20 +5223,17 @@ const memoryStore = createMemoryStore({
       // Right behind the night, not at the tail: the block is cut from the
       // end when it is over budget, and this is the line that answers "what
       // chapter are you up to".
-      readingNote(readReading(store.get('her.reading'))),
+      workWorld.prompt(),
       // His shelf beside hers: where he is up to, and the spoiler line (suwayomi.ts).
       hisReadingLine(),
       // What she did with her own hands lately (herhands.ts), so it is hers to bring up.
       handsNote(readHands(store.get('her.hands')), Date.now(), iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso))), today),
-      // Her own game: where the run stands, read off the game (pokemon.ts).
-      runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null),
       dayNote(getDays(), today),
       weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
       projectsNote(getProjects(), Date.now()),
       // Her body in the game, one line, only when there is something to say.
-      minecraftNote(minecraft?.lastSeen ?? null, minecraft?.connected ?? false),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
@@ -4661,8 +5244,9 @@ const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes
 // The vault-memory seam from above, now that the memory store exists: vault
 // pages are admitted exactly like things she was told, but marked explicit so
 // they are never treated as guesses.
-let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
+let admitVaultMemory: ((draft: { id?: string; text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
 admitVaultMemory = draft => {
+ if(process.env.HARU_CORE_KNOWLEDGE==='on'){const plan=corePolicySync<any>('knowledge-flow.admit',[draft,getSlate(),knownSinceSlate(),Date.now()]);if(Object.hasOwn(plan,'result'))return plan.result;const observed=addMemory(plan.text,plan.kind,plan.subject,plan.extra);return corePolicySync('knowledge-flow.admissionResult',[observed]);}
   // Not while she is a stranger. His pages are the one part of her record a reset
   // cannot take — they are his, and the sync re-reads them every hour — so a
   // minute after the wipe they put fifteen facts about him back in her head and
@@ -4672,7 +5256,7 @@ admitVaultMemory = draft => {
   // half that becomes a memory of hers.
   if (blankSlateInstruction(getSlate(), knownSinceSlate())) return null;
   // A resighting: the same line on the same page is not him saying it again.
-  const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit', resighting: true });
+  const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit', resighting: true, id: draft.id, evidenceDetail: 'vault: standing page ' + (draft.id ?? '') });
   // A refused bullet used to reach the tally as a repeat, so a page whose lines
   // were all being thrown away read as a page already known: "Preferences.md: 5
   // bullet(s), +0 ~5 repeated", every hour, while three of the five were dropped.
@@ -4691,6 +5275,7 @@ type SystemConfig = { enabled: boolean; level: 1 | 2 | 3 | 4; allowlist: string[
 const DEFAULT_SYSTEM_CONFIG: SystemConfig = { enabled: true, level: 2, allowlist: ['restart_docker_container', 'start_service', 'stop_service', 'restart_haru'] };
 
 function readSystemConfig(): SystemConfig {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-system.config',[store.get('system.config')??null]);
   const saved = store.get('system.config') as Partial<SystemConfig> | undefined;
   if (!saved || typeof saved !== 'object') return DEFAULT_SYSTEM_CONFIG;
   const level = saved.level === 4 ? 4 : saved.level === 3 ? 3 : saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
@@ -4702,6 +5287,7 @@ function readSystemConfig(): SystemConfig {
 }
 
 function readSystemEvents(): { enabled: boolean; sampleSeconds: number; minGapMinutes: number; thresholds: EventThresholds } {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-system.events',[store.get('system.events')??null]);
   const saved = store.get('system.events') as Partial<{ enabled: boolean; sampleSeconds: number; minGapMinutes: number; thresholds: EventThresholds }> | undefined;
   const sampleSeconds = typeof saved?.sampleSeconds === 'number' ? Math.max(10, Math.min(300, Math.round(saved.sampleSeconds))) : 30;
   const minGapMinutes = typeof saved?.minGapMinutes === 'number' ? Math.max(1, Math.min(240, Math.round(saved.minGapMinutes))) : 15;
@@ -4735,7 +5321,8 @@ async function sampleSystem() {
   if (systemCollecting) return;
   systemCollecting = true;
   try {
-    if (!readSystemConfig().enabled || !readSystemEvents().enabled) return;
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on'){if(!corePolicySync<any>('final-system.sampleStart',[readSystemConfig(),readSystemEvents()]).collect)return;}
+    else if (!readSystemConfig().enabled || !readSystemEvents().enabled) return;
     const [light, gpu, docker, gpuApps] = await Promise.all([
       collectSystem(),
       collectGpu(),
@@ -4743,9 +5330,13 @@ async function sampleSystem() {
       collectGpuApps(),
     ]);
     const sample = sampleFromCollectors({ ...light, gpu, docker, gpuApps, processes: [], services: [] }, new Date());
-    systemSamples.push(sample);
-    if (systemSamples.length > 8) systemSamples = systemSamples.slice(-8);
-    if (++systemSampleCount % SAMPLES_WRITTEN_EVERY === 0) store.set('system.samples', systemSamples);
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+      const p=corePolicySync<{samples:SystemSample[];count:number;write:boolean}>('final-system.sampleObserved',[systemSamples,systemSampleCount,sample]);systemSamples=p.samples;systemSampleCount=p.count;if(p.write)store.set('system.samples',p.samples);
+    }else{
+      systemSamples.push(sample);
+      if (systemSamples.length > 8) systemSamples = systemSamples.slice(-8);
+      if (++systemSampleCount % SAMPLES_WRITTEN_EVERY === 0) store.set('system.samples', systemSamples);
+    }
     const events = readSystemEvents();
     const fired = checkEvents(systemSamples, events.thresholds, new Date(), events.minGapMinutes * 60_000, systemLastFired);
     if (fired.length) store.set('system.lastFired', systemLastFired);
@@ -4761,6 +5352,12 @@ async function sampleSystem() {
 }
 
 async function runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+   const c=corePolicySync<{file:string;args:string[];timeoutMs:number}>('final-system.commandStart',[file,args]);
+   const observation=await new Promise<{error:string|null;stderr:string}>(resolve=>execFile(c.file,c.args,{timeout:c.timeoutMs},(error,_stdout,stderr)=>resolve({error:error?.message??null,stderr:String(stderr)})));
+   return corePolicySync('final-system.commandResult',[observation.error,observation.stderr]);
+ }
+
   return new Promise(resolve => {
     execFile(file, args, { timeout: 30_000 }, (error, _stdout, stderr) => {
       if (error) resolve({ ok: false, error: String(stderr || error.message || '').slice(0, 300) });
@@ -4778,6 +5375,13 @@ async function runSystemCommand(file: string, args: string[]): Promise<{ ok: boo
  * prompt rather than left behind a tool. The tools stay for follow-ups.
  */
 async function systemContextFor(message: string): Promise<string> {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+  const p=corePolicySync<any>('final-system.contextStart',[message,readSystemConfig().enabled]);if('result' in p)return p.result;
+  const c=p.command;
+  const [light,gpu,docker,services,processes]=await Promise.all([c.light?collectSystem():null,c.gpu?collectGpu():null,c.docker?collectDocker():null,c.services?collectServices():null,c.processes===null?null:collectProcesses(c.processes)]);
+  return corePolicySync('final-system.contextObserved',[{light,gpu,docker,services,processes}]);
+ }
+
   if (!readSystemConfig().enabled || !message) return '';
   const text = message.toLowerCase();
   const gpu = /(vram|gpu|graphic|video memory)/.test(text);
@@ -4822,6 +5426,7 @@ const DEFAULT_CHARACTER = {
 // Blank fields fall back to the defaults rather than leaving Haru with no
 // persona at all, so clearing a box in the drawer cannot silently neuter it.
 function getCharacter() {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync<{identity:string;style:string}>('memory-admin.character',[store.get('character')]);
   const saved = store.get('character') as Partial<typeof DEFAULT_CHARACTER> | undefined;
   return {
     identity: saved?.identity?.trim() || DEFAULT_CHARACTER.identity,
@@ -4836,6 +5441,7 @@ function getCharacter() {
  * baked in permanently.
  */
 function getActiveCharacter() {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync<{identity:string;style:string}>('memory-admin.activeCharacter',[store.get('character'),getSlate(),knownSinceSlate(),Date.now()]);
   const character = getCharacter();
   // The overlay this function was always for. While she is a stranger the slate
   // has to argue at the persona's own altitude rather than from a block below it
@@ -4848,7 +5454,7 @@ function getActiveCharacter() {
 /** The slate left by the last reset, or nothing. See blankslate.ts. */
 function getSlate(): BlankSlate | null {
   const saved = store.get('her.slate') as Partial<BlankSlate> | undefined;
-  return typeof saved?.at === 'string' && saved.at ? { at: saved.at } : null;
+  return readSlate({ slate: saved });
 }
 
 /**
@@ -4865,13 +5471,15 @@ function getSlate(): BlankSlate | null {
  * caller of this number meant before there was a reset at all.
  */
 function knownSinceSlate(): number {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.known',[getSlate(),getMemories()]);
   const slate = getSlate();
   const memories = getMemories();
   if (!slate) return memories.length;
   const after = Date.parse(slate.at);
   if (!Number.isFinite(after)) return memories.length;
   return memories.filter(memory => {
-    if (memory.source === 'explicit') return false;
+    if (memory.evidence?.some(entry => entry.detail?.startsWith('vault:'))) return false;
+    if (memory.supersededBy || memory.status === 'archived') return false;
     const born = Date.parse(memory.createdAt ?? '');
     return Number.isFinite(born) && born >= after;
   }).length;
@@ -4896,7 +5504,9 @@ function knownSinceSlate(): number {
  * followed this reset yet" is a comparison that cannot drift with the clocks.
  */
 function resetHer({ body = false, at = new Date().toISOString() }: { body?: boolean; at?: string } = {}): { at: string; body: boolean; backups: number } {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return runCoreMemoryReset(body,at,{core:remainingStore(app.getPath('userData')),store,roots:{home:app.getPath('home'),userData:app.getPath('userData')},publishSchedule:()=>{if('updateMirror' in scheduler)scheduler.updateMirror(store.getSchedule());},renderGraph:graph=>renderGraphPage(graph,new Date()).text,exists:existsSync,move:renameSync,write:(file,text)=>writeFileSync(file,text,'utf8'),join:path.join});
   const backups = store.backup(body ? 'body-clear' : 'reset');
+  store.transaction(() => {
   store.setMemories([]);
   store.setSessions([]);
   store.setMonthNotes([]);
@@ -4921,6 +5531,10 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
   // starts at nothing because it is the thing he has to earn back. Only on a
   // reset — a limb clearing its own files has had nothing happen to it.
   if (!body) store.set('vitals', { ...DEFAULT_VITALS, ...STRANGER_VITALS });
+  store.resetMemoryAssets();
+  if (!body) store.set('her.slate', { at });
+  });
+  if('updateMirror' in scheduler)scheduler.updateMirror(store.getSchedule());
   // The rest of her record is files rather than keys, and a file left where it
   // is outlives the wipe. Each one is moved aside under a dated name rather than
   // deleted — still his to open, no longer hers to read back as a life she
@@ -5022,6 +5636,12 @@ type Mood = { /** His first apology was not enough; the next one is (dice.ts). *
   diaryDay?: string };
 
 function getMood(): Mood {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on'){
+    const raw=store.get('mood')??null,result=corePolicySync<any>('mood.normalize',[raw]);
+    if(result.backup){try{copyFileSync(path.join(app.getPath('userData'),'config.json'),path.join(app.getPath('userData'),`config.json.before-mood-scale-${new Date().toISOString().replace(/[:.]/g,'-')}`));}catch{}}
+    if(result.write)store.transaction(()=>{if(JSON.stringify(store.get('mood')??null)!==JSON.stringify(raw))throw Error('core_mood_state_changed');store.set('mood',result.persisted);});
+    return result.view;
+  }
   let saved = store.get('mood') as (Partial<Mood> & { scale?: number }) | undefined;
   // Saved before 2026-09-19, on 0–9 / 0–8 / 0–30: brought onto 0–100 once, with
   // the file as it was kept beside it (mood.ts rescaleOldMood).
@@ -5052,6 +5672,8 @@ function getTraits(): Traits {
 }
 
 function getMonthHistory(): MonthSignals[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.monthHistory',[remainingStore(app.getPath('userData')).get('config',{})]);
+
   const saved = store.get('her.months') as MonthSignals[] | undefined;
   return Array.isArray(saved) ? saved : [];
 }
@@ -5061,12 +5683,16 @@ function getMonthHistory(): MonthSignals[] {
 type MonthTally = { month: string; hurtEvents: number; apologies: number; woundUp: number };
 
 function getMonthTally(): MonthTally {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.monthTally',[remainingStore(app.getPath('userData')).get('config',{}),currentChatDayKey()]);
+
   const month = currentChatDayKey().slice(0, 7);
   const saved = store.get('her.monthTally') as MonthTally | undefined;
   return saved && saved.month === month ? { ...saved, woundUp: saved.woundUp ?? 0 } : { month, hurtEvents: 0, apologies: 0, woundUp: 0 };
 }
 
 function tallyMonth(what: 'hurt' | 'apology' | 'wound-up') {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){conversationApply(corePolicySync<any>('conversation-program.growth',['tally',remainingStore(app.getPath('userData')).get('config',{}),{},currentChatDayKey(),what]));return;}
+
   const tally = getMonthTally();
   store.set('her.monthTally', {
     ...tally,
@@ -5082,6 +5708,8 @@ function tallyMonth(what: 'hurt' | 'apology' | 'wound-up') {
  * Nothing she said is in it — see growth.ts on why that matters.
  */
 function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.monthSignals',[store.getArchive(),month,tally??null]);
+
   const archive = store.getArchive() as Record<string, { role?: string; content?: string; at?: string }[]>;
   const days = Object.entries(archive).filter(([day]) => day.slice(0, 7) === month);
   if (!days.length) return null;
@@ -5113,6 +5741,8 @@ function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
  * so any of it can be put back (his call, 2026-09-19).
  */
 function growAtFold(month: string) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){conversationApply(corePolicySync<any>('conversation-program.growth',['fold',remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),currentChatDayKey(),month]));return;}
+
   const history = getMonthHistory();
   if (history.some(one => one.month === month)) return;
   const now = monthSignals(month, getMonthTally());
@@ -5134,11 +5764,15 @@ function growAtFold(month: string) {
  * Only what is worse than this counts against him (grudge.ts).
  */
 function ordinaryHanging(): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<number>('conversation-program.ordinaryHanging',[remainingStore(app.getPath('userData')).get('config',{})]);
+
   return normFrom(getMonthHistory())?.hangingPerDay ?? 0;
 }
 
 /** The months before growth existed, read off the archive once so she has a norm. */
 function backfillMonths() {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){conversationApply(corePolicySync<any>('conversation-program.growth',['backfill',remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),currentChatDayKey()]));return;}
+
   if (getMonthHistory().length) return;
   const archive = store.getArchive() as Record<string, unknown>;
   const months = [...new Set(Object.keys(archive).map(day => day.slice(0, 7)))].sort();
@@ -5155,6 +5789,8 @@ function backfillMonths() {
  * compile.ts exists to settle.
  */
 function herBehaviour(): Candidate[] {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on')return corePolicySync<any>('context-preparation.herBehaviour',[getMood(),getTemperament(),getTraits(),getFeelings()]);
+
   const mood = getMood();
   const temperament = getTemperament();
   const traits = getTraits();
@@ -5196,6 +5832,17 @@ const QUIET_ROOM_MS = 30 * 60_000;
 
 /** What time does to them, every few minutes of her waking day. A night is not a silence. */
 function passFeelings(now: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_FEELINGS==='on'){
+    const feelings=getFeelings(),mood=getMood(),passedAt=feelingsPassedAt,jealousAt=jealousOfScreenAt,machineAt=machineCheckedAt;
+    const facts={...publicationSnapshot(),now,feelings,mood,passedAt,jealousAt,machineAt,ownTimeAt:herOwnTimeAt,
+      activityKind:currentActivity?.kind,messages:store.get('chat.messages')??[],socialDraw:Math.random(),diskDraw:Math.random(),diskGb:null as number|null};
+    let decision=corePolicySync<any>('feelings.tick',[facts]);
+    if(decision.checkMachine){try{const room=statfsSync(app.getPath('userData'));facts.diskGb=room.bavail*room.bsize/2**30;}catch{}
+      decision=corePolicySync<any>('feelings.tick',[facts]);}
+    if(decision.write)store.transaction(()=>{if(JSON.stringify(getFeelings())!==JSON.stringify(feelings)||JSON.stringify(getMood())!==JSON.stringify(mood)
+      ||feelingsPassedAt!==passedAt||jealousOfScreenAt!==jealousAt||machineCheckedAt!==machineAt)throw Error('core_feelings_state_changed');store.set('her.feelings',decision.feelings);});
+    feelingsPassedAt=decision.passedAt;if(decision.write){machineCheckedAt=decision.machineAt;jealousOfScreenAt=decision.jealousAt;}return;
+  }
   if (herAsleepNow()) { feelingsPassedAt = now; return; }
   if (now - feelingsPassedAt < FEELINGS_EVERY_MS) return;
   const minutes = (now - feelingsPassedAt) / 60_000;
@@ -5242,6 +5889,8 @@ let machineCheckedAt = 0;
 const LONG_SILENCE_MINUTES = 4 * 60;
 
 function getMute(): MuteState | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.getMute',[remainingStore(app.getPath('userData')).get('config',{})]);
+
   const saved = store.get('mute') as MuteState | undefined;
   return saved && typeof saved.until === 'number' ? saved : null;
 }
@@ -5252,6 +5901,8 @@ function getMute(): MuteState | null {
  * (mute.ts); this is where the decision meets her actual state and is kept.
  */
 function muteTurn(latest: string): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const facts={...conversationPolicyFacts(),vitals,feelings:getFeelings(),muteLean:muteLean(getTemperament()?.kind),fuse:fuseOf(getTraits())};let p=corePolicySync<any>('conversation-program.mute',[facts,latest,[]]);if(p.draws)p=corePolicySync<any>('conversation-program.mute',[facts,latest,Array.from({length:p.draws},()=>Math.random())]);conversationApply(p);for(const event of p.events){if(event.kind==='vitals')nudgeVitals(event.event);else if(event.kind==='feel')feelNow(event.event);else throw Error('core_conversation_event_protocol');}sendToWindows('mood:changed',getMood());return p.result;}
+
   const now = Date.now();
   const mood = getMood();
   const state = getMute();
@@ -5281,16 +5932,34 @@ function muteTurn(latest: string): string {
 }
 
 function setMood(mood: Mood) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.mergeMood',[remainingStore(app.getPath('userData')).get('config',{}),getMood(),mood]);conversationApply(p);sendToWindows('mood:changed',p.result);return;}
+
   // Merged over what is kept: the patience callers rewrite is the moment's,
   // the grudge underneath it is not theirs to drop.
   store.set('mood', { ...getMood(), ...mood });
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('mood:changed', mood);
+  sendToWindows('mood:changed', mood);
 }
 
 // Works out where her patience stands for this message: cool off for time away,
 // then move for what was actually said. Returns the level the reply is generated
 // under, so the same number drives both the prompt and the ignore decision.
 function advanceMood(latest: string, history: { role?: string; content?: string }[]) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on'){
+    const mood=getMood(),feelings=getFeelings(),month=getMonthTally(),screenAt=jealousOfScreenAt;
+    const decision=corePolicySync<any>('mood.advance',[{mood,latest,history,now:Date.now(),day:currentChatDayKey(),
+      fuse:fuseOf(getTraits()),prefs:getPush().prefs,local:zonedNow(CHAT_TIMEZONE),temperament:getTemperament(),
+      jealousOfScreenAt:screenAt,draws:[Math.random(),Math.random()],returnDraw:Math.random()}]);
+    store.transaction(()=>{
+      if(JSON.stringify(getMood())!==JSON.stringify(mood)||JSON.stringify(getFeelings())!==JSON.stringify(feelings)
+        ||JSON.stringify(getMonthTally())!==JSON.stringify(month)||jealousOfScreenAt!==screenAt)throw Error('core_mood_state_changed');
+      for(const event of decision.feelingEvents)feelNow(event);
+      for(const tally of decision.tallies)tallyMonth(tally);
+      setMood(decision.patch);
+    });
+    jealousOfScreenAt=decision.jealousOfScreenAt;
+    for(const event of decision.vitalEvents)nudgeVitals(event);
+    return decision.result;
+  }
   const mood = getMood();
   const minutesAway = mood.lastMessageAt ? (Date.now() - new Date(mood.lastMessageAt).getTime()) / 60_000 : 0;
   const fuse = fuseOf(getTraits());
@@ -5298,31 +5967,16 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   const ego = afterEgoCooldown(mood.ego, minutesAway);
   const at = new Date().toISOString();
 
-  // Coming back after signing off outranks saying goodnight twice: the second
-  // "night" is them still here, which is the thing worth being arsed about.
+  // A fresh sign-off closes the current exchange, even if they said goodnight earlier.
   const today = currentChatDayKey();
   const alreadySaidGoodnight = mood.goodnightDay === today;
-  const goodnight: 'said' | 'after' | 'none' = alreadySaidGoodnight ? 'after' : isGoodnight(latest) ? 'said' : 'none';
+  const goodnight: 'said' | 'after' | 'none' = isGoodnight(latest) ? 'said' : alreadySaidGoodnight ? 'after' : 'none';
   const goodnightDay = goodnight === 'said' ? today : mood.goodnightDay;
 
-  // Being shouted at outlasts the message that caused it: she withholds an
-  // answer until it is acknowledged, so the flag has to persist across turns.
-  let shout = shoutState(latest, Boolean(mood.awaitingApology));
-  // An apology usually lands; hurt, a standing grudge or a bad day can make the
-  // first one not enough (dice.ts). Once: the second always does, so making him
-  // mean it is a beat and never a wall.
-  if (shout === 'forgiven' && !mood.apologyRefused) {
-    const odds = apologyOdds({ ...swayNow(), grudge: mood.grudge ?? 0 });
-    if (Math.random() >= odds) { shout = 'unmoved'; feelNow('stood-ground'); console.log(`[mood] he apologised and it was not enough yet (odds were ${odds.toFixed(2)})`); }
-  }
-  const awaitingApology = shout === 'shouted' || shout === 'awaiting' || shout === 'unmoved';
-
-  if (isIgnoring(irritation)) {
-    // Already stonewalling: this attempt only counts as wearing her down.
-    irritation = afterPoke(irritation);
-    setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology });
-    return { irritation, ego, goodnight, shout };
-  }
+  // Irritation affects tone, not access to an answer. Retire legacy refusal flags
+  // in this same durable interaction update; retain emotional history.
+  const shout = shoutState(latest, false);
+  const awaitingApology = false;
 
   const previousUser = [...history].reverse().find(message => message.role === 'user')?.content?.trim().toLowerCase();
   const repeated = previousUser !== undefined && previousUser === latest.trim().toLowerCase();
@@ -5370,7 +6024,7 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   if (paid) console.log(`[grudge] an apology taken — grudge ${mood.grudge ?? 0} -> ${grudgeAfterApology(mood.grudge ?? 0)}`);
   // How often he winds her up is what months of it do to her fuse (growth.ts).
   if (irritation >= IRRITATION.voiced && mood.irritation < IRRITATION.voiced) tallyMonth('wound-up');
-  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, apologyRefused: shout === 'unmoved' ? true : shout === 'forgiven' ? false : mood.apologyRefused, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
+  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, apologyRefused: false, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
   return { irritation, ego, goodnight, shout };
 }
 
@@ -5389,6 +6043,12 @@ let listError = '';
  * they were watching half an hour ago beats knowing nothing.
  */
 async function refreshAniList(force = false) {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const config=readAniListConfig(store.get('anilist')),decision=corePolicySync<any>('final-anilist.cache',[config,Date.now(),listFetchedAt,force]);
+    if(decision.clear){cachedList=[];listError='';return;}if(!decision.refresh)return;
+    try{cachedList=await userList(config.username,net.fetch);listFetchedAt=Date.now();listError='';}catch(error){listError=error instanceof Error?error.message:String(error);listFetchedAt=Date.now();}return;
+  }
+
   const config = readAniListConfig(store.get('anilist'));
   if (!config.enabled || !config.username) { cachedList = []; listError = ''; return; }
   if (!force && Date.now() - listFetchedAt < ANILIST_TTL_MS) return;
@@ -5406,6 +6066,11 @@ async function refreshAniList(force = false) {
 
 /** Their list as a prompt line, kicking off a refresh when it has gone stale. */
 function aniListSummary() {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const decision=corePolicySync<any>('final-anilist.cache',[readAniListConfig(store.get('anilist')),Date.now(),listFetchedAt,false]);
+    if(!decision.context)return '';if(decision.refresh)void refreshAniList();return formatList(cachedList);
+  }
+
   const config = readAniListConfig(store.get('anilist'));
   if (!config.enabled || !config.username) return '';
   if (Date.now() - listFetchedAt >= ANILIST_TTL_MS) void refreshAniList();
@@ -5424,6 +6089,7 @@ function aniListSummary() {
  * and is dropped rather than colouring a conversation already underway.
  */
 function readFreshStart(messages: { role: string }[]): FreshStart | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const packet=corePolicySync<any>('agenda-life.freshStart',[agendaFacts(ownedAgendaCore()),messages]);applyAgendaPlan(ownedAgendaCore(),packet,()=>{});return packet.result;}
   const marker = store.get('chat.freshStart') as FreshStart | undefined;
   if (!marker) return null;
   if (messages.some(message => message.role === 'assistant')) {
@@ -5457,6 +6123,7 @@ const OPENING_MIN_GAP_MS = 20 * 60_000;
  * said unprompted — so an opening can be told what she has already raised.
  */
 function herLinesLastDay(nowMs: number): string[] {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<string[]>('agenda-life.herLinesLastDay',[ownedAgendaCore().get('config',{}),store.getArchive(),getAsides(),currentChatDayKey(),nowMs]);
   const since = nowMs - 24 * 3_600_000;
   type Line = { role?: string; content?: string; at?: string };
   const hers = (entries: Line[]) => entries
@@ -5480,11 +6147,13 @@ function herLinesLastDay(nowMs: number): string[] {
  *  ones are staleItemNamed's business, and matching against them only
  *  lengthens the list of things she is told not to say. */
 function openItems(items: KeptItem[], todayKey: string): KeptItem[] {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<number[]>('agenda-life.openIndices',[items,todayKey]).map(i=>items[i]);
   return items.filter(item => !item.done && item.date >= todayKey);
 }
 
 /** What is due today that she has not already brought up herself. */
 function dueTodayCount(items: KeptItem[], statuses: ItemStatus[], todayKey: string, raised: KeptItem[]): number {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<number>('agenda-life.dueTodayCount',[items,statuses,todayKey,raised.map(i=>items.indexOf(i))]);
   return items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now') && !raised.includes(item)).length;
 }
 
@@ -5492,6 +6161,7 @@ function dueTodayCount(items: KeptItem[], statuses: ItemStatus[], todayKey: stri
 const AT_THE_DESK_SECONDS = 300;
 
 async function composeOpening(): Promise<string | null> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedComposeOpening();
   if (herAsleepNow()) return null;
   // Said goodnight, then a restart: the desk asked for an opening and got one
   // thirteen minutes before her bedtime (2026-09-06). She has logged off.
@@ -5527,7 +6197,7 @@ async function composeOpening(): Promise<string | null> {
   // which then sat at the top of the day as something she had said to them.
   // With no sign of them being up and nobody at the machine, a rolled day
   // opens nothing; the first word of the day is theirs.
-  if (kind === 'fresh' && fresh?.reason === 'daily' && !invited && !theyAreUpNow() && powerMonitor.getSystemIdleTime() >= AT_THE_DESK_SECONDS) {
+  if (kind === 'fresh' && fresh?.reason === 'daily' && !invited && !theyAreUpNow() && (process.env.HARU_CORE_BRAIN_WORKER === 'on' || powerMonitor.getSystemIdleTime() >= AT_THE_DESK_SECONDS)) {
     console.log('[chat] no opening — the day rolled over, but they are not up yet');
     return null;
   }
@@ -5661,13 +6331,11 @@ function availableTools(turn: TurnContext): ToolAvailability {
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
     mangaShelf: mangaShelfLink() !== null,
-    pokemon: pokemonLink() !== null,
-    manga: mangaLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: turn.handsAllowed(),
-    desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
+    pictures: explicitModeNow(),
+    desktop: process.env.HARU_CORE_BRAIN_WORKER === 'on' ? {launch:false,power:false} : supportedDesktop(readDesktopConfig(store.get('desktop'))),
     knockedAwake: herKnockedAwakeNow(),
-    minecraft: minecraft !== null,
     anime: animeLink() !== null,
   };
 }
@@ -5695,6 +6363,11 @@ function refreshConfigurationNote() {
  */
 const shellGate = new ShellGate();
 function shellLink(): ToolDeps['shell'] {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    if(!corePolicySync<boolean>('final-shell.available',[readSystemConfig(),store.get('system.config')??null,os.homedir()]))return null;
+    return {run:input=>runCoreShell(input,{core:remainingStore(app.getPath('userData')),system:readSystemConfig,home:os.homedir(),run:runCommand,ledger:text=>{const dir=path.join(os.homedir(),'.config','haru');mkdirSync(dir,{recursive:true});appendFileSync(path.join(dir,'shell.log'),text);}})};
+  }
+
   const system = readSystemConfig();
   const shell = readShellConfig(store.get('system.config'));
   if (!system.enabled || system.level < 3 || !shell.enabled) return null;
@@ -5705,7 +6378,7 @@ function shellLink(): ToolDeps['shell'] {
         console.log(`[shell] refused "${command.slice(0, 80)}" — ${refused}`);
         return { error: `Refused: ${refused}. Say so plainly, and do not look for another way round it.` };
       }
-      const verdict = shellGate.consider({ command, said, door, now: Date.now() });
+      const verdict = shellGate.consider({ command, said, door, now: Date.now(), diagnostics: readSystemConfig().level === 4 });
       if (!verdict.run) return { confirm: true, command, note: verdict.note };
       const ran = await runCommand(command, shell);
       const at = new Date().toISOString();
@@ -5738,6 +6411,7 @@ function downloadsLink(): Downloads | null {
     fetch: (url, init) => net.fetch(url, init),
     known: () => {
       const saved = store.get('anime.fetches');
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.readFetches',[saved??null]);
       return Array.isArray(saved)
         ? saved.filter((item): item is { title: string; infoHash?: string } => !!item && typeof item === 'object' && typeof (item as { title?: unknown }).title === 'string')
         : [];
@@ -5752,6 +6426,11 @@ function downloadsLink(): Downloads | null {
  * the next turn.
  */
 function claudeSessions(): ToolDeps['claude'] {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    if(!readClaudeCodeConfig(store.get('claudeCode')).enabled)return null;
+    return coreSessionLink({core:remainingStore(app.getPath('userData')),home:os.homedir(),dirs:LOCAL_DIRS,systemdRun:existsSync('/usr/bin/systemd-run')?'/usr/bin/systemd-run':null,sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms)),run:(file,args,options)=>new Promise(resolve=>{execFile(file,args,{cwd:options.cwd,timeout:options.timeoutMs,maxBuffer:16*1024*1024},(error,stdout,stderr)=>resolve({ok:!error,stdout:String(stdout??''),stderr:String(stderr??error?.message??'')}));})});
+  }
+
   const config = readClaudeCodeConfig(store.get('claudeCode'));
   if (!config.enabled) return null;
   const host: SessionHost = {
@@ -5795,6 +6474,8 @@ function toolDeps(turn: TurnContext): ToolDeps {
     store,
     getCheckIns, setCheckIns,
     getJournal, writeJournal,
+    memoryTool:(name,args,message)=>runCoreMemoryTool(name,args,message,{core:remainingStore(app.getPath('userData')),sources:()=>blockSources(''),publish:events=>memoryStore.notifyCommitted(events)}),
+    userRecord: (action,args)=>coreUserRecord(action,args),
     noteJournalAsked: (date: string) => { journalAskedOn = date; },
     getKept, addKeptItem, toggleKept, removeKept, updateKept,
     getMemories, setMemories, addMemory,
@@ -5812,7 +6493,7 @@ function toolDeps(turn: TurnContext): ToolDeps {
     setPendingChoices: turn.setPendingChoices,
     requestRestart: turn.requestRestart,
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
-    goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
+    goBackToSleep: input => goBackToSleep(supplementOwned()?supplement('sleepInput',[input]):{ pointless: true, block: input.block, why: 'her call' }),
     booking: { book: bookFollowUp },
     chats: { search: searchOldChats },
     // Claude Code sessions he picks up in the Claude app (claudesession.ts).
@@ -5823,10 +6504,6 @@ function toolDeps(turn: TurnContext): ToolDeps {
     shell: shellLink(),
     // His manga, fetched at his word (suwayomi.ts).
     mangaShelf: mangaShelfLink(),
-    // Her Game Boy (pokemon.ts).
-    pokemon: pokemonDeps(),
-    // Her own reading, now (manga.ts).
-    manga: mangaLink(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
@@ -5837,12 +6514,22 @@ function toolDeps(turn: TurnContext): ToolDeps {
     hostedModels: async route => {
       const config = store.get(`ai.${route}`) as ProviderConfig | undefined;
       if (!config?.endpoint || !config.provider) return null;
+      // A local Ollama lists its models on its own endpoint, not OpenAI's /models.
+      if (config.provider === 'ollama') {
+        try { return await ollamaTags(config.endpoint); } catch (error) {
+          console.warn(`[self] could not list the ${route} route's models:`, error instanceof Error ? error.message : error);
+          return null;
+        }
+      }
       try { return await openAIModels(config.endpoint, config.provider as Provider); } catch (error) {
         console.warn(`[self] could not list the ${route} route's models:`, error instanceof Error ? error.message : error);
         return null;
       }
     },
+    policyConfig:()=>remainingStore(app.getPath('userData')).get('config',{}),
+    applyToolPlan:plan=>applyRemainingPlan(remainingStore(app.getPath('userData')),plan),
     changeMySetting: plan => applyPlanAtTheirWord(plan),
+    makePicture: prompt => makeAndSendPicture(prompt),
     lastResults: turn.lastResults,
     lastSearchQuery: turn.lastSearchQuery,
     rememberSearch: turn.rememberSearch,
@@ -5852,12 +6539,6 @@ function toolDeps(turn: TurnContext): ToolDeps {
       const saved = store.get('screenshots') as { folder?: string } | undefined;
       return typeof saved?.folder === 'string' && saved.folder ? saved.folder : path.join(app.getPath('userData'), 'browser-shots');
     },
-    // Her body in the game. Captured at call time, so a link that is stopped
-    // between turns is seen as gone rather than reached through a dead handle.
-    minecraft: minecraft ? {
-      status: () => minecraft!.status(),
-      send: (skill, args) => minecraft!.send(skill, args),
-    } : null,
     // The anime stack, likewise captured at call time (anime.ts).
     anime: (link => link ? { watch: input => link.watch(input), status: title => link.status(title) } : null)(animeLink()),
   };
@@ -5880,6 +6561,8 @@ const TOO_LONG = /exceeds? the available context|exceed_context_size/i;
  * a problem.
  */
 function isRemote(endpoint: string) {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){let host:string|null=null;try{host=new URL(endpoint.trim()).hostname}catch{}return naturalPolicy<boolean>('isRemote',[endpoint,host,os.networkInterfaces()]);}
+
   const value = endpoint.trim();
   if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i.test(value)) return false;
   // A machine is not a different machine just because it is reached by one of
@@ -5914,11 +6597,20 @@ function isRemote(endpoint: string) {
  * only theirs.
  */
 function keyFor(endpoint: string): string {
+  const direct = directCredentialName(endpoint);
+  if (direct) {
+    const configured = directProviderKey(endpoint);
+    if (configured) return configured;
+    if (direct === 'MIMO_API_KEY') return decryptSecret(store.get('mimoApiKey' as never) as string | undefined);
+    if (direct === 'OPENAI_API_KEY') return getOpenAIKey();
+    return '';
+  }
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return ''; }
   if (/(^|\.)x\.ai$/.test(host)) return getRemoteKey();
   if (/(^|\.)openai\.com$/.test(host)) return getOpenAIKey();
   if (/(^|\.)venice\.ai$/.test(host)) return getVeniceKey();
+  if (host === 'api.xiaomimimo.com') return decryptSecret(store.get('mimoApiKey' as never) as string | undefined);
   return getSelfHostedKey();
 }
 
@@ -5979,22 +6671,25 @@ function modelHeaders(endpoint: string): Record<string, string> {
  */
 function hasKeyFor(endpoint: string): boolean {
   if (!isRemote(endpoint) || keyFor(endpoint)) return true;
+  if (directCredentialName(endpoint)) return false;
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return true; }
   // The same three that requireKeyFor refuses for. Anything else — our own box,
   // a rented GPU — may legitimately have none.
-  return !/(^|\.)(x\.ai|openai\.com|venice\.ai)$/.test(host);
+  return !/(^|\.)(x\.ai|openai\.com|venice\.ai|xiaomimimo\.com)$/.test(host);
 }
 
 function requireKeyFor(endpoint: string, provider: Provider) {
   if (!isRemote(endpoint) || keyFor(endpoint)) return;
+  const direct = directCredentialName(endpoint);
+  if (direct) throw new Error(`Missing ${direct}; the direct provider is unavailable.`);
   // Only a company that demands a key is worth stopping for. Our own server may
   // have none — an unsecured box is a thing to warn about, not to refuse to
   // call, and refusing here would have broken pointing the model at a rented GPU
   // before it made a single request.
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { /* handled below */ }
-  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : /(^|\.)venice\.ai$/.test(host) ? 'Venice' : '';
+  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : /(^|\.)venice\.ai$/.test(host) ? 'Venice' : /(^|\.)xiaomimimo\.com$/.test(host) ? 'MiMo' : '';
   if (!name) return;
   void provider;
   throw new Error(`No API key has been saved, so ${name} was sent none. Paste it in setup and press Save key.`);
@@ -6008,7 +6703,7 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * purpose: every composer in this file calls ollamaPost, and none of them should
  * have to know or care which provider answered.
  */
-type PostOptions = { tools?: boolean;
+type PostOptions = { firstWordMs?: number; tools?: boolean;
   /** A table laid by the caller — her own pass — instead of the one the turn would be given. */
   table?: ChatTool[]; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
   /** Only an explicit chat turn can offer tools; background composers have none. */
@@ -6027,6 +6722,11 @@ const heldTools = { day: '', names: new Set<string>() };
 /** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
 function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext): ChatTool[] {
   const day = localDateKey(zonedNow(CHAT_TIMEZONE));
+  if(process.env.HARU_CORE_TOOL_MENU==='on'){
+    const result=corePolicySync<{tools:ChatTool[];state:{day:string;names:string[]}}>('tool-menu.hosted',[
+      availableTools(turn),conversation,day,{day:heldTools.day,names:[...heldTools.names]}]);
+    heldTools.day=result.state.day;heldTools.names=new Set(result.state.names);return result.tools;
+  }
   if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
   const available = availableTools(turn);
   return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
@@ -6040,12 +6740,12 @@ function latestUserText(conversation: { role?: string; content?: string }[]): st
   return '';
 }
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && turn && !turn.pageWasRead() && !toolless.has(config.model) ? hostedTools(conversation, turn) : undefined,
+    tools: tools && !toolless.has(config.model) ? table ?? (turn && !turn.pageWasRead() ? hostedTools(conversation, turn) : undefined) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),
@@ -6053,7 +6753,8 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     provider: config.provider,
     cacheKey,
   });
-  const response = await net.fetch(`${trimEndpoint(config.endpoint)}/chat/completions`, {
+  assertOutboundSafe(conversation, (body as { tools?: unknown[] }).tools);
+  const response = await coreCloudFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/chat/completions`, {
     method: 'POST',
     headers: modelHeaders(config.endpoint),
     body: JSON.stringify(body),
@@ -6066,14 +6767,14 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     if (toolsUnsupported(response.status, detail) && tools) {
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
-      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
+      return sendToProvider(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
     }
     throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
   }
   if (onChunk) return streamOpenAI(response, onChunk, config.model);
   const reply = await response.json();
   notePromptCache(config.model, (reply as { usage?: unknown }).usage);
-  return fromOpenAIReply(reply) as OllamaMessage;
+  return fromOpenAIReply(reply, config.model) as OllamaMessage;
 }
 
 /**
@@ -6095,42 +6796,7 @@ function notePromptCache(model: string, usage: unknown) {
  * non-streamed request.
  */
 async function streamOpenAI(response: Response, onChunk: (text: string) => void, model = ''): Promise<OllamaMessage> {
-  if (!response.body) throw new Error('The provider returned nothing to read.');
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let content = '';
-  const toolCalls: NonNullable<OllamaMessage['tool_calls']> = [];
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let at: number;
-    while ((at = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, at).trim();
-      buffer = buffer.slice(at + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') { buffer = ''; break; }
-      let payload: { usage?: unknown; choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
-      try { payload = JSON.parse(data) as typeof payload; } catch { continue; }
-      if (payload.usage) notePromptCache(model, payload.usage);
-      const delta = payload.choices?.[0]?.delta;
-      if (!delta) continue;
-      if (delta.content) { content += delta.content; onChunk(delta.content); }
-      for (const call of delta.tool_calls ?? []) {
-        const at = call.index ?? toolCalls.length;
-        const held = toolCalls[at] ?? (toolCalls[at] = { function: { name: '', arguments: '' } });
-        if (call.id) held.id = call.id;
-        held.function = held.function ?? { name: '', arguments: '' };
-        if (call.function?.name) held.function.name = call.function.name;
-        if (call.function?.arguments) held.function.arguments = (held.function.arguments ?? '') + call.function.arguments;
-      }
-    }
-  }
-  const message: OllamaMessage = { role: 'assistant', content };
-  if (toolCalls.some(call => call.function?.name)) message.tool_calls = toolCalls;
-  return message;
+  return readOpenAIStream(response, onChunk, model, usage => notePromptCache(model, usage));
 }
 
 /**
@@ -6187,27 +6853,11 @@ function isAbsent(error: unknown): boolean {
  * problem is what gets reported.
  */
 function homeTwin(config: ProviderConfig): ProviderConfig | null {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('homeTwin',[config,isRemote(config.endpoint),LOCAL_MODELS]);
+
   if (!isRemote(config.endpoint)) return null;
   if (isOpenAIShaped(config.provider)) return null;
   return { ...config, endpoint: LOCAL_MODELS };
-}
-
-/**
- * The rented GPU we already pay for "A second model for the hard ones", used
- * here for a second reason: this box has one card shared with her voice, and a
- * reply that fails outright — the local model out of VRAM, wedged, not
- * answering at all — is worse than one answered a little slower by someone
- * else's hardware. Not a twin of the local model, so no name is preserved; the
- * user already agreed to have this one answer under Setup.
- *
- * Guarded to a config that is not already OpenAI-shaped so a failure once
- * escalated there does not loop back into itself.
- */
-function capacitySpill(config: ProviderConfig): ProviderConfig | null {
-  if (isOpenAIShaped(config.provider)) return null;
-  const spill = store.get('escalate.provider') as ProviderConfig | undefined;
-  if (!spill?.model || !isOpenAIShaped(spill.provider)) return null;
-  return { ...spill, temperature: config.temperature };
 }
 
 /**
@@ -6223,10 +6873,12 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn }: PostOptions = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn, signal }: PostOptions = {}) {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreProviderFallback(conversation,modelForNow(config),{...naturalPolicy<any>('postOptions',[config,{tools:arguments[2]?.tools,temperature:arguments[2]?.temperature}]),table,format,maxTokens,onChunk,numCtx,turn,signal});
+
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, table, temperature, format, maxTokens, onChunk, numCtx, turn };
+  const options = { tools, table, temperature, format, maxTokens, onChunk, numCtx, turn, signal };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -6256,10 +6908,154 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
+async function refreshTaskCatalog() {
+  const updates = await Promise.all(DIRECT_MODELS.map(async model => {
+    try {
+      const response = await net.fetch(model.source, { signal: AbortSignal.timeout(20_000) });
+      if (!response.ok) return undefined;
+      return directCatalogEntry(model, await response.text());
+    } catch { return undefined; }
+  }));
+  const verified = updates.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  // Venice routes need current rates too; otherwise their eligibility expires after 24 hours.
+  const veniceRoutes = ((store.get('ai.modelRegistry') as any)?.entries ?? []).filter((entry: any) => entry.config?.provider === 'venice');
+  if (veniceRoutes.length && getVeniceKey()) {
+    try {
+      const response = await net.fetch('https://api.venice.ai/api/v1/models', {
+        headers: { Authorization: `Bearer ${getVeniceKey()}` }, signal: AbortSignal.timeout(20_000),
+      });
+      if (response.ok) {
+        const entries = veniceRegistryEntries(await response.json(), veniceRoutes)
+          .map(entry => ({ ...entry, pricingSource: 'https://api.venice.ai/api/v1/models' }));
+        verified.push(...entries as typeof verified);
+      }
+    } catch { /* Existing verified rates expire normally if the catalog is unavailable. */ }
+  }
+  // NanoGPT routes (e.g. the hosted conversation model) live on a host, not in
+  // DIRECT_MODELS. Without this their price would age past 24h and the route
+  // would silently drop back to local, so refresh each one from its model page.
+  const nanoRoutes = ((store.get('ai.modelRegistry') as any)?.entries ?? []).filter((entry: any) => {
+    try { return Boolean(entry.config?.endpoint) && /(^|\.)nano-gpt\.com$/i.test(new URL(entry.config.endpoint).hostname); } catch { return false; }
+  });
+  if (nanoRoutes.length) {
+    const nano = await Promise.all(nanoRoutes.map(async (entry: any) => {
+      try {
+        const source = `https://nano-gpt.com/models/text/${entry.config.model}`;
+        const response = await net.fetch(source, { signal: AbortSignal.timeout(20_000) });
+        if (!response.ok) return undefined;
+        const pricing = nanoGptPricing(await response.text());
+        if (!pricing) return undefined;
+        return { id: entry.id, role: entry.role, config: entry.config, enabled: true,
+          capabilities: entry.capabilities, pricing, pricingVerifiedAt: Date.now(), pricingSource: source };
+      } catch { return undefined; }
+    }));
+    const priced = nano.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    if (priced.length) console.log(`[tasks] refreshed ${priced.length} NanoGPT price(s) from the model page`);
+    verified.push(...priced as typeof verified);
+  }
+  const ablitRoutes = ((store.get('ai.modelRegistry') as any)?.entries ?? []).filter((entry: any) =>
+    entry.config?.endpoint === 'https://api.abliteration.ai/v1' && entry.config?.model === 'abliterated-model-large-v2');
+  if (ablitRoutes.length) {
+    try {
+      const source = 'https://docs.abliteration.ai/pricing.md';
+      const response = await net.fetch(source, { signal: AbortSignal.timeout(20_000) });
+      const pricing = response.ok ? abliterationPricing(await response.text()) : null;
+      if (pricing) verified.push(...ablitRoutes.map((entry: any) => ({ ...entry, pricing, pricingVerifiedAt: Date.now(), pricingSource: source })));
+    } catch { /* Existing verified pricing expires normally. */ }
+  }
+  if (verified.length) store.set('ai.modelRegistry', refreshDirectEntries(store.get('ai.modelRegistry') as any, verified));
+  console.log(`[tasks] refreshed ${verified.length} provider prices; unavailable prices expire after 24h`);
+}
+
+app.whenReady().then(() => { void refreshTaskCatalog(); setInterval(() => void refreshTaskCatalog(), 3_600_000); });
+
+const providerAvailability = new ProviderAvailability(event => {
+  console.log('[provider-availability] '+JSON.stringify(event));
+  sendToWindows('ai:fellBack', `${event.model} is blocked by its billing account. Haru will skip this provider for five minutes and use an eligible fallback.`);
+}, Date.now, store.get('ai.providerAvailability'), rows=>store.set('ai.providerAvailability',rows),
+  process.env.HARU_CORE_ROUTE_ADMISSION==='on'?{
+    read:()=>remainingStore(app.getPath('userData')).get('config',{}),
+    commit:plan=>applyRemainingPlan(remainingStore(app.getPath('userData')),plan as any),
+  }:undefined);
+const taskBridge = new TaskBridge();
+app.on('before-quit', taskBridge.close);
+void taskBridge.call('health', {}).then(() => console.log('[tasks] durable worker ready')).catch(() => console.warn('[tasks] durable worker unavailable; chat fails closed'));
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, options: PostOptions = {}): Promise<OllamaMessage> {
+  // A detached composer can start before its parent's foreground scope closes.
+  // Match the durable background classification below instead of inheriting
+  // foreground privileges merely through AsyncLocalStorage.
+  const backgroundComposition = process.env.HARU_CORE_INFERENCE_PRIORITY !== 'on' && process.env.HARU_CORE_COMPOSITION === 'on' && !activeTask.getStore()
+    && !options.turn && (options.tools === false || options.table?.length === 0);
+  const runBackground=process.env.HARU_CORE_INFERENCE_PRIORITY==='on'
+    ?corePolicySync<boolean>('inference-priority.provider',[isLocalConfig(config),inferencePriority.inForeground,process.env.HARU_CORE_COMPOSITION==='on',Boolean(activeTask.getStore()),Boolean(options.turn),options.tools===false,options.table?.length===0])
+    :isLocalConfig(config)&&(!inferencePriority.inForeground||backgroundComposition);
+  if (runBackground) {
+    return inferencePriority.runBackground(config.endpoint, protectedInferenceEndpoint(), signal =>
+      sendToProviderAdmitted(conversation, config, { ...options, signal: options.signal ? AbortSignal.any([options.signal, signal]) : signal }));
+  }
+  return sendToProviderAdmitted(conversation, config, options);
+}
+
+async function sendToProviderAdmitted(conversation: OllamaMessage[], config: ProviderConfig, options: PostOptions = {}): Promise<OllamaMessage> {
+  options.signal?.throwIfAborted();
+  providerAvailability.assertAvailable(config);
+  const replySignal = isLocalConfig(config) ? inferencePriority.replySignal : undefined;
+  if (replySignal) options = { ...options, signal: options.signal ? AbortSignal.any([options.signal, replySignal]) : replySignal };
+  const table = options.table ?? (options.tools !== false && options.turn && !options.turn.pageWasRead()
+    ? isOpenAIShaped(config.provider) ? hostedTools(conversation, options.turn) : chatTools(availableTools(options.turn), latestUserText(conversation)) : []);
+  if (!isLocalConfig(config)) {
+    if (!isAllowedTaskProvider(config)) throw new Error('provider_not_allowed');
+    assertOutboundSafe(conversation, table);
+  }
+  const task = activeTask.getStore();
+  if(!task&&process.env.HARU_CORE_COMPOSITION==='on'&&(isLocalConfig(config)||(process.env.HARU_CORE_SCHEDULER==='on'&&activeScheduledJob.getStore()))&&!options.turn&&!table.length){
+    const registry=readModelRegistry(store.get('ai.modelRegistry'),{
+      local:(store.get('ai.config') as ProviderConfig|undefined)??config,conversation:store.get('ai.conversation') as ProviderConfig|undefined,
+      specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision:readVisionConfig(store.get('vision')),
+    });
+    // Keep the requested route. Scheduled hosted follow-ups receive the same
+    // durable budgets, one attempt, no tools and a forty-second ceiling.
+    const local=isLocalConfig(config),policy=readTaskPolicy(store.get('ai.taskPolicy'));
+    const background=new TaskController(taskBridge.call,registry,{...policy,
+      taskBudgetMicros:local?0:policy.taskBudgetMicros,dailyBudgetMicros:local?0:policy.dailyBudgetMicros,
+      maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:local?180000:Math.min(40000,policy.deadlineMs)},!local);
+    await background.start('Background model composition (no actions)',config.model,'background');
+    let reply:OllamaMessage|undefined;
+    await background.compose(async()=>{reply=await sendToProviderAdmitted(conversation,config,{...options,tools:false,table:[]});return reply;},conversation);
+    return withToolContract(reply!,[]);
+  }
+  const run = (signal: AbortSignal, onChunk: (text: string) => void, maxTokens?: number) => providerAvailability.run(config, () => sendToProviderUnchecked(conversation, config,
+    { ...options, table, ...(maxTokens ? { maxTokens } : {}), signal, ...(options.onChunk ? { onChunk } : {}) }));
+  if (task) return withToolContract(await task.post(conversation, config, table, options.maxTokens, run, options.onChunk, options.firstWordMs, options.signal), options.tools === false ? [] : table);
+  if (!isLocalConfig(config)) throw new Error('cloud_task_required');
+  return withToolContract(await guardedRequest((signal, chunk) => run(signal, chunk), { signal: options.signal, totalMs: 180_000, firstWordMs: options.firstWordMs, onChunk: options.onChunk }), options.tools === false ? [] : table);
+}
+
+async function sendToProviderUnchecked(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
+  if (config.model === 'gpt-6-astra' && new URL(config.endpoint).hostname === 'api.openai.com') {
+    requireKeyFor(config.endpoint, 'openai');
+    const body = toResponsesBody({ model: config.model, conversation, tools: tools ? table : undefined, maxTokens: maxTokens ?? 2048, stream: Boolean(onChunk), cacheKey });
+    const response = await coreCloudFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/responses`, {
+      method: 'POST', headers: modelHeaders(config.endpoint), body: JSON.stringify(body), ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), 'openai'));
+    return onChunk ? streamResponses(response, config.model, onChunk) : fromResponsesReply(await response.json(), config.model);
+  }
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
+  if (config.provider === 'anthropic') {
+    requireKeyFor(config.endpoint, 'anthropic');
+    const body = toAnthropicBody({ model: config.model, conversation, tools: tools ? table : undefined, maxTokens: maxTokens ?? 4096, stream: Boolean(onChunk) });
+    const response = await coreCloudFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': keyFor(config.endpoint), 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify(body), ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), 'anthropic'));
+    return onChunk ? streamAnthropic(response, config.model, onChunk) : fromAnthropicReply(await response.json(), config.model);
+  }
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, table, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
+  const chatConfig = store.get('ai.config') as ProviderConfig | undefined;
+  const contextSize = requestContextSize(config, chatConfig ? modelForNow(chatConfig) : undefined, chatNumCtx(), numCtx ?? sideNumCtx());
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
     const offered = table ?? (withTools && turn && !turn.pageWasRead() ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
     if (offered.length) {
@@ -6270,8 +7066,9 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
       console.log(`[ai] offering ${offered.length} tools to ${config.model} (prompt ~${est} tokens)`);
     }
     try {
-      return await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
+      return await coreModelFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/api/chat`, {
         method: 'POST',
+        ...(signal ? { signal } : {}),
         headers: modelHeaders(config.endpoint),
         body: JSON.stringify({
           model: config.model,
@@ -6298,7 +7095,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // expiry, then sixty seconds exactly when it moved out here.
           // releaseModelForGame had it in the right place all along.
           keep_alive: OLLAMA_KEEP_ALIVE,
-          options: { temperature, num_ctx: numCtx ?? sideNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          options: { temperature, num_ctx: contextSize, ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
@@ -6365,7 +7162,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
   const data = await response.json() as { message?: OllamaMessage; error?: string };
   if (data.error) throw new Error(data.error);
   if (!data.message) throw new Error('Ollama response did not include a message.');
-  return data.message;
+  return receivedProviderMessage(data.message);
 }
 
 /**
@@ -6389,8 +7186,9 @@ async function streamOllama(response: Response, onChunk: (text: string) => void)
   let buffered = '';
   const take = (line: string) => {
     if (!line.trim()) return;
-    let payload: { message?: OllamaMessage };
+    let payload: { message?: OllamaMessage; error?: string };
     try { payload = JSON.parse(line) as typeof payload; } catch { console.warn(`[ai] dropped an unreadable stream line (${line.length} chars)`); return; }
+    if (payload.error) throw new Error(`Local provider stream failed: ${payload.error}`);
     const piece = payload.message;
     if (!piece) return;
     if (piece.content) { content += piece.content; onChunk(piece.content); }
@@ -6408,7 +7206,7 @@ async function streamOllama(response: Response, onChunk: (text: string) => void)
   take(buffered);
   const message: OllamaMessage = { role: 'assistant', content };
   if (toolCalls?.length) message.tool_calls = toolCalls;
-  return message;
+  return receivedProviderMessage(message);
 }
 
 // Shown to the model as tone reference rather than picked from — the point of
@@ -6443,6 +7241,8 @@ const GLOAT_EXAMPLES = [
  * `onChunk` streams her version to the reader; the hosted one was not shown.
  */
 async function inHerVoice(answer: string, recent: { role: string; content: string; attachments?: unknown[] }[], options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return conversationRun('voice',{answer,recent,maxTokens:options.maxTokens??null,stream:Boolean(options.onChunk)},options.onChunk);
+
   const local = store.get('ai.config') as ProviderConfig | undefined;
   // Her own model says it — the one that knows how she talks. With a
   // conversation route set, that is the route: it answers as her every other
@@ -6504,6 +7304,8 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
 /** The same call as ollamaQuip, keeping every line — for an answer that comes in a shape. */
 /** A cue goes out as a stage direction, with the system told so; anything with real content in it goes out as it is. */
 function composerTurns(system: string, user: string): { role: string; content: string }[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.composerTurns',[system,user]);
+
   // The first-person note rides in every system prompt, parsed answers and all:
   // everything she composes here is said as herself, or it is not hers to say.
   return isCue(user)
@@ -6512,11 +7314,15 @@ function composerTurns(system: string, user: string): { role: string; content: s
 }
 
 async function ollamaQuipLong(system: string, user: string, config: ProviderConfig): Promise<string> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return conversationRun('long',{system,user,config});
+
   const message = await ollamaPost(composerTurns(system, user), config, { tools: false, temperature: 0.9 });
   return (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim().slice(0, 1600);
 }
 
 async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return conversationRun('quip',{system,user,config});
+
   const once = async (instruction: string) => {
     const message = await ollamaPost(
       composerTurns(instruction, user),
@@ -6558,6 +7364,8 @@ async function ollamaQuip(system: string, user: string, config: ProviderConfig) 
  * itself over the limit and cannot be trimmed any other way.
  */
 function toLength(text: string, limit: number) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-policy.toLength',[text,limit]);
+
   if (text.length <= limit) return text;
   const sentences = text.split(/(?<=[.!?…])\s+/);
   let kept = '';
@@ -6581,6 +7389,8 @@ function toLength(text: string, limit: number) {
  * as interruptible as being panned.
  */
 function stillTalkingAbout(): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-program.stillTalkingAbout',[speakingNow,speakingLine]);
+
   return speakingNow && speakingLine ? ` You have not even finished saying it — you are still speaking these words aloud right now: "${speakingLine.slice(0, 300)}"` : '';
 }
 
@@ -6595,6 +7405,10 @@ function stillTalkingAbout(): string {
  * The approval happens in a moment, and the moment is the point.
  */
 function recentExchange(limit = 6): string {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<string>('recentExchange',[store.get('chat.messages')??[],arguments[0]??null,arguments.length===0||arguments[0]===undefined]);
+
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-program.recentExchange',[store.get('chat.messages')??[],limit]);
+
   const messages = (store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? [];
   return messages
     .slice(-limit)
@@ -6624,6 +7438,8 @@ const normaliseLine = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}
  * that stops her repeating herself, and does nothing about her repeating us.
  */
 function reusesExample(line: string, examples: string[]): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<boolean>('conversation-policy.reusesExample',[line,examples]);
+
   const said = normaliseLine(line);
   if (!said) return false;
   // Compared on the first four letters, so "take" and "taken" are one word.
@@ -6649,6 +7465,8 @@ function reusesExample(line: string, examples: string[]): boolean {
 }
 
 async function quipOfHerOwn(system: string, user: string, config: ProviderConfig, examples: string[]) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return conversationRun('own',{system,user,config,examples});
+
   const line = await ollamaQuip(system, user, config);
   if (!reusesExample(line, examples)) return line;
   console.warn('[react] she read an example back word for word — asking again');
@@ -6658,6 +7476,8 @@ async function quipOfHerOwn(system: string, user: string, config: ProviderConfig
 }
 
 export function ollamaRetort(disliked: string, config: ProviderConfig) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.reaction',['retort',disliked,0,getActiveCharacter().identity,store.get('chat.messages')??[],speakingNow,speakingLine]);return quipOfHerOwn(p.system,p.user,config,p.examples);}
+
   const interrupted = stillTalkingAbout();
   const system = [
     getActiveCharacter().identity,
@@ -6679,6 +7499,8 @@ export function ollamaRetort(disliked: string, config: ProviderConfig) {
 // Praise is not thanked for, it is cashed in. The line should read as her taking
 // the approval as licence rather than as a compliment received.
 export function ollamaGloat(praised: string, config: ProviderConfig, ego: number) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.reaction',['gloat',praised,ego,getActiveCharacter().identity,store.get('chat.messages')??[],speakingNow,speakingLine]);return quipOfHerOwn(p.system,p.user,config,p.examples);}
+
   const interrupted = stillTalkingAbout();
   const system = [
     getActiveCharacter().identity,
@@ -6741,6 +7563,7 @@ const STILL_MEANS_IT_MS = 30 * 60_000;
 const CONTEXT_TURNS = 8;
 
 function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<KeptItem|null>('agenda-life.chase',[open,ownedAgendaCore().get('config',{}),getAsides(),Date.now()]);
   let latest: { id: string; at: number } | null = null;
   for (const [id, state] of Object.entries(reminderStates())) {
     const at = state?.lastAt ?? 0;
@@ -6804,6 +7627,7 @@ let movedJustNow: { title: string; from: string; to: string } | null = null;
  * Still refuses to guess: no task named and none being discussed means no move.
  */
 function putOffSpoken(said: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaSpoken('putOff',said);
   movedJustNow = null;
   const when = putOffUntil(said);
   if (!when) return null;
@@ -6824,11 +7648,12 @@ function putOffSpoken(said: string) {
 /**
  * "Getting it done now" ticks nothing off — it says they have started. The
  * item is marked underway: chases hold off for a while, and the next thing
- * she raises unprompted is how it is going (boredNudge). Without this she
+ * she raises unprompted is how it is going (composeSpontaneousNudge). Without this she
  * answered "I'll take it" and then, half an hour on, needled them about an
  * old day summary as if the task had never been mentioned.
  */
 function startedSpoken(said: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaSpoken('started',said);
   if (doneClause(said)) return null;
   const clause = underwayClause(said);
   if (!clause) return null;
@@ -6846,6 +7671,7 @@ function startedSpoken(said: string) {
 }
 
 function tickOffSpoken(said: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedAgendaSpoken('tick',said);
   // Matched against the clause that reports it done, not the whole message.
   // Everything else they said is about something else by definition.
   const reported = doneClause(said);
@@ -6892,6 +7718,7 @@ let journalAskedOn = store.get('journal.askedOn') as string | undefined;
  * talking.
  */
 async function askForJournal() {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return askForOwnedJournal();
   const config = readJournalConfig(store.get('journal.config'));
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
@@ -6955,6 +7782,8 @@ async function askForJournal() {
  * call does nothing, which is the intent — see noticing.ts for the budget.
  */
 async function noticePage(page: NoticedPage) {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on'){const read=()=>({config:remainingStore(app.getPath('userData')).get('config',{}),day:localDateKey(zonedNow(CHAT_TIMEZONE)),now:Date.now(),lastInterjectionAt,journal:getJournal(),memories:getMemories(),sessions:getSessions(),profile:getProfile(),voice:getVoiceConfig(),search:readSearchConfig(store.get('search')),character:getActiveCharacter(),context:unpromptedContext()});const p=corePolicySync<any>('context-preparation.noticeStart',[page,read()]);if(p.action==='stop')return;applyRemainingPlan(remainingStore(app.getPath('userData')),p.plan);try{const m=await ollamaPost(p.request.messages,p.request.config,p.request.options);activeTask.getStore()?.signal.throwIfAborted();const result=corePolicySync<any>('context-preparation.noticeObserved',[p.state,m.content??'',read()]);if(result&&interject(result.line,{source:result.source}))void speak(result.line,classifyEmotion(result.line,result.provider));}catch(error){console.warn('[notice]',error instanceof Error?error.message:'failed');}return;}
+
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
   const notices = readNotices(store.get('pageNotices'), today);
@@ -7042,6 +7871,7 @@ async function pullCheckIns(): Promise<void> {
     const theirs = Array.isArray(body.entries) ? body.entries : [];
     if (!theirs.length) return;
 
+    if(process.env.HARU_CORE_USER_RECORDS==='on'){const result=coreUserRecord('checkins.merge',{entries:theirs});if(result.what)console.log('[checkins] '+result.what);return;}
     const before = getCheckIns();
     const merged = mergeCheckIns(before, theirs as never);
     const what = describePull(before, merged);
@@ -7108,14 +7938,14 @@ async function syncMemories(): Promise<void> {
     // and plainly, rather than letting it read as the server being unreachable.
     if (got.status === 404) { console.warn('[memory] that server is too old to sync memories'); return; }
     if (!got.ok) { console.warn('[memory] could not read them (' + got.status + ')'); return; }
-    const body = await got.json() as { memories?: unknown; slate?: unknown };
+    const body = await got.json() as { memories?: unknown; deletions?: unknown; slate?: unknown };
 
     // Before the merge, and before the push below: if her brain has reset, this
     // machine is holding a mirror of a Haru who no longer exists, and the push
     // would hand the whole of it back.
     followSlate(body);
 
-    const report = mergeIn(body.memories);
+    const report = mergeIn(withoutPreSlate(body, getSlate()));
     const what = describeMerge(report);
     if (what) console.log('[memory] ' + what + ' from the server');
 
@@ -7125,7 +7955,7 @@ async function syncMemories(): Promise<void> {
     const sent = await net.fetch(source.url + '/api/memory/records', {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ memories: getMemories() }),
+      body: JSON.stringify({ memories: getMemories(), deletions: memoryStore.getDeletions() }),
     });
     if (!sent.ok) { console.warn('[memory] the server would not take ours (' + sent.status + ')'); return; }
     const took = await sent.json() as { added?: number; updated?: number };
@@ -7296,7 +8126,7 @@ function readAnimeFetches(): AnimeFetch[] {
 /**
  * The anime stack, or null when any of its three servers is not wired up.
  *
- * Built per call, like the Minecraft link: the keys are read from the apps'
+ * Built per call: the keys are read from the apps'
  * own files each time, so a rotated key is picked up on the next ask rather
  * than after a restart. Jellyfin's is hers (the Settings panel), because
  * Jellyfin keeps its in a database rather than a file.
@@ -7310,20 +8140,54 @@ function animeLink(): AnimeLink | null {
   const sonarrKey = apiKeyFrom(config.sonarr.apiKeyFile);
   const prowlarrKey = apiKeyFrom(config.prowlarr.apiKeyFile);
   if (!sonarrKey || !prowlarrKey) return null;
+  const playbackSnapshot=()=>JSON.stringify([readAnimeConfig(store.get('anime')),readJellyfinConfig(store.get('jellyfin')),store.get('jellyfinApiKey')??null]);
+  const playbackBinding=playbackSnapshot();
+  const assertPlaybackCurrent=()=>{
+    if(playbackSnapshot()!==playbackBinding)throw Error('anime_playback_config_stale');
+  };
   return new AnimeLink(
     config,
     { jellyfinUrl: jellyfin.url, jellyfinUserId: jellyfin.userId, jellyfinKey, sonarrKey, prowlarrKey },
     (url, init) => net.fetch(url, init),
     {
       fetches: readAnimeFetches,
-      keep: fetch => {
-        store.set('anime.fetches', [...readAnimeFetches(), fetch].slice(-ANIME_FETCHES_KEPT));
+      downloadEffects:()=>store.get('anime.downloadEffects')??null,
+      watchRecords:()=>store.get('anime.fetchWatches')??null,
+      commitDownload:plan=>{
+        assertPlaybackCurrent();
+        if(JSON.stringify(store.get('anime.downloadEffects')??null)!==JSON.stringify(plan.expected))throw Error('anime_download_receipt_stale');
+        store.set('anime.downloadEffects',plan.ledger);
+      },
+      commitWatch:plan=>{
+        assertPlaybackCurrent();
+        if(JSON.stringify(store.get('anime.fetchWatches')??null)!==JSON.stringify(plan.expected))throw Error('anime_watch_state_stale');
+        store.set('anime.fetchWatches',plan.records);
+      },
+      playbackEffects:()=>store.get('anime.playbackEffects')??null,
+      assertPlaybackCurrent,
+      commitPlayback:plan=>{
+        assertPlaybackCurrent();
+        if(JSON.stringify(store.get('anime.playbackEffects')??null)!==JSON.stringify(plan.expected))throw Error('anime_playback_receipt_stale');
+        store.set('anime.playbackEffects',plan.ledger);
+      },
+      keep: async fetch => {
+        if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on'){
+          assertPlaybackCurrent();
+          const plan=corePolicySync<any>('anime-downloads.keepFetch',[store.get('anime.fetches')??null,fetch]);
+          if(JSON.stringify(store.get('anime.fetches')??null)!==JSON.stringify(plan.expected))throw Error('anime_fetch_state_stale');
+          store.set('anime.fetches',plan.fetches);
+        }else store.set('anime.fetches', [...readAnimeFetches(), fetch].slice(-ANIME_FETCHES_KEPT));
         // The watch that files it and says when it is in (animefetch.ts).
-        scheduler.add(fetchJob(fetch, Date.now()));
+        await scheduler.add(fetchJob(fetch, Date.now()));
         console.log(`[anime] fetching ${fetch.title}: ${fetch.release} (${Math.round(fetch.sizeBytes / 2 ** 30)} GB, ${fetch.episodes} episodes) — watched every ${FETCH_EVERY_MS / 60_000} min for ${FETCH_FOR_MS / 3_600_000} h`);
       },
       markImported: (seriesId, atIso) => {
-        store.set('anime.fetches', readAnimeFetches().map(item => (item.seriesId === seriesId && !item.importedAt ? { ...item, importedAt: atIso } : item)));
+        if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on'){
+          assertPlaybackCurrent();
+          const plan=corePolicySync<any>('anime-downloads.markImported',[store.get('anime.fetches')??null,seriesId,atIso]);
+          if(JSON.stringify(store.get('anime.fetches')??null)!==JSON.stringify(plan.expected))throw Error('anime_fetch_state_stale');
+          store.set('anime.fetches',plan.fetches);
+        }else store.set('anime.fetches', readAnimeFetches().map(item => (item.seriesId === seriesId && !item.importedAt ? { ...item, importedAt: atIso } : item)));
       },
     },
   );
@@ -7341,6 +8205,26 @@ function animeLink(): AnimeLink | null {
 const fetchWatchState = new Map<number, { misses: number; rescanAskedAt: number }>();
 
 async function watchFetch(job: Job): Promise<Outcome> {
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on'){
+    const link=animeLink();
+    if(!link)return corePolicySync('anime-downloads.watchUnavailable',[Date.now()]);
+    const facts=()=>({pushback:store.get('pushback')??null,prefs:getPush().prefs,local:zonedNow(CHAT_TIMEZONE),asleep:herAsleepNow(),knockedAwake:herKnockedAwakeNow(),wakeAt:herWakeAt()??null,
+      theyUp:theyAreUpNow(),lastUserActivityAt,lastInterjectionAt,quietAfterUserMs:QUIET_AFTER_USER_MS,interjectGapMs:INTERJECT_GAP_MS});
+    return link.runFetchWatch(job,async(op,args)=>{
+      switch(op){
+        case 'notifyFacts':return facts();
+        case 'composeNotice':{
+          try{return {line:await composeUnprompted(args[0].prompt)}}catch{return {line:null}}
+        }
+        case 'publish':{
+          const fresh=facts();
+          if(JSON.stringify(Object.fromEntries(Object.keys(args[3]).map(k=>[k,(fresh as any)[k]])))!==JSON.stringify(args[3]))throw Error('anime_notice_facts_stale');
+          lastInterjectionAt=Date.now();const aside=noteAside(args[0],'anime',args[1].slice(0,80));return {accepted:true,aside,storedAside:getAsides().find(item=>item.id===aside?.id)??null};
+        }
+        default:throw Error('anime_notification_command_invalid');
+      }
+    });
+  }
   const payload = job.payload ?? {};
   const seriesId = Number(payload.seriesId);
   const title = String(payload.title ?? 'the show');
@@ -7438,6 +8322,23 @@ async function watchFetch(job: Job): Promise<Outcome> {
   }
 }
 
+function coreUserRecord(action:string,args:unknown):any{
+  const core=remainingStore(app.getPath('userData'));
+  return commitUserRecord(action,args,{core,read:()=>{const now=zonedNow(CHAT_TIMEZONE);return {config:core.get('config',{}),today:localDateKey(now),at:new Date().toISOString()};},
+    publish:(name,value)=>sendToWindows(name,value),asked:date=>{journalAskedOn=date;}});
+}
+async function askForOwnedJournal(){
+  const core=remainingStore(app.getPath('userData'));const scope=activeScheduledJob.getStore();
+  if(!scope)throw Error('core_journal_scope_required');
+  let context='';
+  const read=()=>{if(JSON.stringify(activeScheduledJob.getStore())!==JSON.stringify(scope))throw Error('core_journal_scope_changed');
+    const now=zonedNow(CHAT_TIMEZONE),character=getActiveCharacter();return {scope,config:core.get('config',{}),today:localDateKey(now),at:new Date().toISOString(),nowMs:Date.now(),hour:now.getHours(),minute:now.getMinutes(),identity:character.identity,style:character.style,context};};
+  try{const result=await runOwnedJournal({core,read,prepare:()=>{context=unpromptedContext();},compose:c=>ollamaPost(c.messages,c.provider,c.options),publish:c=>interject(c.line,{source:c.source})});
+    if(result.askedOn!==undefined)journalAskedOn=result.askedOn;
+    if(result.speech)void speak(result.speech.line,classifyEmotion(result.speech.line,result.speech.provider));
+    console.log('[core-journal] '+JSON.stringify({status:result.status}));
+  }catch(error){console.warn('[core-journal] attempt unresolved:',error instanceof Error?error.message:String(error));}
+}
 function getCheckIns() {
   return readCheckIns(store.get('checkins'));
 }
@@ -7448,6 +8349,7 @@ function getCheckIns() {
  * the journal config would take the day's notes with it.
  */
 function setCheckIns(next: ReturnType<typeof readCheckIns>) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on'){coreUserRecord('checkins.replace',next);return;}
   store.set('checkins', next);
   sendToWindows('checkins:changed', next.entries);
 }
@@ -7457,6 +8359,7 @@ function getJournal(): JournalEntry[] {
 }
 
 function setJournal(entries: JournalEntry[]) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on'){coreUserRecord('journal.replace',{entries});return;}
   // Under `journal.entries`, with the config at `journal.config`, so neither
   // write clobbers the other — the same dot-path trap as the API keys, except
   // here the thing at risk is everything they have written.
@@ -7469,6 +8372,7 @@ function setJournal(entries: JournalEntry[]) {
  * landed rather than announcing a save she did not verify.
  */
 function writeJournal(text: string, ratings: { mood?: number; anxiety?: number; energy?: number; sleep?: number }, prompted: boolean) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return coreUserRecord('journal.write',{text,...ratings,prompted}) as JournalEntry|undefined;
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
   const entries = upsertEntry(getJournal(), {
     date: today,
@@ -7498,6 +8402,7 @@ let awaitingAccount: string | null = null;
 
 /** Which overdue item, if any, an unprompted line of hers is demanding a report on. */
 function noteSheAsked(line: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){awaitingAccount=corePolicySync<string|null>('agenda-life.sheAsked',[line,getKept(),agendaClock(zonedNow(CHAT_TIMEZONE))]);return;}
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const chaseable = getKept().filter(item => itemStatus(item, now, todayKey) === 'overdue' && !item.heardAbout);
@@ -7516,6 +8421,7 @@ function noteSheAsked(line: string) {
  * — settles it, which for an event is the only ending it will ever get.
  */
 function noteTheyAccounted(said: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const packet=corePolicySync<any>('agenda-life.accounted',[said,awaitingAccount,agendaFacts(ownedAgendaCore()),new Date().toISOString(),randomUUID()]);applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);awaitingAccount=packet.awaiting;return;}
   if (!awaitingAccount) return;
   const spoken = said.trim().split(/\s+/).filter(Boolean);
   // A grunt is not an account. Three words is the shortest real answer — "it was
@@ -7553,7 +8459,7 @@ function noteTheyAccounted(said: string) {
  */
 type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees: boolean;
   /** The conversation route (ai.conversation): a hosted model speaking as her, filtered as the local one is, never rewritten. */
-  hosted?: boolean };
+  hosted?: boolean; role?: ModelRole; entryId?: string };
 
 /**
  * Where the conversation itself is answered, when somewhere other than the
@@ -7584,6 +8490,8 @@ const HOSTED_PARAGRAPHS = 4;
  */
 type RevoiceSetting = { every?: number; model?: string };
 function revoiceSetting(): Required<RevoiceSetting> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.revoiceSetting',[remainingStore(app.getPath('userData')).get('config',{})]);
+
   const saved = (store.get('ai.revoice') ?? {}) as RevoiceSetting;
   return { every: typeof saved.every === 'number' ? saved.every : REVOICE_EVERY, model: typeof saved.model === 'string' && saved.model.trim() ? saved.model.trim() : 'aion-labs-aion-3-0' };
 }
@@ -7591,6 +8499,8 @@ function revoiceState() { return readRevoiceState(store.get('revoice')); }
 
 /** Their messages since the last pass, today and in the archive. */
 function messagesSinceRevoice(): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<number>('conversation-program.messagesSinceRevoice',[remainingStore(app.getPath('userData')).get('config',{}),store.getArchive()]);
+
   const since = revoiceState().lastAt;
   const count = (turns: { role?: string; at?: string }[]) => turns.filter(turn => turn.role === 'user' && (!since || (turn.at ?? '') > since)).length;
   const archive = store.getArchive() as unknown as Record<string, { role?: string; at?: string }[]>;
@@ -7600,6 +8510,8 @@ function messagesSinceRevoice(): number {
 let revoicing = false;
 let revoiceRetryAt = 0;
 async function runRevoice(why: string): Promise<{ shown: number; rewritten: number; kept: number; dropped: number; model: string } | { error: string }> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.revoiceAdmission',[{...conversationRevoiceFacts(),id:randomUUID()},why]);if(Object.hasOwn(p,'result'))return p.result;conversationApply(p);revoicing=true;try{let observed:any;try{observed={ok:true,value:await sendToProvider(p.command.messages,p.command.config,p.command.options)};}catch(error){observed={ok:false,error:error instanceof Error?error.message:String(error)};}const done=corePolicySync<any>('conversation-program.revoiceObserved',[p.state,observed,conversationRevoiceFacts()]);conversationApply(done);revoiceRetryAt=done.retryAt;return done.result;}finally{revoicing=false;}}
+
   if (revoicing) return { error: 'a pass is already running' };
   const route = conversationRoute();
   if (!route) return { error: 'no hosted route to run it on' };
@@ -7644,10 +8556,12 @@ async function runRevoice(why: string): Promise<{ shown: number; rewritten: numb
 }
 
 function considerRevoicing() {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const why=corePolicySync<string|null>('conversation-program.considerRevoicing',[conversationRevoiceFacts()]);if(why)return runRevoice(why);return;}
+
   if (revoicing || Date.now() < revoiceRetryAt) return;
   const every = revoiceSetting().every;
   const since = messagesSinceRevoice();
-  if (dueForRevoice(since, every)) void runRevoice(`${since} messages since the last pass, every ${every}`);
+  if (dueForRevoice(since, every)) return runRevoice(`${since} messages since the last pass, every ${every}`);
 }
 
 /**
@@ -7665,6 +8579,8 @@ let secondThoughtTimer: ReturnType<typeof setTimeout> | undefined;
 let lastSecondThoughtAt = 0;
 
 function scheduleSecondThought(input: { hers: boolean; ranting: boolean; latest: string; reply: string; config: ProviderConfig }) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){clearTimeout(secondThoughtTimer);const at=Date.now(),facts={hers:input.hers,ranting:input.ranting,replyLength:input.reply.length},odds=sway('second-thought',SECOND_THOUGHT_ODDS,swayNow());let rolls:number[]=[];let p=corePolicySync<any>('conversation-program.secondSchedule',[facts,at,lastSecondThoughtAt,odds,rolls]);while(p.draws){while(rolls.length<p.draws)rolls.push(Math.random());p=corePolicySync<any>('conversation-program.secondSchedule',[facts,at,lastSecondThoughtAt,odds,rolls]);}if(p.result)secondThoughtTimer=setTimeout(()=>{void secondThought(p.result.repliedAt,input);},p.result.delay);return;}
+
   clearTimeout(secondThoughtTimer);
   if (!wantsSecondThought({ hers: input.hers, ranting: input.ranting, replyLength: input.reply.length }, Math.random, sway('second-thought', SECOND_THOUGHT_ODDS, swayNow()))) return;
   if (Date.now() - lastSecondThoughtAt < SECOND_THOUGHT_GAP_MS) return;
@@ -7675,6 +8591,8 @@ function scheduleSecondThought(input: { hers: boolean; ranting: boolean; latest:
 }
 
 async function secondThought(repliedAt: number, input: { latest: string; reply: string; config: ProviderConfig }) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.secondStart',[repliedAt,input,conversationSecondFacts()]);if(Object.hasOwn(p,'result'))return;try{const answer=await Promise.race([sendToProvider(p.command.messages,p.command.config,p.command.options),new Promise<never>((_,reject)=>setTimeout(()=>reject(Error('no answer in 40s')),p.command.timeoutMs))]);const done=corePolicySync<any>('conversation-program.secondObserved',[p.state,answer.content??'',conversationSecondFacts()]);if(!done.result)return;lastSecondThoughtAt=done.result.at;lastInterjectionAt=done.result.at;noteAside(done.result.line,'followup',done.result.about);}catch(error){console.warn('[followup]',error instanceof Error?error.message:'failed');}return;}
+
   if (herAsleepNow() || herKnockedAwakeNow()) { console.log('[followup] held — she is asleep, or was got up'); return; }
   const now = Date.now();
   if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered first — nothing to add'); return; }
@@ -7688,9 +8606,7 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
   if (messages.at(-1)?.role !== 'assistant' || !untagged(messages.at(-1)?.content ?? '').includes(untagged(input.reply).slice(0, 40))) { console.log('[followup] the conversation moved on — nothing to add'); return; }
   const character = getActiveCharacter();
   const route = conversationRoute() ?? input.config;
-  // Her game, in facts, with the fence: this composer had none and invented a caught Pidgey a beat after "how's your game going" (pokemon.ts runNote).
-  const herGame = runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null);
-  const system = [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY, herGame].filter(Boolean).join('\n\n');
+  const system = [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].filter(Boolean).join('\n\n');
   const conversation: OllamaMessage[] = [
     { role: 'system', content: system },
     ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
@@ -7721,66 +8637,53 @@ let pendingGoogleConsent: Promise<{ url: string; port: number }> | null = null;
 
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
-  if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
+  if (!route?.model || !isAllowedTaskProvider(route) || !hasKeyFor(route.endpoint)) return null;
   return route;
 }
 
-/**
- * `pictures` and `files` force the question out to the hosted model, whatever
- * decide() says.
- *
- * Not a preference — the local default cannot see at all. qwen2.5 handed an
- * image has nothing to answer from, so a picture that stays home is a picture
- * nobody looks at, which is the whole complaint this change exists to fix. Any
- * other attached file goes out on the same terms: the user's rule is that the
- * hosted model is for what they hand her, and nothing else.
- *
- * A message from the phone used to be a third forcing reason, on the
- * theory that a wait in a chat app reads as broken. Withdrawn: the user wants
- * their words answered by the local model wherever they are said from, and the
- * hosted one kept for uploads. That is a rule about cost and about where a
- * conversation lives, and it is theirs to set.
- *
- * `sees` on the way back is what tells the caller whether to send the image or
- * to have it read into words first. It is returned rather than inferred, because
- * every reason for refusing below is a reason the picture must not travel, and
- * working that out twice in two places is how the two answers drift apart.
- */
-function brainFor(
-  message: string,
-  local: ProviderConfig,
-  conversation: { role: string; content: string }[] = [],
-  { pictures = false, files = false } = {},
-): Brain {
+/** Initial role selection. Rechecked against the complete prompt and tools before dispatch. */
+async function brainFor(
+  message: string, local: ProviderConfig, conversation: { role: string; content: string }[] = [],
+  { pictures = false, files = false, call = false } = {},
+): Promise<Brain> {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){const setting=readEscalateConfig(store.get('escalate')),vision=readVisionConfig(store.get('vision')),registry=callRegistry(readModelRegistry(store.get('ai.modelRegistry'),{local,conversation:store.get('ai.conversation') as ProviderConfig|undefined,specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision}),store.get('ai.callConversation'),call);const intent=await coreTaskIntent(message,{pictures,files,minWords:setting.minWords,history:conversation}),policy=readTaskPolicy(store.get('ai.taskPolicy'));const request:RouteRequest={...naturalPolicy<any>('brainRequest',[message,conversation,intent,policy,setting,pictures]),available:entry=>providerAvailability.available(entry.config)&&(entry.local||hasKeyFor(entry.config.endpoint))};const chosen=process.env.HARU_CORE_NATURAL_TURN==='on'?await naturalSelection(()=>selectCallModel(registry,intent.role,request),()=>coreSelectTaskModel(registry,intent.role,request)):await selectCallModel(registry,intent.role,request)??await coreSelectTaskModel(registry,intent.role,request);return naturalPolicy<any>('brainFinished',[chosen??null,local,registry,intent.reason]);}
+
   const setting = readEscalateConfig(store.get('escalate'));
-  const hosted = store.get('escalate.provider') as ProviderConfig | undefined;
-  // The key is part of being usable, not a detail discovered on the way out.
-  const usable = Boolean(hosted?.model && isOpenAIShaped(hosted.provider) && hasKeyFor(hosted.endpoint));
-  // An attachment overrides the word count, and overrides the setting with it.
-  // Escalation being switched off is a preference about cost on an ordinary
-  // question asked at the desk; a file has no local answer to fall back to,
-  // only a worse one.
-  const forced = pictures || files;
-  if (!usable || (!setting.enabled && !forced)) return { config: local, escalated: false, because: 'no second model set up', sees: false };
+  const vision = readVisionConfig(store.get('vision'));
+  const registry = callRegistry(readModelRegistry(store.get('ai.modelRegistry'), {
+    local, conversation: store.get('ai.conversation') as ProviderConfig | undefined,
+    specialist: store.get('escalate.provider') as ProviderConfig | undefined, vision,
+  }), store.get('ai.callConversation'), call);
+  const intent = await coreTaskIntent(message, { pictures, files, minWords: setting.minWords, history: conversation });
+  const policy = readTaskPolicy(store.get('ai.taskPolicy'));
+  const role = intent.role;
+  const request: RouteRequest = {
+    cloudAllowed: policy.enabled && (role === 'conversation' || setting.enabled),
+    conversation: [...routingTextHistory(conversation), { role: 'user', content: message }],
+    inputs: pictures ? ['text', 'image'] : ['text'], tools: true,
+    budgetMicros: policy.dailyBudgetMicros ? policy.taskBudgetMicros : 0,
+    available: entry => providerAvailability.available(entry.config) && (entry.local || hasKeyFor(entry.config.endpoint)),
+  };
+  const chosen = await selectCallModel(registry, role, request) ?? await coreSelectTaskModel(registry, role, request);
+  return chosen ? brainFromEntry(chosen, intent.reason) : {
+    config: local, escalated: false, because: 'no eligible direct route; using local Qwen',
+    sees: registry.find(entry => entry.role === 'everyday')?.capabilities.image ?? false, role: 'everyday', entryId: 'everyday',
+  };
+}
+function brainFromEntry(entry: ModelEntry, because: string): Brain {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('brainFromEntry',[entry,because]);
 
-  const verdict = pictures ? { escalate: true, because: 'there is a picture in it' }
-    : files ? { escalate: true, because: 'there is a file in it' }
-    : decide(message, setting, { routed: conversationRoute() !== null });
-  if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
+  return { config: entry.config, escalated: !entry.local && entry.role !== 'conversation', hosted: entry.role === 'conversation' && !entry.local,
+    because, sees: entry.capabilities.image, role: entry.role, entryId: entry.id };
+}
+function observeTaskModel(model: string, succeeded: boolean) {
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){conversationCommit(app.getPath('userData'),naturalPolicy<any>('modelObserved',[remainingStore(app.getPath('userData')).get('config',{}),model,succeeded]));return;}
 
-  // The content scan only. A page she reads mid-turn is not a reason to keep
-  // the turn home: the brain is chosen before any tool runs, so no page-read
-  // flag can be set here (an old global carried the previous turn's flag in,
-  // which kept the message *after* a lookup local and never the lookup itself),
-  // and the tool loop already hands a page to whichever model is answering.
-  // An attachment is a file from this machine, but attaching something is a
-  // deliberate act of handing it over, so it is not refused here either.
-  const allowed = conversationMayLeave([...conversation, { role: 'user', content: message }]);
-  if (!allowed.safe) {
-    console.log(`[router] keeping this one local — ${allowed.because}`);
-    return { config: local, escalated: false, because: `stays here: ${allowed.because}`, sees: false };
-  }
-  return { config: { ...hosted!, temperature: local.temperature }, escalated: true, because: verdict.because, sees: true };
+  const saved = store.get('ai.modelRegistry') as { entries?: any[] } | undefined;
+  if (!saved?.entries) return;
+  store.set('ai.modelRegistry', { ...saved, entries: saved.entries.map(entry => entry.config?.model === model ? {
+    ...entry, observed: { attempts: (entry.observed?.attempts ?? 0) + 1, successes: (entry.observed?.successes ?? 0) + Number(succeeded) },
+  } : entry) });
 }
 
 // There used to be a fastBrain() here that sent the one-shot composers — the
@@ -7808,6 +8711,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   vision: VisionConfig,
   provider: ProviderConfig,
 ): Promise<(T & { images?: string[] })[]> {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return foldCoreAttachments(messages,inPlay,sees,a=>readAttachment(a,vision,provider),imageForSending);
   if (!inPlay.size) return messages;
   const out: (T & { images?: string[] })[] = [...messages];
   for (const [at, attachments] of inPlay) {
@@ -7836,9 +8740,25 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
+const finishLocalReply: typeof finishLocalReplyUntimed = (...args) => timeTurnReview(() => finishLocalReplyUntimed(...args));
+const naturalPreferences = new ConversationPreferenceCache();
+
+async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>) {
+  markTurn('foreground_queued');
+  return inferencePriority.runForeground(() => ollamaChatTurn(...args));
+}
+
+async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId, signal }: { signal?:AbortSignal; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
+  signal?.throwIfAborted();
+  markTurn('harness_start');
+  const enteredAt = Date.now();
+  console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'received', at: enteredAt })}`);
   const turn = createTurnContext({ hands, web, choices });
   const latest = messages.at(-1)?.content ?? '';
+  const nudgeResponseMessages = messages;
+  // Capture current-utterance evidence before any slow work or another input.
+  const voiceContext = voiceSense.beginTurn(latest);
+  const voiceEvidence = voiceSense.evidence();
   // Told which line of hers he is answering, where he said (replyto.ts). After
   // `latest`, which is read for what the message is ABOUT — the tool table, recall,
   // the stale-item check — and has to stay his words alone, not her quoted line.
@@ -7863,7 +8783,6 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and the answer to "how did it go" rarely looks like a completion.
   noteTheyAccounted(latest);
   // They have spoken, which is what every escalation was trying to achieve.
-  acknowledgeReminders();
   // Asked for somewhere real — a steakhouse, a barber, a place to eat — the
   // search runs before she answers and the results ride in beside the message,
   // because names are the one thing a small model invents most convincingly.
@@ -7873,8 +8792,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // an answer built out of a list somebody else wrote is not her repeating
   // herself, and it is not padding either.
   let fromSearch = false;
-  const lookUp = messages.at(-1)?.role === 'user' && searchConfig.enabled ? placeQuery(latest, searchConfig.place) : null;
-  if (lookUp) {
+  const placeLookupPlan=process.env.HARU_CORE_NAVIGATION_POLICY==='on'?navigationPolicy('placeSearchStart',[latest,messages.at(-1)?.role??null,searchConfig]):null;
+  const lookUp = placeLookupPlan?placeLookupPlan.query:(messages.at(-1)?.role === 'user' && searchConfig.enabled ? placeQuery(latest, searchConfig.place) : null);
+  // A standalone turn cannot enter the lookup awaits below; its reminder and
+  // mood writes can share one durable commit before provider work.
+  const batchReminderAcknowledgement = naturalConversationKind(latest) !== null && !lookUp;
+  if (!batchReminderAcknowledgement) acknowledgeReminders();
+  if (lookUp && process.env.HARU_CORE_NAVIGATION_POLICY==='on') {
+    const observed=await runCorePlaceSearch(placeLookupPlan,aside,{search:(query:string,options:any)=>searchWeb(query,options,net.fetch,getSearchKey()),format:(query:string,found:any)=>formatResults(query,found,false),current:()=>readSearchConfig(store.get('search'))});
+    aside=observed.aside;fromSearch=observed.fromSearch;
+  } else if (lookUp) {
     try {
       // A wider net than the usual four: she is picking three or four out of
       // it, and half of any page of results is a listicle rather than a place.
@@ -7922,20 +8849,34 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the GPS knows the place, not that it is work or that it ends at half four.
   // "It's not raining here" — their window, against the forecast's model. Kept
   // for a couple of hours: no rain pushes, and the prompt takes their word.
-  if (messages.at(-1)?.role === 'user' && disputesRain(latest)) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){conversationApply(corePolicySync<any>('conversation-program.weatherDispute',[remainingStore(app.getPath('userData')).get('config',{}),messages.at(-1)?.role??null,latest,Date.now()]));}else if (messages.at(-1)?.role === 'user' && disputesRain(latest)) {
     saveWeather({ ...getWeather(), disputedAt: Date.now() });
     console.log('[weather] they say it is not raining where they are — their word over the forecast for two hours');
   }
   // Their answer to what she asked about their day, taken as one: the aside is
   // marked answered, and the brain that replies is told what this is.
   let answering = '';
-  if (messages.at(-1)?.role === 'user') {
+  if(process.env.HARU_CORE_ASIDES==='on') {
+    const answer=coreAside('answer',{role:messages.at(-1)?.role});answering=answer.instruction;
+    if(answer.ask)console.log(`[push] they are answering ${answer.ask.asked}`);
+  } else if (messages.at(-1)?.role === 'user') {
     const ask = openAsk(getAsides(), Date.now());
     if (ask) {
       store.set('chat.asides', answerAsk(getAsides(), ask.id, new Date().toISOString()));
       answering = `They are answering what you asked at ${clockAt(Date.parse(ask.at))} — ${ask.asked}. Take it as the answer: react to it as you would, and remember it as a fact about their day.`;
       console.log(`[push] they answered her ask (${ask.asked})`);
     }
+  }
+  const feedbackAsides = getAsides(), feedbackLearning = getNudgeLearning();
+  const learned = await coreLearnNudgeResponse(feedbackAsides, feedbackLearning, nudgeResponseMessages, Date.now()).catch(() => {
+    console.log('[core-nudge] '+JSON.stringify({op:'response',reason:'attribution_unavailable'}));
+    return null;
+  });
+  if (learned && sameCoreFeedback(feedbackAsides, feedbackLearning, getAsides(), getNudgeLearning())) {
+    const response = learned.learning.at(-1);
+    const schedule = response?.engagement ? learnPhoneReply(getPhoneNudges(), response.asideId, zonedNow(CHAT_TIMEZONE).getHours(), Date.now()) : getPhoneNudges();
+    store.set({ 'chat.asides': learned.asides, 'chat.nudgeLearning': learned.learning, 'chat.phoneNudges': schedule });
+    sendToWindows('chat:asidesChanged', learned.asides);
   }
   // Said once, to him, and then done with: she is annoyed, not a broken record.
   // And if this very message is them naming the place — "I'm home now", late
@@ -7959,7 +8900,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Asked to be quiet, or finished being quiet: her call, see muteTurn. Not on a
   // call — he rang her to hear her.
   const quiet = messages.at(-1)?.role === 'user' && !call && !brief && !choices ? muteTurn(latest) : '';
-  let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
+  let turnedUp:string;
+  if(process.env.HARU_CORE_LOCATION_POLICY==='on'){const result=applyCoreLocation('chat',[latest,messages.at(-1)?.role==='user'],locationAdapter());turnedUp=result.turnedUp;}else{
+  turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
     console.log(`[where] they have said it themselves now — no complaint about ${arrival.place}`);
@@ -7982,12 +8925,20 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     store.set('told', spot);
     console.log(`[told] they are ${spot.enRoute ? 'on their way to ' : ''}${spot.where}${spot.until ? ` until ${spot.until}` : ''}${spot.thenTo ? `, then ${spot.thenTo}` : ''}`);
   }
+  }
   // Their own ask first; failing that, her offer plus their yes — "I'll remind
   // you at 6:54 AM if you need it" / "Yes please" — which reads as a request
   // only when the two messages are read together. See acceptedOffer.
   const herPrevious = [...messages].reverse().find(message => message.role === 'assistant')?.content;
   const theirRecent = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
-  const reminder = messages.at(-1)?.role === 'user'
+  let reminder: ReturnType<typeof reminderAsk> = null;
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){
+    const packet=corePolicySync<any>('agenda-life.directReminder',[agendaFacts(ownedAgendaCore()),{lastIsUser:messages.at(-1)?.role==='user',latest,previous:typeof herPrevious==='string'?herPrevious:null,recentUsers:theirRecent,clock:agendaClock(zonedNow(CHAT_TIMEZONE))},new Date().toISOString(),randomUUID()]);
+    applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+    if(packet.result){reminder=packet.result.reminder;aside=[aside,packet.result.aside].filter(Boolean).join(' ');}
+    if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
+  }else{
+  reminder = messages.at(-1)?.role === 'user'
     ? (reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) ?? acceptedOffer(latest, typeof herPrevious === 'string' ? herPrevious : undefined, theirRecent, zonedNow(CHAT_TIMEZONE)))
     : null;
   if (reminder) {
@@ -7995,26 +8946,31 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     console.log(`[remind] read from the message: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
     aside = [aside, reminderSavedAside(reminder, localDateKey(zonedNow(CHAT_TIMEZONE)))].filter(Boolean).join(' ');
   }
+  }
   // Counted here rather than in the prompt so it survives across turns: telling
   // her to drop it and having her comply for one reply is the whole complaint.
-  const pushback = nextPushback(store.get('pushback') as Pushback | undefined, readsAsDropIt(latest), Date.now());
-  store.set('pushback', pushback);
+  const previousPushback = store.get('pushback') as Pushback | undefined;
+  const pushback=process.env.HARU_CORE_DEVICE_ACTIVITY==='on'?deviceMutation('pushback',[latest],deviceStateAdapter()):nextPushback(previousPushback,readsAsDropIt(latest),Date.now());
+  if(!(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')&&(pushback.count!==previousPushback?.count||pushback.at!==previousPushback?.at))store.set('pushback',pushback);
   if (readsAsDropIt(latest)) feelNow('drop-it');
   if (readsAsDropIt(latest)) console.log(`[pushback] told to drop it (${pushback.count}/${PUSHBACK_LIMIT})${isSilenced(pushback, Date.now()) ? ' — dropping the subject entirely' : ''}`);
   nudgeVitals('spoken-to');
-  const mood = advanceMood(latest, messages.slice(0, -1));
+  // Feelings and mood are one interaction update, committed together before dispatch.
+  const mood = await store.transactionAsync(() => {
+    if (batchReminderAcknowledgement) acknowledgeReminders();
+    return advanceMood(latest, messages.slice(0, -1));
+  });
   const { irritation, ego } = mood;
   // The category only, never the title — a log outlives the moment, and a
   // browsing history written to disk is a different thing from her reading a
   // window title and forgetting it.
   console.log(`[ai] chat request: model=${config.model} ctx=${chatNumCtx()} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight} screen=${currentActivity ? currentActivity.kind : 'none'}${traceId ? ` trace=${traceId}` : ''}`);
-  // Past the threshold she does not answer at all. Returned rather than thrown:
-  // the renderer marks the turn as ignored instead of showing an error.
-  if (isIgnoring(irritation)) {
-    console.log('[ai] ignoring — irritation above threshold');
-    return { content: '', ignored: true, irritation, ego, choices: turn.pendingChoices() };
-  }
-  const started = Date.now();
+  // Explicit messages receive answers at every mood level. Background callers
+  // still use isIgnoring to suppress unsolicited chatter.
+  const started = enteredAt;
+  // Stage timings contain no conversation content.
+  let prepLast = enteredAt;
+  const prepMark = (what: string) => { markTurn('preparation_checkpoint',{step:what}); const now = Date.now(); console.log(`[prep] ${what}: ${now - prepLast}ms${traceId ? ` trace=${traceId}` : ''}`); prepLast = now; };
   const startOfToday = localDateKey(zonedNow(CHAT_TIMEZONE));
   const hasItems = getKept().some(item => item.date >= startOfToday);
   const fresh = readFreshStart(messages);
@@ -8034,59 +8990,57 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // her replies in too would just as often paper over a message with no
   // keywords of its own with ones that were never theirs.
   const recentUserContext = messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-3).join(' ');
+  // Decide before system inspection, retrieval or full prompt construction.
+  // Interaction-state writes above remain authoritative on both paths.
+  let compactConversation: OllamaMessage[] | null = null;
+  let compactSources: NaturalConversationSources | null = null;
+  let compactReason = 'dependent_or_mixed_request';
+  const assemblyCache: { revision?: string; hit?: boolean } = {};
+  let preferenceCacheHit = false;
+  const compactEvidence = { now: zonedNow(CHAT_TIMEZONE), timezone: CHAT_TIMEZONE, voice: voiceEvidence, fresh };
+  const naturalAdmission=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<any>('admission',[{messages,latest,brief:Boolean(brief),choices:Boolean(choices),answering:Boolean(answering),turnedUp:Boolean(turnedUp),quiet:Boolean(quiet),rant:Boolean(rantRoomNow),aside:aside??null,call,fast:store.get('ai.fastConversation')??null,route:conversationRoute()??null}]):null;
+  const proposedKind=naturalAdmission?naturalAdmission.kind:naturalConversationKind(latest);
+  const specialMode=naturalAdmission?naturalAdmission.special:brief||choices||answering||turnedUp||quiet||rantRoomNow||!directReplyAsideAllowed(aside,call);
+  if(naturalAdmission?naturalAdmission.eligible:proposedKind&&!specialMode&&naturalConversationEligible(messages,latest)&&(!call||naturalCallAllowed(store.get('ai.fastConversation'),messages,latest,aside))&&conversationRoute()){
+    if (!conversationMayLeave(nudgeResponseMessages, false, Number.MAX_SAFE_INTEGER).safe) compactReason = 'private_context';
+    else {
+      try {
+        const slate = getSlate();
+        const blankSlate = Boolean(blankSlateInstruction(slate, knownSinceSlate()));
+        const deletions = memoryStore.getDeletions();
+        const naturalSources=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<any>('continuitySources',[deletions,blankSlate,slate??null,fresh??null,messages]):null;
+        const forgottenAt=naturalSources?naturalSources.options.forgottenAt:deletions.map(entry=>entry.at).sort().at(-1);
+        const preferences=naturalPreferences.read(nudgeResponseMessages,getMemories(),naturalSources?naturalSources.options:{blankSlate,deletedIds:deletions.map(entry=>entry.id),forgottenAt});
+        preferenceCacheHit = preferences.hit;
+        // Old transcript words must not resurrect a deleted/reset preference.
+        const cutoff=naturalSources?0:Math.max(Date.parse(forgottenAt??'')||0,blankSlate?Date.parse(slate?.at??'')||0:0,fresh?.reason==='manual'?Date.parse(fresh.at)||0:0);
+        const recent=naturalSources?naturalSources.recent:messages.filter((message,index)=>index===messages.length-1||!cutoff||Date.parse(message.at??'')>cutoff);
+        assemblyCache.revision = JSON.stringify([store.get('ai.conversation'), store.get('ai.fastConversation')]);
+        const prepared = await corePrepareNaturalConversation(recent, latest, getActiveCharacter(), {
+          ...compactEvidence, continuity: preferences.entries,
+          mood: { irritation, ego, goodnight: mood.goodnight, shout: mood.shout },
+          blankSlate: blankSlateInstruction(slate, knownSinceSlate()),
+          learnedLessons: learningNote(app.getPath('userData'), latest, conversationRoute()!.model),
+          ...(call ? { callContext: aside } : {}),
+        }, assemblyCache);
+        compactConversation = prepared.messages;
+        compactSources = prepared.sources;
+        compactReason = `standalone_${proposedKind}`;
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith('natural_context_overflow:')) throw error;
+        compactReason = error.message;
+      }
+    }
+  } else if (proposedKind) compactReason = specialMode ? 'special_context' : 'attachments_history_or_route';
+  console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'route', elapsedMs: Date.now() - enteredAt,
+    path: compactConversation ? 'natural' : 'full', reason: compactReason, instructionCacheHit: Boolean(assemblyCache.hit), preferenceCacheHit })}`);
   // Collected before the prompt so a machine question is answered from facts,
   // not from the model's assumptions about what it runs on.
-  const machineNote = await systemContextFor(latest);
+  const machineNote = compactConversation ? '' : await systemContextFor(latest);
+  prepMark('systemContext');
   // Likewise the way somewhere: found first, spoken about second, linked last.
-  const directions = await directionsFor(latest, messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-4));
-  // Semantic retrieval: embed this turn's query (cached) and fold the memory
-  // similarities into what she gets told, so "the thing we did to the server"
-  // can find the memory even with no words in common.
-  // And the message on its own, in parallel, so earlier lines about something
-  // else cannot drown out what was just asked (RetrieveOptions.focus).
-  // Further back than the days in front of her: an exchange or two from the
-  // archive, only when this message names something specific that they name too,
-  // or nothing. Its own embedding, of this message alone and with the search
-  // prefix, because the memories above are embedded without one. See recall.ts.
-  // Decided before the embeds go out so its request rides with the other two:
-  // the embedder is on the CPU and serves one request at a time, so awaited
-  // after them it was a third embed's wait on every reply that named anything.
-  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
-  const archiveIndex = chatIndex(recallDay);
-  const specific = rareTerms(archiveIndex, latest);
-  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
-  const [queryVector, latestVector, recallVector] = await Promise.all([
-    tryEmbedQuery(`${recentUserContext} ${latest}`),
-    recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
-    recallModel && embedFormat(recallModel) === recallFormat ? tryEmbedQuery(embedText(recallModel, 'query', latest)) : Promise.resolve(null),
-  ]);
-  const semantic = queryVector && memoryStore.vectors().size
-    ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
-    : undefined;
-  const latestSemantic = latestVector && memoryStore.vectors().size
-    ? semanticSimilarities(getMemories(), latestVector, memoryStore.vectors())
-    : undefined;
-  // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
-  const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
-  const recalled = recallVector && shownDays
-    ? pickRecalled(archiveIndex.exchanges, recallVectors, recallVector, RECALL_LIMIT, RECALL_FLOOR, exchange => !shownDays.has(exchange.day) && mentionsAny(archiveIndex, exchange.id, specific))
-    : [];
-  if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
-  // Who and what the message names, and one step further (factgraph.ts). A
-  // lookup, not a call — and nothing at all when nobody is named.
-  const factGraph = store.getFactGraph();
-  const linked = linkedFacts(factGraph, latest, { context: recentUserContext, userName: graphUserName() });
-  if (linked.length) console.log(`[graph] ${linked.length} linked fact(s) for ${[...new Set(linked.map(entry => entry.seed))].map(id => factGraph.entities.find(entity => entity.id === id)?.name).join(', ')}`);
-  // His own card on whatever just came up, and any still up from the last message or two (lore.ts).
-  const lore = activeCards(loreCards(), latest, loreMemory);
-  loreMemory = lore.memory;
-  if (lore.cards.length) console.log(`[lore] ${lore.cards.length} card(s) up${lore.triggered.length ? ` — just came up: ${lore.triggered.join('; ')}` : ''}`);
-  const promptNow = zonedNow(CHAT_TIMEZONE);
-  // Written down every reply so the eight thresholds in VITAL_CUES can be
-  // tuned from what actually fired rather than from what they were guessed to
-  // fire at. `grep '\[vitals\]' ~/haru.log | …` is the whole measurement.
-  console.log(`[vitals] ${cueLog(vitals, getMood().irritation)}`);
-  { const mood = getMood(); const woke = getTemperament(); console.log(`[mood] ${woke ? `${woke.kind} ${woke.intensity}` : 'no temperament yet'} · irritation ${mood.irritation} ego ${mood.ego} grudge ${mood.grudge ?? 0} · ${feelingsLog(getFeelings())}`); }
+  const directions = compactConversation ? null : await directionsFor(latest, messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-4));
+  prepMark('directions');
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.
@@ -8094,7 +9048,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // message and are not hers to see: shown one, she wrote one, coordinates
   // and all, in place of a reply.
   const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message))
-    .map(message => (message.role === 'assistant' && /maps\.apple\.com|google\.com\/maps|goo\.gl/.test(message.content ?? '') ? { ...message, content: withoutMapsLinks(message.content) } : message));
+    .map(message => process.env.HARU_CORE_NAVIGATION_POLICY==='on'?navigationPolicy<typeof message>('historyMessage',[message]):(message.role === 'assistant' && /maps\.apple\.com|google\.com\/maps|goo\.gl/.test(message.content ?? '') ? { ...message, content: withoutMapsLinks(message.content) } : message));
   const inPlay = attachmentsInPlay(vetted, Date.now());
   const carried = [...inPlay.values()].flat();
   // Only what arrived with this message decides where it is answered. A
@@ -8117,10 +9071,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and not the transcript, and answers from what a YouTube link usually is —
   // it described Rick Astley for a clip of elephants, with the words in hand.
   const video = messages.at(-1)?.role === 'user' && videoIdFrom(latest.match(/https?:\/\/\S+/)?.[0] ?? '') !== null;
-  // A call never goes out to the second model: its answer is not streamed,
-  // and the rewrite that says it as herself is a second wait on top — one
-  // spoken question with two question marks in it was sent out as "several
-  // questions at once" and took 16 s to come back.
+  // Call cloud opt-in covers both the compact social path and ordinary
+  // conversation with full retrieval. Local actions and private context still
+  // stay home; every cloud request uses the normal task and publication gate.
   // A command may run this turn: answered at home, so what it prints never
   // leaves the box (shell.ts) — the hosted route is skipped below as well.
   const shellTurn = messages.at(-1)?.role === 'user' && shellRelevant(latest) && shellLink() !== null;
@@ -8128,27 +9081,21 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The machine is in the conversation at any level: she is told the server is
   // the box in her room, hers to look at with her tools (prompt.ts).
   const machineTurn = !shellTurn && messages.at(-1)?.role === 'user' && readSystemConfig().enabled && (machineRelevant(latest) || downloadsRelevant(latest));
-  let brain: Brain = call ? { config, escalated: false, because: 'a call is answered at home', sees: false }
+  const naturalPaths=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<any>('pathKinds',[{brief:Boolean(brief),choices:Boolean(choices),answering:Boolean(answering),carried:carried.length,aside:aside??null,call,messages,vetted,latest,machineTurn,fast:store.get('ai.fastConversation')??null}]):null;
+  const directKind=naturalPaths?naturalPaths.directKind:!brief&&!choices&&directReplyAsideAllowed(aside,call)&&!answering&&!carried.length&&messages.at(-1)?.role==='user'?directReplyKind(latest):null;
+  const fastCall=naturalPaths?naturalPaths.fastCall:call&&!brief&&!choices&&!answering&&!carried.length&&naturalCallAllowed(store.get('ai.fastConversation'),vetted,latest,aside);
+  const cloudCall=naturalPaths?naturalPaths.cloudCall:call&&!brief&&!choices&&!answering&&!carried.length&&!machineTurn&&conversationCallAllowed(store.get('ai.fastConversation'),vetted,latest,aside);
+  const turnAdmission=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('initial',[{call,cloudCall,shell:shellTurn,directions:Boolean(directions),video,directKind,conversationRoute:conversationRoute(),brief,choices,privateSafe:conversationMayLeave(nudgeResponseMessages,false,Number.MAX_SAFE_INTEGER).safe,config}]):null;
+  let brain:Brain=turnAdmission?(turnAdmission.brain??await brainFor(latest,config,messages,{pictures,files:arrived.length>0,call})):call && !cloudCall ? { config, escalated: false, because: 'a local-only call', sees: false }
     : shellTurn ? { config, escalated: false, because: 'a command may run: answered at home', sees: false }
     : directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
     : video ? { config, escalated: false, because: 'a video is read at home, where the transcript tool is', sees: false }
-    : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
+    : directKind && !conversationRoute() ? { config, escalated: false, because: 'a short conversational turn', sees: false }
+    : await brainFor(latest, config, messages, { pictures, files: arrived.length > 0, call });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
-  // Their turn, not escalated, not a one-shot composer: the conversation route
-  // answers as her, if one is set and this conversation may leave the box.
   const home = config;
-  const route = !brain.escalated && !shellTurn && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
-  if (route) {
-    // A page she fetched last turn does not keep this turn at home. His
-    // call, 2026-09-02: a public page she went and read may ride along to the
-    // conversation model. What still keeps a turn home is the content scan
-    // over the last dozen messages, page text included — a key, a card number,
-    // a password with a value beside it — and reading a page still takes her
-    // tools away for the rest of that turn. Escalation keeps the stricter rule.
-    const allowed = conversationMayLeave([...messages]);
-    if (allowed.safe) brain = { config: { ...route, temperature: config.temperature }, escalated: false, because: 'the conversation route', sees: false, hosted: true };
-    else console.log(`[router] the conversation route stays home this turn — ${allowed.because}`);
-  }
+  const cloudAllowed=turnAdmission?turnAdmission.cloudAllowed:(!call||cloudCall)&&!shellTurn&&!directions&&!video&&!brief&&!choices&&conversationMayLeave(nudgeResponseMessages,false,Number.MAX_SAFE_INTEGER).safe;
+  if(process.env.HARU_CORE_NATURAL_TURN==='on')brain=naturalTurn<Brain>('enforce',[brain,home,cloudAllowed]);else if(!cloudAllowed)brain={config:home,escalated:false,because:'local-only turn',sees:false,role:'everyday',entryId:'everyday'};
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
   // Said out loud, once, when a picture has just been attached and cannot be
@@ -8163,18 +9110,98 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Reading a file is the slow part, so it happens once the brain is settled and
   // its result is cached — a follow-up about the same video must not transcribe
   // it a second time.
-  const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  const withFiles = compactConversation ? vetted : await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  prepMark('attachments');
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
-  // A picture a seeing brain was handed is read through her own eyes in the
-  // background as well. The follow-up goes to the conversation route, which
-  // cannot see, and waited twenty seconds for that reading in the turn —
-  // done now, it is in the cache by the time they ask.
-  if (brain.sees) {
+  // Literal fresh-image descriptions already have one grounded foreground
+  // read. Avoid a second caption competing for the same local model. Other
+  // image tasks retain prefetch; uncached follow-ups read on demand as before.
+  const imageInputProfile = brain.sees && pictures ? await coreInputProfile(latest, pictures) : 'normal';
+  if(process.env.HARU_CORE_ATTACHMENTS==='on'){for(const file of attachmentPolicy<Attachment[]>('preload',[carried,brain.sees,imageInputProfile]))void readAttachment(file,vision,config).catch(()=>{});}else if (brain.sees && imageInputProfile !== 'grounded-perception') {
     for (const file of carried) {
       if (file.kind !== 'image') continue;
       void readAttachment(file, vision, config).catch(() => { /* the follow-up tries again, as before */ });
     }
   }
+  const naturalKind=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<any>('hostedKind',[{compact:Boolean(compactConversation),hosted:Boolean(brain.hosted),brief:Boolean(brief),choices:Boolean(choices),call,fastCall,answering:Boolean(answering),aside:aside??null,turnedUp:Boolean(turnedUp),quiet:Boolean(quiet),rant:Boolean(rantRoomNow),carried:carried.length,messages:withFiles,latest}]):compactConversation&&brain.hosted&&!brief&&!choices&&(!call||fastCall)&&!answering&&directReplyAsideAllowed(aside,call)&&!turnedUp&&!quiet&&!rantRoomNow&&!carried.length&&naturalConversationEligible(withFiles,latest)?naturalConversationKind(latest):null;
+  if (naturalKind) console.log(`[latency] natural=${naturalKind} retrieval=not-needed${traceId ? ` trace=${traceId}` : ''}`);
+  if (naturalKind) markTurn('retrieval_skipped');
+  const { conversation, evidence: replyEvidence } = naturalKind && compactConversation
+    ? { conversation: compactConversation, evidence: compactEvidence }
+    : await (async () => {
+  // Semantic retrieval: embed this turn's query (cached) and fold the memory
+  // similarities into what she gets told, so "the thing we did to the server"
+  // can find the memory even with no words in common.
+  // And the message on its own, in parallel, so earlier lines about something
+  // else cannot drown out what was just asked (RetrieveOptions.focus).
+  // Further back than the days in front of her: an exchange or two from the
+  // archive, only when this message names something specific that they name too,
+  // or nothing. Its own embedding, of this message alone and with the search
+  // prefix, because the memories above are embedded without one. See recall.ts.
+  // Decided before the embeds go out so its request rides with the other two:
+  // the embedder is on the CPU and serves one request at a time, so awaited
+  // after them it was a third embed's wait on every reply that named anything.
+  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const archiveIndex = (process.env.HARU_CORE_FINAL_TOOLS==='on'?!corePolicySync<any>('final-recall.eligibility',[naturalKind??null,0,0]).index:Boolean(naturalKind)) ? null : chatIndex(recallDay);
+  const specific = archiveIndex ? rareTerms(archiveIndex, latest) : new Set<string>();
+  const recallModel = (process.env.HARU_CORE_FINAL_TOOLS==='on'?corePolicySync<any>('final-recall.eligibility',[naturalKind??null,recallVectors.size,specific.size]).model:recallVectors.size&&specific.size) ? getKnowledgeEmbedder()?.model : undefined;
+  markTurn('retrieval_start');
+  const retrievalStartedAt = Date.now();
+  const coreMemoryConfig = readCoreMemoryConfig();
+  const coreReadAt = new Date();
+  const sourceRevision = store.memorySourceRevision();
+  const memoryRequest: CoreMemoryRequest = {
+    protocol: 1, query: recentUserContext ? `${recentUserContext} ${latest}` : latest, latest,
+    ...(sourceRevision ? { expectedSourceRevision: sourceRevision } : {}), now: coreReadAt.toISOString(), expectedSlateAt: getSlate()?.at ?? null,
+    ...(coreMemoryConfig.expectedEpochId ? { expectedEpochId: coreMemoryConfig.expectedEpochId } : {}),
+  };
+  const auxiliaryTexts = [`${recentUserContext} ${latest}`.trim(),
+    recentUserContext.trim() ? latest.trim() : null,
+    recallModel && embedFormat(recallModel) === recallFormat ? embedText(recallModel, 'query', latest).trim() : null];
+  const embeddingModel = getKnowledgeEmbedder();
+  const combinedMemory = coreMemoryConfig.transport === 'service' && coreMemoryConfig.mode === 'on' && sourceRevision
+    && embeddingModel?.cacheKey === `${coreMemoryConfig.endpoint.replace(/\/+$/, '')}\u0000${coreMemoryConfig.embedModel}`
+    ? prepareCoreMemory(coreMemoryConfig, memoryRequest, auxiliaryTexts.flatMap((text, index) => text ? [{ id: String(index), text }] : []), embeddingModel.model)
+      .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error })) : null;
+  const readMemoryForTurn = prefetchCoreMemory(coreMemoryConfig, memoryRequest, combinedMemory ? async () => {
+    const result = await combinedMemory; if (!result.ok) throw result.error; return result.value.memory;
+  } : undefined);
+  const [queryVector, latestVector, recallVector] = combinedMemory ? await combinedMemory.then(result =>
+    auxiliaryTexts.map((_, index) => result.ok ? result.value.vectors[String(index)] ?? null : null)) : await Promise.all([
+    naturalKind ? Promise.resolve(null) : tryEmbedQuery(`${recentUserContext} ${latest}`),
+    !naturalKind && recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
+    recallModel && embedFormat(recallModel) === recallFormat ? tryEmbedQuery(embedText(recallModel, 'query', latest)) : Promise.resolve(null),
+  ]);
+  prepMark('embeddings');
+  const semantic = queryVector && memoryStore.vectors().size
+    ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
+    : undefined;
+  const latestSemantic = latestVector && memoryStore.vectors().size
+    ? semanticSimilarities(getMemories(), latestVector, memoryStore.vectors())
+    : undefined;
+  // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
+  const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
+  const recalled = process.env.HARU_CORE_FINAL_TOOLS==='on'
+    ? (archiveIndex?coreProactiveRecall(archiveIndex,recallVectors,recallVector,[...(shownDays??[])],[...specific]):[])
+    : recallVector && shownDays && archiveIndex
+    ? pickRecalled(archiveIndex.exchanges, recallVectors, recallVector, RECALL_LIMIT, RECALL_FLOOR, exchange => !shownDays.has(exchange.day) && mentionsAny(archiveIndex, exchange.id, specific))
+    : [];
+  if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
+  // Who and what the message names, and one step further (factgraph.ts). A
+  // lookup, not a call — and nothing at all when nobody is named.
+  let factGraph = store.getFactGraph();
+  let linked = naturalKind || process.env.HARU_CORE_GRAPH_RETRIEVAL === 'on' ? [] : linkedFacts(factGraph, latest, { context: recentUserContext, userName: graphUserName() });
+  if (linked.length) console.log(`[graph] ${linked.length} linked fact(s) for ${[...new Set(linked.map(entry => entry.seed))].map(id => factGraph.entities.find(entity => entity.id === id)?.name).join(', ')}`);
+  // His own card on whatever just came up, and any still up from the last message or two (lore.ts).
+  const lore = activeCards(loreCards(), latest, loreMemory);
+  loreMemory = lore.memory;
+  if (lore.cards.length) console.log(`[lore] ${lore.cards.length} card(s) up${lore.triggered.length ? ` — just came up: ${lore.triggered.join('; ')}` : ''}`);
+  const promptNow = zonedNow(CHAT_TIMEZONE);
+  // Written down every reply so the eight thresholds in VITAL_CUES can be
+  // tuned from what actually fired rather than from what they were guessed to
+  // fire at. `grep '\[vitals\]' ~/haru.log | …` is the whole measurement.
+  console.log(`[vitals] ${cueLog(vitals, getMood().irritation)}`);
+  { const mood = getMood(); const woke = getTemperament(); console.log(`[mood] ${woke ? `${woke.kind} ${woke.intensity}` : 'no temperament yet'} · irritation ${mood.irritation} ego ${mood.ego} grudge ${mood.grudge ?? 0} · ${feelingsLog(getFeelings())}`); }
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
@@ -8183,20 +9210,38 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // first, the clock and mood and screen last — and the reply starts at the
   // cache instead of at full prompt-processing speed. The local model keeps
   // the tone-last order, which it was written for.
-  const coreMemoryConfig = readCoreMemoryConfig();
   const profileArgs = [latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic] as const;
   let coreGraphIds: string[] = [];
-  const coreMemory = await selectCoreMemory({
+  const coreMemory: Awaited<ReturnType<typeof selectCoreMemory>> = naturalKind
+    ? { profile: '', oldProfile: '', status: coreMemoryConfig.mode, elapsedMs: 0 }
+    : await selectCoreMemory({
     config: coreMemoryConfig,
+    read: readMemoryForTurn,
+    now: coreReadAt,
     background: !coreMemoryConfig.captureDir,
     query: recentUserContext ? `${recentUserContext} ${latest}` : latest,
+    latest,
+    sourceRevision: () => store.memorySourceRevision(),
     slateAt: () => getSlate()?.at ?? null,
     render: memoryStore.prepareProfileSummary(...profileArgs, ids => { coreGraphIds = ids; }),
     fallbackRender: () => profileSummary(...profileArgs),
     log: entry => console.log(`[core-memory] ${JSON.stringify(entry)}`),
   });
+  prepMark('coreMemory');
+  // Read the current graph after memory's awaited work; no retained decision is
+  // reused across that await. Enabled mode has no local graph-policy fallback.
+  if (!naturalKind && process.env.HARU_CORE_GRAPH_RETRIEVAL === 'on') {
+    factGraph = store.getFactGraph();
+    linked = linkedFacts(factGraph, latest, { context: recentUserContext, userName: graphUserName() });
+  }
+  markTurn('retrieval_end');
+  console.log(`[retrieval-timing] ${JSON.stringify({ elapsedMs: Date.now() - retrievalStartedAt, parallel: true })}`);
   const promptState = {
     ...mood,
+    learnedLessons: learningNote(app.getPath('userData'), latest, brain.config.model),
+    imaginedDream: naturalKind ? '' : imaginationNote(app.getPath('userData'), latest),
+    // Nighttime courtesy and follow-ups should not be displaced by an old row.
+    ...(herKnockedAwakeNow() ? { goodnight: 'none' as const, shout: mood.shout === 'awaiting' ? 'none' as const : mood.shout } : {}),
     now: promptNow,
     timezone: CHAT_TIMEZONE,
     character: getActiveCharacter(),
@@ -8227,7 +9272,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     known: knownSinceSlate(),
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
-    linked: linkedNote(factGraph, coreMemory.status === 'on' ? withoutCoreGraphClaims(linked, coreGraphIds) : linked),
+    linked: naturalKind ? '' : linkedNote(factGraph, coreMemory.status === 'on' ? withoutCoreGraphClaims(linked, coreGraphIds) : linked),
     // Lore.md is his page, and it hands her his name, his job, his business
     // address, his psychologist and his diagnosis — on exactly the message the
     // slate has her asking who he is. His page is untouched and the cards come
@@ -8243,7 +9288,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // Her day, what months made of her, and what she is feeling — as things
     // that want to be said, for compile.ts to arbitrate between (prompt.ts).
     behaviour: herBehaviour(),
-    fond: vitals.affection >= 0.72,
+    fond: process.env.HARU_CORE_STARTUP_CONTEXT==='on'?corePolicySync('conversation-inputs.fond',[vitals.affection]):vitals.affection >= 0.72,
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: ignoredTodayNow(),
@@ -8258,9 +9303,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
     tastes: tastesInstruction(getInterests()),
-    diary: diaryContext(recentEntries(app.getPath('home'), 2)),
+    diary: naturalKind ? '' : diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
-    serverNote: shellTurn ? SERVER_NOTE : machineTurn ? serverLookNote(readSystemConfig().level) : '',
+    serverNote: [shellTurn ? (process.env.HARU_CORE_FINAL_TOOLS==='on'?corePolicySync<string>('final-shell.note',['serverNote']):SERVER_NOTE) : machineTurn ? serverLookNote(readSystemConfig().level) : '', shellLink() && readSystemConfig().level === 4 ? (process.env.HARU_CORE_FINAL_TOOLS==='on'?corePolicySync<string>('final-shell.note',['diagnosticNote']):DIAGNOSTIC_NOTE) : ''].filter(Boolean).join(' '),
   };
   console.log(`[prompt] ${compileLog(behaviourOf(promptState))}`);
   // A hosted brain reads the whole prompt before its first word, so its system
@@ -8277,11 +9322,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // compliance is untested, and a malformed label is the one thing the stripper
   // cannot take out — it removes an exact [mood] and leaves anything else
   // visible, which on the fallback brain would put the mess in front of him.
-  const sizedSystem = (state: typeof promptState) => {
-    const system = chatSystemPrompt(state, Boolean(brain.hosted), Boolean(away));
-    return (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
-  };
-  const sized = sizedSystem(promptState);
+  const assembledPrompt = naturalKind ? {system:'',dynamic:''} : await coreChatPrompt(promptState,Boolean(brain.hosted),Boolean(away),answering);
+  const sized = assembledPrompt.system;
+  prepMark('chatSystemPrompt');
   // On a turn about her, the sign-off comes off her recent replies as she is
   // shown them — see seedOffTheOrders. She copies the history over the rule.
   // The days before this one, in front of today's: her own one-line notes for
@@ -8290,7 +9333,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the raw day and byte-stable, so the cached head shrinks and stretches.
   // markTimeGaps writes the seam between today and any raw turns, so she can
   // tell yesterday from now rather than reading it all as one flat conversation.
-  const earlier = earlierDaysContext(getSessions(), getMonthNotes(), store.getArchive(), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
+  const earlier = naturalKind ? { turns: [], notes: [] } : earlierDaysContext(getSessions(), getMonthNotes(), store.getArchive(), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
+  prepMark('earlierDays');
   const before = earlier.turns
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
   if (earlier.notes.length) console.log(`[ai] ${earlier.notes.length} note(s) — months and days — go in front of today's`);
@@ -8300,8 +9344,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // other seeds: a rewrite that still ends on an order loses it like any other.
   const revoiced = applyRevoices(history as unknown as { id?: string; role: string; content: string }[], revoiceState().rewrites);
   if (revoiced.applied) console.log(`[revoice] ${revoiced.applied} of her replies shown as re-voiced`);
-  const shown = hers ? seedOffTheOrders(revoiced.shown as unknown as OllamaMessage[], dropClosingOrder) : revoiced.shown as unknown as OllamaMessage[];
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized },
+  const shown = process.env.HARU_CORE_STARTUP_CONTEXT==='on' ? [] : hers ? seedOffTheOrders(revoiced.shown as unknown as OllamaMessage[], dropClosingOrder) : revoiced.shown as unknown as OllamaMessage[];
+  let conversation: OllamaMessage[] = process.env.HARU_CORE_STARTUP_CONTEXT==='on' ? corePolicySync('conversation-inputs.history',[Boolean(hers),revoiced.shown,sized,brief,earlier.notes]) : [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized },
     // Her own notes on the finished days, as background right after the rules
     // and before anything raw — the first thing read after the system prompt.
     ...(earlier.notes.length ? [{ role: 'system', content: `The days before today, from your own notes — how things stood, in your words at the time:\n${earlier.notes.join('\n')}` }] : []),
@@ -8314,10 +9358,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // What he sent while she slept, read where the rest of the turn's asides
   // are — the last thing before she speaks, where a small model still has it.
   const wakeNow = wakeNoteNow();
-  // How he sounded, from the audio he uploaded — consumed once, the next time
-  // she speaks. The same room-reading as readsAsRough, from his voice instead
-  // of his words.
-  const voiceRoomNow = takeVoiceRoom();
+  // Audio evidence was matched to this exact utterance before the model ran.
+  const voiceRoomNow = voiceContext;
   // An aside about this turn — they spoke over her — goes in the same place,
   // read just before LAST_WORD; the Ollama shaper folds both into their turn.
   // The complaint about turning up unannounced goes here rather than into the
@@ -8328,29 +9370,32 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the local one already has it, in the tone-last order it was written for.
   // LAST_WORD comes last for the local brain; a hosted one gets her voice note
   // after it (HOSTED_VOICE), since that is where a hosted model reads hardest.
-  const preTurnSystem = [
-    ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
-    aside, turnedUp, directions?.note ?? '', hers, talking, quiet, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
+  const preTurnSystem = process.env.HARU_CORE_STARTUP_CONTEXT==='on' ? [] : [
+    ...(!naturalKind && brain.hosted ? [assembledPrompt.dynamic, answering] : []),
+    aside, turnedUp, directions?.note ?? '', hers, talking, quiet, rantRoomNow, wakeNow, emojiRut(herRecentReplies),
     LAST_WORD,
     // After LAST_WORD, for a hosted brain only: her register and the labelling
     // rule, nearest his turn, where a model that reads the end of the prompt
     // hardest still has them (HOSTED_VOICE in room.ts, deliveryReminder).
     brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
+    voiceRoomNow,
   ].filter(Boolean);
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')conversation=corePolicySync('conversation-inputs.preTurn',[conversation,{natural:naturalKind??null,hosted:Boolean(brain.hosted),dynamic:assembledPrompt.dynamic,answering,aside,turnedUp,directions:directions?.note??'',hers,talking,quiet,rantRoom:rantRoomNow,wake:wakeNow,recentReplies:herRecentReplies,voice:voiceRoomNow}]);
+  else if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
   if (coreMemoryConfig.captureDir && coreMemory.coreProfile !== undefined) {
     try {
-      const comparisonConversation = (profile: string, graphIds: string[]) => {
+      const comparisonConversation = async (profile: string, graphIds: string[]) => {
         const state = { ...promptState, profile, linked: linkedNote(factGraph, withoutCoreGraphClaims(linked, graphIds)) };
-        const variantSystem = sizedSystem(state);
+        const variantPrompt = await coreChatPrompt(state,Boolean(brain.hosted),Boolean(away),answering);
+        const variantSystem = variantPrompt.system;
         let variant = conversation.map((message, index) => index === 0 ? { ...message, content: brief ? `${variantSystem} ${BREVITY}` : variantSystem } : message);
-        if (brain.hosted) variant = replacePromptProfile(variant, chatDynamicContext(promptState, Boolean(away)), chatDynamicContext(state, Boolean(away)));
+        if (brain.hosted) variant = replacePromptProfile(variant, assembledPrompt.dynamic, variantPrompt.dynamic);
         return variant;
       };
       captureCorePromptComparison(coreMemoryConfig, {
         epochId: coreMemory.epochId, mode: coreMemory.status,
-        old: comparisonConversation(coreMemory.oldProfile, []),
-        core: comparisonConversation(coreMemory.coreProfile, coreGraphIds),
+        old: await comparisonConversation(coreMemory.oldProfile, []),
+        core: await comparisonConversation(coreMemory.coreProfile, coreGraphIds),
       });
     } catch { /* optional diagnostics must never cost a reply */ }
   }
@@ -8359,48 +9404,258 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // replaying what she was actually told, and nothing else shows that.
   if (process.env.HARU_DUMP_PROMPT) {
     try { writeFileSync(path.join(app.getPath('userData'), 'last-prompt.json'), JSON.stringify({ at: new Date().toISOString(), model: config.model, conversation }, null, 1)); } catch { /* a debugging aid must not cost a reply */ }
+    prepMark('promptDump');
   }
+      return { conversation, evidence: localReplyEvidence(promptState) };
+    })();
   // This turn owns its tool state from entry through every round and retry.
   // Reading outside text withdraws its tools without affecting other replies.
-  // What the reader has been shown so far this round. The moment a round is
-  // thrown away — a tool call arrives, the reply comes back empty, a retry is
-  // pressed — any words already streamed would be a lie, so the sink is told to
-  // take them back and the reader waits for the round that actually survives.
-  let roundStreamed = '';
+  // Publish once, after the tool loop and final filters accept the reply.
+  const replyGate = new ReplyGate(onChunk);
   let spilledHome = false;
-  const forwardChunk = onChunk ? (chunk: string) => { roundStreamed += chunk; onChunk(chunk); } : undefined;
   // Fixed for the whole turn. Only `tools` changes round to round, and that is
   // the loop's decision rather than this function's.
+  let providerFirst = false;
+  let providerSentAt = started;
+  let firstDispatchAt = 0;
   const roundOptions: PostOptions = {
     turn,
-    // The conversation is the one local call that wants the whole window;
-    // everything else shares the side jobs' runner (sideNumCtx).
+    // Background calls to this same model use this window too, avoiding reloads.
     numCtx: chatNumCtx(),
     // A message from outside the desk — the phone — gets a short leash.
     // The reader is watching a chat app, a long reply is a long wait, and
     // away-turns were found to run long: the cap keeps her concise without
     // touching the desk, where a full answer is the point of the window.
     ...(away ? { maxTokens: brain.hosted ? HOSTED_AWAY_MAX_TOKENS : AWAY_MAX_TOKENS } : {}),
-    // A hosted reply is not shown as it arrives: it is the research, not the
-    // answer, and it is said again as herself below — that is what streams.
-    ...(forwardChunk && !brain.escalated ? { onChunk: forwardChunk } : {}),
+    // Keep first-word transport timing while withholding unvalidated assertions.
+    onChunk: text => {
+      if (!providerFirst && text) {
+        providerFirst = true;
+        console.log(`[latency] provider-first=${Date.now() - providerSentAt}ms preparation=${providerSentAt - started}ms path=${naturalKind ? 'natural' : 'full'}${traceId ? ` trace=${traceId}` : ''}`);
+      }
+      replyGate.chunk(text);
+    },
   };
-  const { content: spoken, ran } = await runToolLoop(conversation, {
+  const answerLocally = async (sending: OllamaMessage[], localConfig: ProviderConfig, tools: boolean, inputProfile?:'grounded-perception') => {
+    const localLimit=await coreLocalBudget(localConfig,chatNumCtx(),net.fetch);
+    return inferencePriority.localReply(async () => {
+    if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreNaturalLocal({sending,config:localConfig,tools,inputProfile:inputProfile??null,visualProfiles:process.env.HARU_CORE_VISUAL_PROFILES==='on',naturalKind,compactSources,latest,replyEvidence,mood:getMood(),blankSlate:blankSlateInstruction(getSlate(),knownSinceSlate()),voice:voiceEvidence,localSinglePass:store.get('ai.fastConversation.localSinglePass')===true,directKind,character:getActiveCharacter(),aside:aside??null,numCtx:chatNumCtx(),recentReplies:herRecentReplies},roundOptions);
+    const compactLocal = naturalKind && compactSources && naturalConversationEligible(sending, latest) ? compactSources : null;
+    const localConversation = compactLocal?.messages ?? sending;
+    const evidence = { ...replyEvidence, mood: getMood(), blankSlate: blankSlateInstruction(getSlate(), knownSinceSlate()), ...(compactLocal ? {
+      now: compactLocal.context.now, timezone: compactLocal.context.timezone,
+      continuity: compactLocal.context.continuity, fresh: compactLocal.context.fresh,
+      mood: compactLocal.context.mood, blankSlate: compactLocal.context.blankSlate,
+    } : {}), voice: voiceEvidence };
+    const startedAt = Date.now();
+    if(inputProfile==='grounded-perception'&&process.env.HARU_CORE_VISUAL_PROFILES==='on'){
+      const answer=await composeLocalReply(localConversation,latest,evidence,
+        messages=>sendToProvider(messages,localConfig,{tools:false,table:[],temperature:.15,format:GROUNDED_REPLY_SCHEMA,numCtx:chatNumCtx(),maxTokens:350}),getActiveCharacter());
+      console.log('[perception-profile] '+JSON.stringify({profile:inputProfile,model:localConfig.model,totalMs:Date.now()-startedAt}));
+      return answer;
+    }
+    // Independent rollout gate. A prompt/format pass is not a grounding pass;
+    // keep the established fallback until the reviewed release enables it.
+    if (compactLocal && store.get('ai.fastConversation.localSinglePass') === true) {
+      const answer = await answerLocalNaturalConversation(compactLocal, latest, voiceEvidence,
+        turns => sendToProvider(turns, localConfig, { tools: false, table: [], temperature: 0.15,
+          format: NATURAL_GROUNDED_REPLY_SCHEMA, numCtx: chatNumCtx(), maxTokens: naturalKind === 'play' ? 192 : NATURAL_MAX_TOKENS }),
+        herRecentReplies);
+      console.log(`[latency] local natural ${naturalKind} reply ${Date.now() - startedAt}ms`);
+      return answer;
+    }
+    if (directKind && canReplyDirectly(sending, latest)) {
+      try {
+        const answer = await composeConversationalReply(localConversation, latest, evidence, getActiveCharacter(),
+          messages => sendToProvider(messages, localConfig, {
+            tools: false, temperature: 0.15, format: CONVERSATIONAL_REPLY_SCHEMA,
+            numCtx: chatNumCtx(), maxTokens: 120,
+          }), aside);
+        console.log(`[latency] local ${directKind} reply: one conversational request ${Date.now() - startedAt}ms`);
+        return answer;
+      } catch (error) {
+        if (!(error instanceof VoiceReplyNeedsReview)) throw error;
+        console.log('[voice] withheld a draft that dismissed tone feedback; checking the evidence again');
+        return composeLocalReply(localConversation, latest, directReplyEvidence(evidence),
+          messages => sendToProvider(messages, localConfig, {
+            tools: false, temperature: 0.15, format: GROUNDED_REPLY_SCHEMA,
+            numCtx: chatNumCtx(), maxTokens: 350,
+          }), getActiveCharacter());
+      }
+    }
+    // Once the harness disables tools, discovery cannot contribute anything.
+    // Use the same grounded composer directly; validation and privacy remain
+    // at their existing boundaries. Tool-enabled turns still discover actions.
+    if (!tools) {
+      const answer = await composeLocalReply(sending, latest, evidence,
+        messages => sendToProvider(messages, localConfig, {
+          tools: false, table: [], temperature: 0.15, format: GROUNDED_REPLY_SCHEMA,
+          numCtx: chatNumCtx(), maxTokens: 1024,
+        }), getActiveCharacter());
+      console.log(`[latency] local grounded-only reply ${Date.now() - startedAt}ms`);
+      return answer;
+    }
+    // A draft can contain a false memory or an invented explanation. Keep it
+    // out of the stream and let the same local model answer from evidence.
+    const draft = await ollamaPost(sending, localConfig, { ...roundOptions, tools, onChunk: undefined });
+    const draftMs = Date.now() - startedAt;
+    const answer = await finishLocalReply(draft, localConversation, latest, evidence,
+      messages => sendToProvider(messages, localConfig, {
+        tools: false, temperature: 0.15, format: GROUNDED_REPLY_SCHEMA,
+        numCtx: chatNumCtx(), maxTokens: Math.max(350, Math.ceil((draft.content?.length ?? 0) / 2) + 160),
+      }), undefined, getActiveCharacter());
+    console.log(`[latency] local tool/draft ${draftMs}ms; grounded reply ${Date.now() - startedAt - draftMs}ms`);
+    return answer;
+    },localLimit);
+  };
+  prepMark('modelRegistry');
+  const registry = callRegistry(readModelRegistry(store.get('ai.modelRegistry'), {
+    local: home, conversation: store.get('ai.conversation') as ProviderConfig | undefined,
+    specialist: store.get('escalate.provider') as ProviderConfig | undefined, vision,
+  }), store.get('ai.callConversation'), call);
+  prepMark('taskPolicy');
+  const policy = readTaskPolicy(store.get('ai.taskPolicy'));
+  prepMark('taskIntent');
+  const intent = await coreTaskIntent(latest, { pictures, files: arrived.length > 0, history: messages });
+  const eligible = async (role: ModelRole, sending: OllamaMessage[], budgetMicros: number, excludeIds: string[] = []) => {
+    if(process.env.HARU_CORE_NATURAL_TURN==='on'){const prepared=naturalTurn<any>('eligible',[{role,sending,budget:budgetMicros,excludeIds,cloudAllowed,policy,escalate:readEscalateConfig(store.get('escalate')).enabled,naturalKind,pageRead:turn.pageWasRead()}]);const request:RouteRequest={...prepared,toolSchema:prepared.tools?hostedTools(sending,turn):[],available:entry=>providerAvailability.available(entry.config)&&(entry.local||hasKeyFor(entry.config.endpoint))};return naturalSelection(()=>selectCallModel(registry,role,request),()=>coreSelectTaskModel(registry,role,request));}
+    const request: RouteRequest = {
+    cloudAllowed: cloudAllowed && policy.enabled && (role === 'conversation' || readEscalateConfig(store.get('escalate')).enabled),
+    conversation: sending, inputs: sending.some(message => message.images?.length) ? ['text', 'image'] : ['text'],
+    toolSchema: !(naturalKind && role === 'conversation') && !turn.pageWasRead() ? hostedTools(sending, turn) : [],
+    tools: !(naturalKind && role === 'conversation') && !turn.pageWasRead(),
+    budgetMicros: policy.dailyBudgetMicros ? budgetMicros : 0, excludeIds,
+    available: entry => providerAvailability.available(entry.config) && (entry.local || hasKeyFor(entry.config.endpoint)),
+    };
+    return await selectCallModel(registry, role, request) ?? coreSelectTaskModel(registry, role, request);
+  };
+  prepMark('routerSelectStart');
+  const naturalMaxTokens=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<number>('naturalMaxTokens',[naturalKind]):naturalKind==='play'?192:NATURAL_MAX_TOKENS;
+  const turnFast=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('fastRequest',[{naturalKind,cloudAllowed,policy,conversation}]):null;
+  const fastRequest:RouteRequest={...(turnFast?turnFast.request:{cloudAllowed:cloudAllowed&&policy.enabled,conversation,inputs:['text'] as ('text'|'image')[],maxOutputTokens:naturalMaxTokens,budgetMicros:policy.dailyBudgetMicros?policy.taskBudgetMicros:0}),available:entry=>providerAvailability.available(entry.config)&&hasKeyFor(entry.config.endpoint)};
+  const fastConversation=(turnFast?turnFast.admit:naturalKind)?(process.env.HARU_CORE_NATURAL_TURN==='on'?await naturalSelection(()=>selectCallModel(registry,'conversation',{...fastRequest,tools:false,toolSchema:[]}),()=>coreFastConversationModel(registry,store.get('ai.fastConversation'),fastRequest)):await selectCallModel(registry,'conversation',{...fastRequest,tools:false,toolSchema:[]})??await coreFastConversationModel(registry,store.get('ai.fastConversation'),fastRequest)):undefined;
+  // Preliminary routing used the full transcript and tool/output allowance.
+  // Reconsider an eligible compact request with its actual completion cap.
+  const turnReconsider=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('reconsider',[{fast:fastConversation??null,local:isLocalConfig(config),brain,callRouteId:CALL_ROUTE_ID}]):null;
+  if(turnReconsider?turnReconsider.admit:fastConversation||!isLocalConfig(config)||brain.entryId===CALL_ROUTE_ID){
+    const selected=process.env.HARU_CORE_NATURAL_TURN==='on'?await naturalSelection(async()=>fastConversation,()=>eligible(turnReconsider.role,conversation,policy.taskBudgetMicros)):fastConversation??await eligible(brain.role??'conversation',conversation,policy.taskBudgetMicros);
+    if(process.env.HARU_CORE_NATURAL_TURN==='on'){const finished=naturalTurn<any>('selected',[{selected:selected??null,brain,home,config,fast:fastConversation??null,sameFast:selected===fastConversation,naturalKind}]);if(finished.notice)sendToWindows('ai:fellBack',finished.notice);brain=finished.brain;}else{
+    if(!selected)sendToWindows('ai:fellBack',`${config.model} cannot handle this full request within the current allowance. Haru is using ${home.model}.`);
+    brain=selected?brainFromEntry(selected,brain.because):{config:home,escalated:false,sees:true,because:'full prompt exceeds route policy',role:'everyday',entryId:'everyday'};
+    if(selected===fastConversation&&fastConversation)brain.because=`fast ${naturalKind} conversation`;}
+    config=brain.config;
+  }
+  console.log(`[router] role=${brain.role ?? 'everyday'} model=${config.model} reason=${brain.because}`);
+  prepMark('promptBuilt');
+  const modelObservations: { model: string; succeeded: boolean }[] = [];
+  const flushModelObservations = () => {
+    for (const row of modelObservations.splice(0)) {
+      try { observeTaskModel(row.model, row.succeeded); } catch { /* optional reliability counters */ }
+    }
+  };
+  const task = new TaskController(taskBridge.call, registry, policy, cloudAllowed,
+    (model, succeeded) => modelObservations.push({ model, succeeded }), event => {
+    markTurn(event.stage,{attempt:event.attempt,model:event.model});
+    if (event.stage === 'dispatch') firstDispatchAt ||= event.at;
+    console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, ...event, elapsedMs: event.at - enteredAt,
+      ...(event.stage === 'dispatch' ? { preparationMs: event.at - enteredAt } : {}) })}`);
+  });
+  await task.start(latest, config.model, 'foreground', signal);
+  prepMark('taskStart');
+  // Planning is local even when the response is local. Cloud permission still
+  // governs every response dispatch; Core restricts this route to scoped reads.
+  const turnLoop=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('loopFlags',[{splitEnabled:process.env.HARU_CORE_SPLIT_PLANNER==='on',workflowEnabled:process.env.HARU_CORE_WORKFLOW_PLANNING==='on',local:isLocalConfig(config),hosted:!!brain.hosted,cloudAllowed,pictures,naturalKind,directionsRoute:Boolean(directions?.route)}]):null;
+  const splitPlanningAllowed=turnLoop?turnLoop.splitPlanning:process.env.HARU_CORE_SPLIT_PLANNER==='on'&&(isLocalConfig(config)||(!!brain.hosted&&cloudAllowed))&&!pictures&&!naturalKind;
+  const { content: spoken, ran } = await task.loop(conversation, {
+    requireToolContract: true,
+    splitPlanning:splitPlanningAllowed,
+    generalToolSplit:process.env.HARU_CORE_GENERAL_TOOL_SPLIT==='on',
+    generalToolCloudAllowed:cloudAllowed,
+    toolSnapshot:()=>chatTools(availableTools(turn),latest),
+    receiptPrograms:turnLoop?turnLoop.receiptPrograms:process.env.HARU_CORE_WORKFLOW_PLANNING==='on'&&cloudAllowed&&!isLocalConfig(config)&&!pictures&&!naturalKind,
+    workerRoles:['everyday','conversation','affordable-cloud','specialist','complex','premium'],
+    runWorker:async(sending,{role,maxTokens})=>{
+      const entry=await coreSelectTaskModel(registry,role,{
+        cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],
+        budgetMicros:task.remainingBudgetMicros,
+        available:candidate=>providerAvailability.available(candidate.config)&&(isLocalConfig(candidate.config)||hasKeyFor(candidate.config.endpoint)),
+      });
+      if(!entry)return {error:'unavailable' as const,model:null};
+      console.log('[workflow-worker] '+JSON.stringify({role,model:entry.config.model,tools:false}));
+      try{
+        const message=await sendToProvider(sending,entry.config,{tools:false,table:[],temperature:0.1,maxTokens,
+          onChunk:()=>{},firstWordMs:HOSTED_FIRST_WORD_MS});
+        return {message,model:entry.config.model};
+      }catch(error){
+        await task.check(); // Cancellation/deadline/privacy cannot become a reply.
+        const reason=error instanceof Error?error.message:String(error);
+        const turnWorkerFailure=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('workerFailure',[reason]):null;
+        if(turnWorkerFailure?turnWorkerFailure.throw:/outbound_privacy_blocked|cancelled|deadline/.test(reason))throw error;
+        task.recordWorkerFailure();
+        return {error:turnWorkerFailure?turnWorkerFailure.error:/budget|allowance/.test(reason)?'budget' as const:/first_word_timeout|timeout/.test(reason)?'timeout' as const:'transport' as const,model:entry.config.model};
+      }
+    },
+    ...(taskBridge.readOnlyWorkflow ? {coreReadOnly:{decide:taskBridge.readOnlyWorkflow,table:()=>chatTools(availableTools(turn),latest)}} : {}),
     // With the route in hand there is nothing to look up: offered tools, she
     // searched the web for the traffic, got three American states back, and
     // guessed — while the live number sat in the note beside his message.
-    ...(directions?.route ? { maxRounds: 1 } : {}),
-    ask: async (sending, { tools }) => {
+    ...(turnLoop?('maxRounds' in turnLoop?{maxRounds:turnLoop.maxRounds}:{}):directions?.route?{maxRounds:1}:{}),
+    ask: async (sending, { tools,inputProfile,planningTable,maxTokens:workflowMaxTokens,candidateId,temperature }) => {
+      if(inputProfile==='general-tool-planning'||inputProfile==='general-tool-response'){
+        if(process.env.HARU_CORE_GENERAL_TOOL_SPLIT!=='on')throw Error('general_tool_split_disabled');
+        const planning=inputProfile==='general-tool-planning';
+        const available=chatTools(availableTools(turn),latest);
+        const table=planning?(planningTable??[]):[];
+        if(table.some(tool=>!available.some(current=>current.function.name===tool.function.name)))throw Error('general_tool_unavailable');
+        const entry=planning?registry.find(candidate=>candidate.id===candidateId&&candidate.enabled&&candidate.capabilities.tools&&providerAvailability.available(candidate.config)
+          &&(candidateId==='local-planner'?candidate.local&&isLocalConfig(candidate.config):candidateId==='conversation'&&cloudAllowed&&!candidate.local&&hasKeyFor(candidate.config.endpoint)))
+          :await coreSelectTaskModel(registry,'conversation',{cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],maxOutputTokens:workflowMaxTokens,budgetMicros:task.remainingBudgetMicros,
+            available:candidate=>providerAvailability.available(candidate.config)&&(isLocalConfig(candidate.config)||hasKeyFor(candidate.config.endpoint))});
+        if(!entry)throw Error('general_tool_split_model_unavailable');
+        if(!planning){
+          brain=brainFromEntry(entry,'Core tool-free response');
+          config=entry.config;
+        }
+        await task.check();
+        return sendToProvider(sending,entry.config,{tools,table,temperature,maxTokens:workflowMaxTokens,numCtx:chatNumCtx(),turn});
+      }
+      const verifiedWorkflowResponse=inputProfile==='workflow-response';
+      if(inputProfile==='tool-planning'){
+        if(!splitPlanningAllowed||!tools)throw Error('split_planner_not_eligible');
+        const planner=registry.find(entry=>entry.id==='local-planner'&&entry.enabled&&entry.local&&isLocalConfig(entry.config));
+        if(!planner)throw Error('split_planner_not_registered');
+        const available=new Set(chatTools(availableTools(turn),latest).map(tool=>tool.function.name));
+        const table=(planningTable??[]).filter(tool=>tool.function.name==='vault_read'&&available.has(tool.function.name));
+        if(!table.length)throw Error('split_planner_tool_unavailable');
+        const limit=await coreLocalBudget(planner.config,chatNumCtx(),net.fetch);
+        return inferencePriority.localReply(()=>sendToProvider(sending,planner.config,{
+          tools:true,table,temperature:0,numCtx:chatNumCtx(),maxTokens:256,turn,
+        }),limit);
+      }
+      if(inputProfile==='workflow-response'){
+        if(process.env.HARU_CORE_WORKFLOW_PLANNING!=='on'||tools||!cloudAllowed||typeof workflowMaxTokens!=='number'||!Number.isInteger(workflowMaxTokens)
+          ||workflowMaxTokens<1||workflowMaxTokens>1024)throw Error('workflow_response_not_eligible');
+        const response=await coreSelectTaskModel(registry,'conversation',{
+          cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],maxOutputTokens:workflowMaxTokens,
+          budgetMicros:task.remainingBudgetMicros,
+          available:entry=>providerAvailability.available(entry.config)&&(isLocalConfig(entry.config)||hasKeyFor(entry.config.endpoint)),
+        });
+        if(!response){
+          await task.check();
+          console.log('[workflow-response] '+JSON.stringify({reason:'no_eligible_model',fallback:'recorded_completion'}));
+          return {role:'assistant',content:'',workflowResponseUnavailable:true};
+        }
+        brain=brainFromEntry(response,'verified workflow response');config=brain.config;
+        roundOptions.maxTokens=workflowMaxTokens;
+        inputProfile=undefined; // Ordinary reply validation/fallback stays active.
+      }
       // The conversation route: a deadline on the first word, and the local
       // model answering when it passes or the call fails — she must never go
       // quiet because a company did. A round already streaming is taken back
       // first, so the reader is not shown two beginnings.
       if (brain.hosted) {
-        // The deadline is a race, not an abort: an AbortSignal handed to
-        // net.fetch was not honoured (a turn ran 27 s past an 8 s signal), and
-        // the request is left to finish on its own and be discarded. Streaming,
-        // the first chunk is the first word and the deadline is waived by it;
-        // otherwise the whole reply must land in time.
+        // Transport chunks satisfy the first-word timer without reaching the
+        // display. The task's total deadline remains enforced after that.
         const startedAt = Date.now();
         const cacheKey = `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}`;
         // A network change under a streaming request — the anime stack's
@@ -8410,34 +9665,103 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
         // fallback is a different voice, and the reader hears the switch.
         const transient = (error: unknown) => /ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ECONNRESET|socket hang up/i.test(error instanceof Error ? error.message : String(error));
         for (let attempt = 0; ; attempt++) {
-          let firstWordAt = 0;
-          const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
           try {
+            prepMark('send');
+            providerSentAt = Date.now();
             onSending?.();
-            const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
-            const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
-            const answer = await Promise.race([request, deadline]);
-            console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${firstWordAt ? ` (first word at ${firstWordAt - startedAt}ms)` : ''}${attempt ? ' (second try)' : ''}`);
+            const naturalRoundPolicy=process.env.HARU_CORE_NATURAL_CONVERSATION==='on'?naturalPolicy<any>('roundPolicy',[{naturalKind,messages:sending,latest,fast:fastConversation??null,model:config.model,hostedFirstWordMs:HOSTED_FIRST_WORD_MS}]):null;
+            const naturalRound=naturalRoundPolicy?naturalRoundPolicy.natural:naturalKind&&naturalConversationEligible(sending,latest);
+            const firstWordMs=naturalRoundPolicy?naturalRoundPolicy.firstWordMs:fastConversation&&config.model===fastConversation.config.model?NATURAL_FIRST_WORD_MS:HOSTED_FIRST_WORD_MS;
+            const answer = naturalRound
+              ? await answerNaturalConversation(sending, latest, voiceEvidence, messages => sendToProvider(messages, config, {
+                  ...roundOptions, tools: false, table: [], cacheKey, firstWordMs, maxTokens: naturalMaxTokens,
+                }), withFiles.filter(message => message.role === 'assistant').slice(-3).map(message => message.content ?? ''))
+              : await sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, firstWordMs });
+            const turnAnswer=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('hostedAnswer',[{answer,naturalRound:Boolean(naturalRound),brain,needsReview:needsGroundedConversationReview(latest)}]):null;
+            const refusal=turnAnswer?turnAnswer.invalid:conversationReplyIssue(answer.content??'');
+            if(turnAnswer?Boolean(refusal):!answer.tool_calls?.length&&refusal)throw new ToolLoopFailure('invalid_conversational_reply',refusal);
+            console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${attempt ? ' (second try)' : ''}`);
+            if(turnAnswer?turnAnswer.review:!naturalRound&&['conversation','affordable-cloud'].includes(brain.role??'conversation')&&needsGroundedConversationReview(latest)){
+              const checked = await finishLocalReply(answer, sending, latest, { ...replyEvidence, voice: voiceEvidence },
+                async messages => {
+                  // Review the sources independently of the conversation
+                  // model's personality and draft. This is one bounded,
+                  // accounted composition step, with no tools of its own.
+                  const turnReview=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('reviewRequest',[{cloudAllowed,policy,escalate:readEscalateConfig(store.get('escalate')).enabled,messages,remaining:task.remainingBudgetMicros}]):null;
+                  const reviewer=await coreSelectTaskModel(registry,'affordable-cloud',{...(turnReview??{cloudAllowed:cloudAllowed&&policy.enabled&&readEscalateConfig(store.get('escalate')).enabled,conversation:messages,tools:false,toolSchema:[],inputs:messages.some(message=>message.images?.length)?['text','image'] as ('text'|'image')[]:['text'] as ('text'|'image')[],budgetMicros:policy.dailyBudgetMicros?task.remainingBudgetMicros:0}),available:entry=>providerAvailability.available(entry.config)&&hasKeyFor(entry.config.endpoint)});
+                  if (!reviewer) throw new Error('evidence_review_unavailable');
+                  console.log(`[truth] evidence composition model=${reviewer.config.model}`);
+                  return sendToProvider(messages,reviewer.config,process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<PostOptions>('reviewOptions',[{schema:GROUNDED_REPLY_SCHEMA,cacheKey,firstWordMs:HOSTED_FIRST_WORD_MS}]):{tools:false,table:[],temperature:.1,format:GROUNDED_REPLY_SCHEMA,maxTokens:512,cacheKey,firstWordMs:HOSTED_FIRST_WORD_MS});
+                });
+              replyGate.reset();
+              return checked;
+            }
             return answer;
           } catch (error) {
+            await task.check(); // Cancellation never starts a retry or local fallback.
+            if(process.env.HARU_CORE_NATURAL_TURN==='on'){
+              let decision=naturalTurn<any>('hostedFailure',[{toolLoopFailure:error instanceof ToolLoopFailure,error:error instanceof Error?error.message:String(error),attempt,fast:fastConversation??null,config,home,verified:verifiedWorkflowResponse}]);
+              if(decision.action==='throw')throw error;
+              if(decision.action==='try-fast-fallback'){const primary=await eligible(decision.role,sending,task.remainingBudgetMicros,decision.excludeIds);decision=naturalTurn<any>('hostedAfterFast',[decision.state,primary??null]);}
+              if(decision.action==='retry-primary'){brain=decision.brain;config=brain.config;replyGate.reset();continue;}
+              if(decision.action==='retry-transient'){replyGate.reset();continue;}
+              if(decision.action==='recorded-completion'){replyGate.reset();if(decision.keepLocal)task.keepLocal();task.recordWorkerFailure();return decision.message;}
+              if(decision.action==='local'){replyGate.reset();if(decision.keepLocal)task.keepLocal();spilledHome=true;sendToWindows('ai:fellBack',decision.notice);brain=decision.brain;config=brain.config;return answerLocally(sending,config,tools,inputProfile);}
+              throw Error('core_hosted_failure_protocol');
+            }
+            if (error instanceof ToolLoopFailure) throw error;
+            // A fast-provider outage can fall back to the configured main
+            // conversation model, within this same durable task and allowance.
+            if (fastConversation && config.model === fastConversation.config.model
+                && !/outbound_privacy_blocked|cloud_allowance_required|budget_exceeded|cancelled|deadline/.test(error instanceof Error ? error.message : String(error))) {
+              const primary = await eligible('conversation', sending, task.remainingBudgetMicros, [fastConversation.id]);
+              if (primary && primary.config.model !== config.model) {
+                console.warn(`[latency] fast conversation unavailable; continuing with ${primary.config.model}`);
+                brain = brainFromEntry(primary, 'fast conversation fallback');
+                config = primary.config;
+                replyGate.reset();
+                continue;
+              }
+            }
             if (attempt === 0 && transient(error)) {
               console.warn(`[ai] the conversation route (${config.model}) broke off (${error instanceof Error ? error.message : String(error)}) — asking once more`);
-              if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
+              replyGate.reset();
               continue;
+            }
+            if(verifiedWorkflowResponse){
+              replyGate.reset();
+              if(/outbound_privacy_blocked/.test(error instanceof Error ? error.message : String(error)))task.keepLocal();
+              task.recordWorkerFailure();
+              console.log('[workflow-response] '+JSON.stringify({reason:'provider_failed',model:config.model,fallback:'recorded_completion'}));
+              return {role:'assistant',content:'',workflowResponseUnavailable:true};
             }
             console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
             // Refused for money is worth telling the phone about now, not on the hour.
-            if (/insufficient .*balance/i.test(error instanceof Error ? error.message : String(error))) void checkVeniceBalance('a refused turn');
-            if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
+
+            replyGate.reset();
+            if (/outbound_privacy_blocked/.test(error instanceof Error ? error.message : String(error))) task.keepLocal();
             spilledHome = true;
-            return ollamaPost(sending, home, { ...roundOptions, tools });
+            sendToWindows('ai:fellBack', `${config.model} could not complete this request. Haru is using ${home.model}.`);
+            brain = { config: home, escalated: false, because: 'hosted fallback', sees: false };
+            config = home;
+            return answerLocally(sending, home, tools,inputProfile);
           }
         }
       }
       try {
+        prepMark('send');
+        providerSentAt = Date.now();
         onSending?.();
-        return await ollamaPost(sending, config, { ...roundOptions, tools });
+        return brain.escalated ? await sendToProvider(sending, config, { ...roundOptions, tools }) : await answerLocally(sending, config, tools,inputProfile);
       } catch (error) {
+        await task.check();
+        if(process.env.HARU_CORE_NATURAL_TURN==='on'){
+          const decision=naturalTurn<any>('localFailure',[{brain,home,cloudAllowed,local:isLocalConfig(config),absent:isAbsent(error),intent,error:error instanceof Error?error.message:String(error)}]);
+          if(decision.action==='throw')throw error;
+          if(decision.action==='local'){if(decision.keepLocal)task.keepLocal();brain=decision.brain;config=brain.config;return answerLocally(sending,config,tools,inputProfile);}
+          if(decision.action==='candidate'){const candidate=await eligible(decision.role,sending,task.remainingBudgetMicros);if(!candidate)throw error;brain=brainFromEntry(candidate,'local outage');config=brain.config;return sendToProvider(sending,config,{...roundOptions,tools});}
+          throw Error('core_local_failure_protocol');
+        }
         // Only when nothing answered at all — a refused connection, a pod that
         // is off. A 400 or a 500 with a complaint in it is the local model
         // answering, and the fix for that is in the request, not in asking
@@ -8445,9 +9769,19 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
         // prompt were answered by the hosted model instead, and what the user
         // noticed was her personality gone, not an error. The rule is that the
         // hosted model is for uploads; an outage is the one exception it keeps.
-        const spill = isAbsent(error) ? capacitySpill(config) : null;
+        if (brain.escalated && /outbound_privacy_blocked|cloud_allowance_required|unpriced_or_oversized_request|model_not_registered|provider_not_allowed|budget_exceeded/.test(error instanceof Error ? error.message : String(error))) {
+          if (/outbound_privacy_blocked/.test(error instanceof Error ? error.message : String(error))) task.keepLocal();
+          brain = { config: home, escalated: false, because: 'specialist policy fallback', sees: false };
+          config = home;
+          return answerLocally(sending, home, tools,inputProfile);
+        }
+        const candidate = cloudAllowed && isLocalConfig(config) && isAbsent(error)
+          ? await eligible(['everyday', 'conversation'].includes(intent.role) ? 'affordable-cloud' : intent.role, sending, task.remainingBudgetMicros) : undefined;
+        const spill = candidate?.config;
         if (!spill) throw error;
         console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
+        brain = brainFromEntry(candidate!, 'local outage');
+        config = spill;
         return sendToProvider(sending, spill, { ...roundOptions, tools });
       }
     },
@@ -8470,11 +9804,24 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     withdrawHands: turn.withdrawHands,
     hasOpenTask: () => getKept().some(item => item.kind === 'task' && !item.done),
     canSearch: () => readSearchConfig(store.get('search')).enabled && turn.handsAllowed(),
-    resetStream: () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } },
+    resetStream: replyGate.reset,
     log: line => console.log(line),
     warn: line => console.warn(line),
     traceId,
-  });
+  }, async handoff => {
+    const current=registry.find(entry=>entry.config.model===handoff.currentModel);
+    const turnHandoff=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('qualityHandoff',[{cloudAllowed,escalate:readEscalateConfig(store.get('escalate')).enabled,current:current??null,naturalKind,fast:fastConversation??null,currentModel:handoff.currentModel,conversation:store.get('ai.conversation')??null}]):null;
+    if(turnHandoff?!turnHandoff.admit:!cloudAllowed||!readEscalateConfig(store.get('escalate')).enabled)return null;
+    const role=await coreNextTaskRole(turnHandoff?turnHandoff.role:current?.role??'everyday',intent,turnHandoff?turnHandoff.fast:!!(naturalKind&&fastConversation&&handoff.currentModel===fastConversation.config.model&&handoff.currentModel!==(store.get('ai.conversation') as ProviderConfig|undefined)?.model));
+    if(!role)return null;
+    const next=await eligible(role,handoff.messages,handoff.remainingBudgetMicros,turnHandoff?turnHandoff.excludeIds:current?[current.id]:[]);
+    if (!next) return null;
+    brain = brainFromEntry(next, `answer quality check failed: ${handoff.failure}`);
+    config = next.config;
+    console.log(`[router] quality handoff to ${next.role}: ${config.model}`);
+    return config;
+  }).catch(error => { setImmediate(flushModelObservations); throw error; });
+  signal?.throwIfAborted();
   // Whole paragraphs of her own recent replies come back verbatim otherwise.
   // Only the last two are compared: the echo happens back-to-back, and looking
   // further would start dropping a legitimate restatement — asked what is on
@@ -8485,25 +9832,26 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // is nobody's: a tidy bulleted list with none of her in it, which is exactly
   // what was noticed. Her own model says it again as herself, same facts, her
   // mouth, and that is what the reader watches arrive.
-  const said = brain.escalated ? await inHerVoice(spoken, messages, { ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}), ...(forwardChunk ? { onChunk: forwardChunk } : {}) }) : spoken;
-  const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
+  const replyCleanup=process.env.HARU_CORE_SPEECH_CONTEXT==='on'?corePolicySync<any>('reply-processing.clean',[spoken,withoutMapsLinks(spoken),messages,getKept(),latest,currentActivity?.label??'',{rant:Boolean(rantRoomNow),hers:Boolean(hers),fromSearch,escalated:Boolean(brain.escalated),hosted:Boolean(brain.hosted),hostedParagraphs:HOSTED_PARAGRAPHS},[...ran],agendaClock(zonedNow(CHAT_TIMEZONE))]):null;
+  const said = spoken; // Preserve specialist artifacts without second-model rewriting.
+  const recent = replyCleanup?replyCleanup.recent:messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
   // What she was legitimately given: their message, and whatever is actually
   // on screen. Anything she names beyond that in a closing line was invented.
-  const grounded = `${latest} ${currentActivity?.label ?? ''}`;
+  const grounded = replyCleanup?replyCleanup.grounded:`${latest} ${currentActivity?.label ?? ''}`;
   // Agenda repeats first: it works on whole paragraphs and knows what the
   // subject is, so it should get its say before the blunter filters start
   // counting words.
   // Only what is still open: a finished errand has no claim on the words in it.
-  const onList = getKept().filter(item => !item.done).map(item => item.title);
+  const onList = replyCleanup?replyCleanup.onList:getKept().filter(item => !item.done).map(item => item.title);
   // Not on a grounded answer: with "eat breakfast" on the list, every paragraph
   // of a restaurant list reads as her nagging about breakfast again, and the
   // list is what they asked for.
   // Any maps link she typed is a made-up one — the app attaches the real button below.
-  const unlinked = withoutMapsLinks(said);
+  const unlinked = replyCleanup?replyCleanup.unlinked:withoutMapsLinks(said);
   if (unlinked !== said) console.log('[maps] dropped a link she wrote herself');
   // And not at all on a turn about her: the words of his errands have no
   // business cutting what she says about her own things.
-  const deduped = fromSearch || hers ? unlinked : dropRepeatedAgendaMentions(unlinked, recent, onList, latest);
+  const deduped = replyCleanup?replyCleanup.deduped:fromSearch || hers ? unlinked : dropRepeatedAgendaMentions(unlinked, recent, onList, latest);
   // Outermost on purpose: it counts paragraphs, so it has to see the ones
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about
@@ -8518,8 +9866,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the repetition cuts are exactly wrong for the one reply she was given the
   // room for. Five hundred characters of her own opinion came back as eighty.
   // Talking about her own thing echoes it too — the same reason a rant does.
-  const ranting = Boolean(rantRoomNow || hers);
-  const headed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent, brain.hosted ? HOSTED_PARAGRAPHS : undefined), grounded))));
+  const ranting = replyCleanup?replyCleanup.ranting:Boolean(rantRoomNow || hers);
+  const headed = replyCleanup?replyCleanup.headed:dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent, brain.hosted ? HOSTED_PARAGRAPHS : undefined), grounded))));
   const trimmed = headed;
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
@@ -8530,13 +9878,18 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // tacked-on-paragraph cut nor the repetition cut applies: asked the same
   // question twice she should give the same names twice, and the first time
   // this ran, 843 of her 890 characters were thrown away as "already said".
-  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'), brain.hosted ? HOSTED_PARAGRAPHS : undefined);
-  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch || ranting ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
+  const body = replyCleanup?replyCleanup.body:dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'), brain.hosted ? HOSTED_PARAGRAPHS : undefined);
+  const cleaned = replyCleanup?replyCleanup.cleaned:fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch || ranting ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
   // Her promise, kept: "I'll set the reminder at 6:54 AM" with nothing written
   // is a reminder that exists only in the conversation. See reminderPromised.
   // Not when she already wrote it down herself this turn: the tool ran and
   // she said "reminder set", and the net caught the sentence a second time.
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){
+    const packet=corePolicySync<any>('agenda-life.final',[agendaFacts(ownedAgendaCore()),getAsides(),{lastIsUser:messages.at(-1)?.role==='user',hasReminder:Boolean(reminder),ran:[...ran],latest,reply:cleaned,previous:typeof herPrevious==='string'?herPrevious:'',recentUsers:messages.filter(m=>m.role==='user').slice(-4).map(m=>String(m.content??'')),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),now:Date.now()},new Date().toISOString(),randomUUID()]);
+    applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+    if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
+  }else{
   const promised = !reminder && !ran.has('create_kept_item') && messages.at(-1)?.role === 'user' ? reminderPromised(cleaned, zonedNow(CHAT_TIMEZONE)) : null;
   if (promised) {
     const theirs = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
@@ -8554,19 +9907,36 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     updateKept(moved.item.id, { date: moved.date, ...(moved.time ? { time: moved.time } : {}) });
     console.log(`[agenda] she said she moved it — "${moved.item.title}" is now on ${moved.date}${moved.time ? ` at ${moved.time}` : ''}`);
   }
+  }
   // The eye-roll in thirty-five of forty replies: the wording that caused it is
   // fixed (EXPRESSIVE), and this catches what the wording does not.
   // herRecentReplies, not `recent`: that holds the last two she said, one fewer
   // than the filter asked for, so it never once fired.
-  const thinned = oneEmojiAtMost(dropOverusedEmoji(cleaned, herRecentReplies, HER_EMOJI), HER_EMOJI);
+  const replyFinish=process.env.HARU_CORE_SPEECH_CONTEXT==='on'?corePolicySync<any>('reply-processing.finish',[cleaned,herRecentReplies,HER_EMOJI,Boolean(hers),Boolean(talking),reminder]):null;
+  const thinned = replyFinish?replyFinish.thinned:oneEmojiAtMost(dropOverusedEmoji(cleaned, herRecentReplies, HER_EMOJI), HER_EMOJI);
   if (thinned !== cleaned) console.log('[ai] thinned the emoji in that reply');
   // On a turn that was hers, or one where they only wanted to talk, the closing
   // order or the pivot back to him goes. The note against it stood in the
   // splice and the hosted model ended on "So out with it. What do you actually
   // want?" regardless — see dropClosingOrder for why this is a filter.
-  const varied = hers || talking ? dropClosingOrder(thinned) : thinned;
+  const varied = replyFinish?replyFinish.varied:hers || talking ? dropClosingOrder(thinned) : thinned;
   if (varied !== thinned) console.log('[ai] took the closing order off a reply that was about her');
-  const herLine = reminder?.time ? fixStatedReminderTime(varied, reminder.time) : varied;
+  const herLine = replyFinish?replyFinish.herLine:reminder?.time ? fixStatedReminderTime(varied, reminder.time) : varied;
+  // Everything he reads as her words has to be written as her — not just the
+  // reply her model wrote, but the settlement notice, the tool's receipt, the
+  // specialist's answer, all of which arrive in somebody else's register and
+  // were being published as her lines (seen 2026-09-28: "Completion is
+  // unverified for: go back to sleep…"). Core decides which those are and
+  // writes the rewrite; this is only the transport. A line that already reads
+  // as hers costs one policy round trip and no model call at all.
+  let voiced = herLine;
+  if (process.env.HARU_CORE_CONVERSATION_POLICY==='on') {
+    try {
+      const said = await conversationRun('publication', { answer: herLine, source: brain.escalated ? 'specialist' : 'model', around: latest });
+      if (typeof said === 'string' && said.trim()) voiced = said;
+    } catch (error) { console.warn('[ai] voice pass skipped:', error instanceof Error ? error.message : error); }
+    if (voiced !== herLine) console.log('[ai] said that back in her voice');
+  }
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.
   // Two features meet on "where can I get a decent burger": directions wants one
@@ -8581,12 +9951,27 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // And with no journey looked up at all, a claim about the roads is invented
   // whole: "traffic's already thick, you'll hit the main drag" for a trip
   // nobody asked the map about.
-  const routeless = directions?.route ? fixStatedRoute(herLine, directions.route)
-    : directions && !directions.about && !fromSearch ? dropRouteTalk(herLine)
-    : !directions && !fromSearch && claimsTraffic(herLine) ? dropRouteTalk(herLine)
-    : herLine;
-  if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
-  const content = directions?.found ? withDirections(routeless, directions.found, directions.route ?? undefined) : routeless;
+  const navigationResult=process.env.HARU_CORE_NAVIGATION_POLICY==='on'?navigationPolicy<{routeless:string;content:string}>('finalReply',[voiced,directions,Boolean(fromSearch),Boolean(brain.escalated),spoken]):(()=>{
+  const routeless = directions?.route ? fixStatedRoute(voiced, directions.route)
+    : directions && !directions.about && !fromSearch ? dropRouteTalk(voiced)
+    : !directions && !fromSearch && claimsTraffic(voiced) ? dropRouteTalk(voiced)
+    : voiced;
+  if (routeless !== voiced && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
+  const content = brain.escalated ? voiced : directions?.found ? withDirections(routeless, directions.found, directions.route ?? undefined) : routeless;
+    return {routeless,content};})();
+  const {routeless,content}=navigationResult;
+  replyGate.commit(content);
+  markTurn('published');
+  console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'published', elapsedMs: Date.now() - enteredAt,
+    preparationMs: firstDispatchAt ? firstDispatchAt - enteredAt : null, path: naturalKind ? 'natural' : 'full', model: config.model })}`);
+  // Yield after publication so socket text can leave before optional diagnostics,
+  // speech preparation or post-reply configuration writes run on this thread.
+  await new Promise<void>(resolve => setImmediate(resolve));
+  setImmediate(flushModelObservations);
+  if (naturalKind && process.env.HARU_DUMP_PROMPT) setImmediate(() => {
+    void import('node:fs/promises').then(fs => fs.writeFile(path.join(app.getPath('userData'), 'last-prompt.json'),
+      JSON.stringify({ at: new Date().toISOString(), model: config.model, conversation }, null, 1))).catch(() => {});
+  });
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);  // The turn's ledger, one line: who answered, how much she was handed, and
   // whether the filters had to touch what she said. The before-and-after of a
   // change of brain is read from these.
@@ -8613,14 +9998,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (herKnockedAwakeNow() && readsAsGoodnight(content)) void goBackToSleepOnHerWord();
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
-  if (fresh) store.delete('chat.freshStart');
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){applyAgendaPlan(ownedAgendaCore(),corePolicySync<any>('agenda-life.finishFresh',[agendaFacts(ownedAgendaCore()),fresh]),()=>{});}else if (fresh) store.delete('chat.freshStart');
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
   const herWords = routeless;
-  // The label and the place are the local model's work whichever brain spoke:
-  // Venice answered the classification in prose around the JSON and her face
-  // stuck on the previous mood.
-  const saidMood = classifyEmotion(herWords, home);
+  // The reply already names its intended delivery. Reuse it for voice and
+  // expression instead of queueing a second model request behind every turn.
+  const labelled = splitDelivery(herWords)[0]?.mood;
+  const delivery = labelled ? { ...NEUTRAL_EMOTION, emotion: labelled, confidence: 1 } : null;
+  if (delivery) broadcastBeat(delivery);
+  const saidMood = delivery ? Promise.resolve(delivery) : classifyEmotion(herWords, home);
   void speak(herWords, saidMood);
   void tieToPlace(latest, herWords, home);
   // Restarting herself kills the process she is answering from, so the
@@ -8633,6 +10020,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // renderer owns the stored message and gives it no model, so a thumb on it
   // days later has nothing to go on but this (feedback.ts, Spoke).
   noteWhoSpoke(config.model, brainName);
+  console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'complete', elapsedMs: Date.now() - enteredAt })}`);
+  markTurn('harness_end');
   return { content, ignored: false, irritation, ego, choices: turn.pendingChoices() };
 }
 
@@ -8912,10 +10301,13 @@ function saveWebAccess(access: WebAccess) {
  * resident again she nudges with it as before.
  */
 function nudgeBrain(): ProviderConfig | null {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ProviderConfig|null>('projects.nudgeConfig',[store.get('ai.nudge'),null]);
   const nudge = store.get('ai.nudge') as ProviderConfig | undefined;
   if (!nudge?.model || !nudge.endpoint) return null;
   return nudge;
 }
+
+const workWorld = new CoreWorkWorld();
 
 /**
  * What she would say first, unprompted, to someone holding their phone.
@@ -8931,6 +10323,7 @@ function nudgeBrain(): ProviderConfig | null {
  * does not immediately chase on the other, because both write the same record.
  */
 async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: string } | null> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return ownedReminder(true,0);
   if (herAsleepNow()) return null;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return null;
   // Told to drop something, she drops it here too. Silencing the chat and then
@@ -8992,421 +10385,6 @@ async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: 
   }
 }
 
-// ---- Minecraft ------------------------------------------------------------
-
-/**
- * Her body in Minecraft, which is a separate process on loopback.
- *
- * Deliberately inert at this stage. The link carries events up and commands
- * down; nothing here decides anything about them, and no Minecraft event
- * reaches her prompt, her mood or her memory yet. Those are choices, and they
- * belong with the rest of her judgement rather than in a transport.
- *
- * Kept beside Discord because it is the same kind of thing: another place she
- * exists, reached over a socket, which must never be able to take the desk down
- * with it when it breaks.
- */
-let minecraft: MinecraftLink | null = null;
-let minecraftTrouble = '';
-
-function getMinecraftConfig(): MinecraftConfig {
-  return readMinecraftConfig(store.get('minecraft'));
-}
-
-function startMinecraft() {
-  const config = getMinecraftConfig();
-  if (!config.enabled) return;
-  if (minecraft) return;
-  minecraftTrouble = '';
-  minecraft = new MinecraftLink(config, {
-    onEvent: (event: MinecraftEvent) => {
-      if (worthLogging(event)) console.log(`[minecraft] ${describeEvent(event)}`);
-      onMinecraftEvent(event);
-    },
-    onReady: status => {
-      minecraftTrouble = '';
-      if (status?.owner) minecraftOwner = status.owner;
-      console.log(`[minecraft] worker up — ${status ? `${status.state} on ${status.server.host}:${status.server.port} (${status.server.version})` : 'status unavailable'}`);
-    },
-    onTrouble: why => {
-      // Only when it changes: a worker that is switched off would otherwise
-      // write the same line every retry, forever.
-      if (why === minecraftTrouble) return;
-      minecraftTrouble = why;
-      console.warn(`[minecraft] ${why}`);
-    },
-  });
-  minecraft.start();
-  console.log(`[minecraft] link armed for ${config.url}`);
-}
-
-function stopMinecraft() {
-  minecraft?.stop();
-  minecraft = null;
-  minecraftTrouble = '';
-}
-
-/** What she last decided, and what last went wrong, so a step does not repeat itself. */
-let lastMinecraftDecision = '';
-let lastMinecraftFailure = '';
-
-/**
- * One planning step: look, decide, act once.
- *
- * The model is handed the world in a few lines and a list of names, and
- * answers with one name. That is the whole of what it may do — see
- * minecraftplan.ts for why the answer is read so strictly. Through the same
- * hosted route as her conversation, in her own identity, because she is one
- * Haru and what she builds is what she wants.
- *
- * Called by nothing on a timer yet. Phase 7 owns *when*; this owns *what*.
- * The IPC handler below is a hand trigger for trying it.
- */
-type PlanStep = { plan: string; kind: 'wait' | 'done' | 'failed'; skill?: string; error?: string };
-
-async function planMinecraftStep(prefetched?: MinecraftStatus): Promise<PlanStep | null> {
-  if (!minecraft) return null;
-  const route = conversationRoute();
-  if (!route) { console.warn('[minecraft] cannot plan — no hosted route is set up'); return null; }
-  const status = prefetched ?? await minecraft.status();
-  if (!status) { console.warn('[minecraft] cannot plan — the worker is not answering'); return null; }
-
-  // Not a question worth asking. Handed "she is not in the world" and a
-  // half-finished project, Kimi chose collectBlock anyway (live, 2026-09-10);
-  // the worker refuses it harmlessly, but that is a paid round trip per tick
-  // for a decision that cannot be right. The only sensible answer when she is
-  // off the server is to wait, so it is given without asking.
-  if (status.observation.state !== 'online' || !status.observation.self) {
-    lastMinecraftDecision = `wait — not in the world (${status.observation.state})`;
-    return { plan: lastMinecraftDecision, kind: 'wait' };
-  }
-
-  const instruction = planInstruction(status.observation, {
-    identity: getActiveCharacter().identity,
-    ownerName: status.owner,
-    lastDecision: lastMinecraftDecision,
-    lastFailure: lastMinecraftFailure,
-  });
-  const started = Date.now();
-  let plan;
-  try {
-    const answer = await ollamaPost(
-      [{ role: 'system', content: instruction }, { role: 'user', content: 'What next?' }],
-      route,
-      // Cooler than a quip: this is a decision, and the same world should get
-      // the same answer more often than not. The cap is generous for a JSON
-      // answer because startProject can carry several goals; thinking is off
-      // on this route (provider.ts), so none of it goes on reasoning.
-      { tools: false, temperature: 0.4, maxTokens: 400 },
-    );
-    plan = readPlan(answer.content ?? '');
-  } catch (error) {
-    console.warn('[minecraft] planning failed:', error instanceof Error ? error.message : error);
-    return null;
-  }
-  console.log(`[minecraft] plan (${Date.now() - started}ms): ${describePlan(plan)}`);
-
-  if (plan.kind === 'wait') {
-    lastMinecraftDecision = `wait — ${plan.why}`;
-    lastMinecraftFailure = '';
-    return { plan: describePlan(plan), kind: 'wait' };
-  }
-  const result = await minecraft.send(plan.skill, plan.args);
-  lastMinecraftDecision = describePlan(plan);
-  lastMinecraftFailure = result.ok ? '' : (result.error ?? 'it did not work');
-  console.log(`[minecraft] ${plan.skill}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
-  return result.ok
-    ? { plan: describePlan(plan), kind: 'done', skill: plan.skill }
-    : { plan: describePlan(plan), kind: 'failed', skill: plan.skill, error: result.error };
-}
-
-// ---- Playing on her own -----------------------------------------------------
-//
-// Minecraft as something she chooses to do with time nobody else wants. The
-// rules — when a session may start, what ends it — are in minecraftlife.ts and
-// are pure; this is the clock and the doing. It never holds the app: a tick is
-// a status read, sometimes a model call, and at most one order to her body.
-
-let minecraftSession: Session | null = null;
-let minecraftSessionsToday = { day: '', count: 0 };
-let lastWhyNotPlaying = '';
-/** A model call can outlast a tick; the next tick must not start over it. */
-let minecraftTicking = false;
-
-function getPlayConfig(): PlayConfig {
-  return readPlayConfig(store.get('minecraft.play'));
-}
-
-function sessionsPlayedToday(): number {
-  const day = currentChatDayKey();
-  if (minecraftSessionsToday.day !== day) minecraftSessionsToday = { day, count: 0 };
-  return minecraftSessionsToday.count;
-}
-
-/** Everything the gate looks at, at this moment. */
-function minecraftSituation(status: MinecraftStatus | null): Situation {
-  const seen = status?.observation ?? null;
-  return {
-    now: Date.now(),
-    lastUserActivityAt,
-    asleep: herAsleepNow(),
-    knockedAwake: herKnockedAwakeNow(),
-    speaking: speakingNow,
-    // A call is a run of his utterances, each through ollamaChat and so through
-    // noteUserSpoke: the idle rule covers it, and there is no separate flag.
-    inCall: false,
-    workerUp: minecraft?.connected ?? false,
-    inWorld: seen?.state === 'online' && !!seen.self,
-    bodyBusy: status?.busy ?? null,
-    sessionsToday: sessionsPlayedToday(),
-  };
-}
-
-async function minecraftTick(): Promise<void> {
-  if (minecraftTicking || !minecraft) return;
-  minecraftTicking = true;
-  try {
-    const config = getPlayConfig();
-    const status = await minecraft.status();
-    const situation = minecraftSituation(status);
-
-    if (!minecraftSession) {
-      if (!config.enabled) return;
-      const why = whyNotStart(situation, config);
-      if (why) {
-        // Said once per reason, not once per tick: "he was talking to her 4
-        // min ago" every 45 seconds is the log nobody can read.
-        if (why !== lastWhyNotPlaying) { lastWhyNotPlaying = why; console.log(`[minecraft] not playing — ${why}`); }
-        return;
-      }
-      lastWhyNotPlaying = '';
-      if (!wantsToStart(situation, config, Math.random())) return;
-      minecraftSession = newSession(Date.now(), lastUserActivityAt);
-      minecraftSessionsToday.count = sessionsPlayedToday() + 1;
-      console.log(`[minecraft] session started (${minecraftSessionsToday.count} today) — ${status?.observation.currentProject ?? 'no project on the go'}`);
-    }
-
-    const stop = whyStop(minecraftSession, situation, config);
-    if (stop) { endMinecraftSession(stop); return; }
-
-    const ask = shouldAskBody(situation);
-    if (!ask.ask) { console.log(`[minecraft] tick — ${ask.because}`); return; }
-
-    const step = await planMinecraftStep(status ?? undefined);
-    if (!step) { minecraftSession = noteTick(minecraftSession, { kind: 'wait' }); return; }
-    minecraftSession = noteTick(minecraftSession,
-      step.kind === 'done' ? { kind: 'do', skill: step.skill ?? 'unknown' }
-      : step.kind === 'failed' ? { kind: 'failed', skill: step.skill ?? 'unknown' }
-      : { kind: 'wait' });
-    if (together && step.kind === 'done' && step.skill) together = noteDidTogether(together, step.skill);
-  } catch (error) {
-    console.warn('[minecraft] tick failed:', error instanceof Error ? error.message : error);
-  } finally {
-    minecraftTicking = false;
-  }
-}
-
-// ---- Him in her world -------------------------------------------------------
-//
-// The three events that are about him — arriving, talking, leaving — and what
-// she does about each. Everything he says in the game reaches the same brain
-// as everything else, framed as speech in a place (minecraftchat.ts), and her
-// answer goes back into the game the way it came. Only he is answered: the
-// worker decides `owner` against the configured name, and a stranger's chat is
-// logged and left.
-
-/** His Minecraft name, as the worker reports it. */
-let minecraftOwner = '';
-/** The stretch of him being here, or null. */
-let together: Together | null = null;
-let heLastLeftMinecraftAt = 0;
-/** One answer at a time in chat, like everywhere else she answers. */
-let answeringInMinecraft = false;
-
-function onMinecraftEvent(event: MinecraftEvent): void {
-  const his = aboutHim(event);
-  if (!his) return;
-  if (his === 'joined') void heJoinedMinecraft();
-  else if (his === 'left') void heLeftMinecraft();
-  else {
-    const text = (event.message as { text?: string } | undefined)?.text ?? '';
-    if (text) void answerInMinecraft(text);
-  }
-}
-
-/** A line of hers, said in the game and offered to the desk. */
-async function sayInMinecraft(line: string, about: string): Promise<void> {
-  if (!minecraft || !line) return;
-  const result = await minecraft.send('chat', { text: line });
-  if (!result.ok) console.warn(`[minecraft] could not say it in chat: ${result.error}`);
-  // The desk hears it too, through the one gate every unprompted line uses; if
-  // the gate refuses, the chat line still went, which is the one that matters.
-  interject(line, { source: 'minecraft', about });
-}
-
-async function heJoinedMinecraft(): Promise<void> {
-  const now = Date.now();
-  const awayMinutes = heLastLeftMinecraftAt ? (now - heLastLeftMinecraftAt) / 60_000 : null;
-  together = heArrived(now);
-  console.log(`[minecraft] ${minecraftOwner || 'he'} is here${awayMinutes === null ? '' : ` (last seen ${Math.round(awayMinutes)} min ago)`}`);
-
-  // Him arriving is an invitation, and not subject to the idle rule or the dice.
-  const config = getPlayConfig();
-  const situation = minecraftSituation(await minecraft?.status() ?? null);
-  if (minecraftSession) {
-    minecraftSession = heardInGame(minecraftSession, lastUserActivityAt);
-  } else {
-    const why = whyNotJoinHim(situation, config);
-    if (why) console.log(`[minecraft] not joining him — ${why}`);
-    else {
-      minecraftSession = newSession(now, lastUserActivityAt);
-      console.log('[minecraft] session started — he is here');
-    }
-  }
-
-  // A greeting, in her own voice, said in the game first: he is there, not at
-  // the desk. Best-effort; a model that will not answer costs nothing but the
-  // line.
-  const brain = store.get('ai.config') as ProviderConfig | undefined;
-  if (!brain?.model || herAsleepNow()) return;
-  try {
-    const character = getActiveCharacter();
-    const line = await ollamaQuip([character.identity, character.style].join(' '), greetingCue(minecraft?.lastSeen ?? null, minecraftOwner || 'he', awayMinutes), nudgeBrain() ?? brain);
-    await sayInMinecraft(line, 'him joining her in Minecraft');
-  } catch (error) {
-    console.warn('[minecraft] no greeting:', error instanceof Error ? error.message : error);
-  }
-}
-
-async function heLeftMinecraft(): Promise<void> {
-  const now = Date.now();
-  const stretch = together;
-  together = null;
-  heLastLeftMinecraftAt = now;
-  if (!stretch) return;
-  const { minutes, did } = describeTogether(stretch, now);
-  console.log(`[minecraft] ${minecraftOwner || 'he'} left after ${Math.round(minutes)} min${did.length ? ` — ${did.join(', ')}` : ''}`);
-
-  // Written down as a thing she did, so "what did you do today" has it; and
-  // remembered only if it was long enough to be an occasion (minecraftchat.ts).
-  if (minutes >= 1) {
-    const what = `played Minecraft with ${minecraftOwner || 'him'} for ${Math.round(minutes)} min${did.length ? ` — ${did.join(', ')}` : ''}`;
-    store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), { at: new Date(now).toISOString(), tool: 'minecraft', what }));
-  }
-  const memory = togetherMemory(stretch, minecraftOwner || 'him', now);
-  if (memory) {
-    const saved = addMemory(memory, 'event', undefined, { source: 'activity', emotion: localEmotion(memory), emotionIntensity: readTone(memory).heat });
-    console.log(`[minecraft] remembered: ${memory}${saved?.created ? '' : ' (already had it)'}`);
-  }
-
-  // She may carry on without him; the session, if there is one, runs on its
-  // own rules from here. A line, if she has one.
-  const brain = store.get('ai.config') as ProviderConfig | undefined;
-  if (!brain?.model || herAsleepNow() || minutes < 2) return;
-  try {
-    const character = getActiveCharacter();
-    const line = await ollamaQuip([character.identity, character.style].join(' '), farewellCue(minecraftOwner || 'he', minutes, did), nudgeBrain() ?? brain);
-    await sayInMinecraft(line, 'him leaving Minecraft');
-  } catch { /* nothing to say is fine */ }
-}
-
-/**
- * What he said in the game, answered in the game.
- *
- * The obviously mechanical lines ("haru follow") are read without a model, the
- * way quick.ts reads a greeting. Everything else is a turn in her one
- * conversation — same history, same brain, same tools, hands withheld — with
- * the leash of a message from elsewhere, and the answer split into chat lines
- * by the worker. It lands in the desk transcript as well, marked as from the
- * game, so coming back to the desk does not mean finding half a conversation.
- */
-async function answerInMinecraft(text: string): Promise<void> {
-  if (!minecraft) return;
-  if (answeringInMinecraft) { console.log('[minecraft] still answering the last one — this one is left'); return; }
-  answeringInMinecraft = true;
-  const started = Date.now();
-  try {
-    if (herAsleepNow()) {
-      const line = knockWhileAsleep();
-      if (line) await minecraft.send('chat', { text: line });
-      return;
-    }
-    if (together) together = noteChatExchange(together);
-    if (minecraftSession) minecraftSession = heardInGame(minecraftSession, Date.now());
-
-    const character = getActiveCharacter();
-    const quick = quickCommand(text, minecraftOwner || 'Tommy', herNameFrom(character.identity) || 'haru');
-    if (quick) {
-      if (quick.skill === 'status') {
-        const status = await minecraft.status();
-        await minecraft.send('chat', { text: status ? statusLine(status.observation) : "I can't tell right now." });
-        return;
-      }
-      const result = await minecraft.send(quick.skill, quick.args);
-      if (together && result.ok) together = noteDidTogether(together, quick.skill);
-      await minecraft.send('chat', { text: result.ok ? quick.say : `can't — ${(result.error ?? 'it did not work').slice(0, 120)}` });
-      console.log(`[minecraft] quick: ${quick.skill} ${result.ok ? 'ok' : `failed — ${result.error}`}`);
-      return;
-    }
-
-    const brain = store.get('ai.config') as ProviderConfig | undefined;
-    if (!brain?.model) return;
-    const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
-    const turn = chatTurn(minecraftOwner || 'he', text);
-    const messages = [...history, { role: 'user', content: turn, at: new Date().toISOString() }];
-    const answer = await ollamaChat(messages, brain, { hands: false, away: CHAT_AWAY, onToolCall: name => { if (together && name === 'minecraft_do') together = noteDidTogether(together, 'minecraft_do'); } });
-    const reply = stripDelivery(answer.content ?? '');
-    // The desk transcript gets it too, marked as from the game.
-    sendToWindows('chat:fromPhone', { text: `(in Minecraft) ${text}`, reply, ignored: Boolean(answer.ignored) });
-    if (reply && !answer.ignored) await minecraft.send('chat', { text: reply });
-    // Talking to her in the game is playing with her, not calling her away.
-    if (minecraftSession) minecraftSession = heardInGame(minecraftSession, lastUserActivityAt);
-    console.log(`[minecraft] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms`);
-  } catch (error) {
-    console.warn('[minecraft] could not answer in chat:', error instanceof Error ? error.message : error);
-  } finally {
-    answeringInMinecraft = false;
-  }
-}
-
-/**
- * The session is over; her body is put somewhere sensible.
- *
- * The wind-down is fired and not waited for. Ending a session is about her
- * attention — he spoke, or it has gone on long enough — and her legs walking
- * home is not something her attention needs to wait on. The executor runs the
- * steps in order regardless.
- */
-function endMinecraftSession(reason: string): void {
-  const session = minecraftSession;
-  if (!session) return;
-  minecraftSession = null;
-  const summary = summarise(session, Date.now());
-  console.log(`[minecraft] session over — ${reason}; ${summary}`);
-  // What she did, written down as a deed, so "what did you do today" has it.
-  // Only a session that did something: "played for 4 min and did nothing much"
-  // is not a thing she did.
-  if (session.did.length) {
-    store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), { at: new Date().toISOString(), tool: 'minecraft', what: `${summary} in Minecraft` }));
-  }
-  const seen = minecraft?.lastSeen ?? null;
-  const steps = windDown({
-    reason,
-    lastDecision: lastMinecraftDecision,
-    hasHome: !!seen?.home,
-    nearHome: (seen?.home?.away ?? Infinity) <= 8,
-    night: seen?.self?.time === 'night' || seen?.self?.time === 'sunset',
-  });
-  const link = minecraft;
-  if (!link) return;
-  void (async () => {
-    for (const step of steps) {
-      const result = await link.send(step.skill, step.args);
-      console.log(`[minecraft] wind-down ${step.skill}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
-    }
-  })();
-}
-
 // ---- The quick route ---------------------------------------------------
 
 /**
@@ -9426,18 +10404,46 @@ function endMinecraftSession(reason: string): void {
  * line back, in her register, since the model would not do it (2026-09-18).
  */
 async function settingSaid(text: string): Promise<{ reply: string; tier: 2 } | null> {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.spokenPlan',[text,core.get('config',{})]);
+    if(!decision)return null;
+    if(decision.settingPlan)await applyPlanAtTheirWord(decision.settingPlan);
+    return {reply:decision.reply,tier:decision.tier};
+  }
   const command = settingCommand(text);
   if (!command) return null;
   const setting = SETTINGS[command.name];
   const verdict = planChange(command.name, command.value, store.get(setting.path));
   if (!verdict.ok) return { reply: verdict.error, tier: 2 };
   const meaning = (level: number) => level >= 4 ? 'my own hands in my own time, and I still run what you hand me once you have said yes to each one' : level === 3 ? 'I run what you hand me, once you have said yes to each one' : level === 2 ? 'I look, and act when you say the word' : 'I look and tell you what I see';
-  if (verdict.unchanged) return { reply: `It is already at ${command.value} — ${meaning(command.value)}.`, tier: 2 };
+  // A mode is answered in her register; the machine level keeps its wording.
+  const mode = command.name === 'brain_model';
+  const escalation = command.name === 'escalation';
+  const already = mode
+    ? (command.value === 'explicit' ? 'Explicit mode is already on.' : 'Explicit mode is already off.')
+    : escalation
+      ? (command.value ? 'Escalation is already on.' : 'Escalation is already off.')
+      : `It is already at ${command.value} — ${meaning(command.value)}.`;
+  if (verdict.unchanged) return { reply: already, tier: 2 };
   await applyPlanAtTheirWord(verdict.plan);
+  if (mode) {
+    return { reply: command.value === 'explicit'
+      ? 'Done — Explicit mode is on. I am not going anywhere.'
+      : 'Done — Explicit mode is off. I am going back to bed.', tier: 2 };
+  }
+  if (escalation) {
+    return { reply: command.value
+      ? 'Done — escalation is on. Pictures, files and code can go out now.'
+      : 'Done — escalation is off. Everything stays here.', tier: 2 };
+  }
   return { reply: `Done. Level ${command.value} now — ${meaning(command.value)}. Do not make it boring.`, tier: 2 };
 }
 
 async function applyPlanAtTheirWord(plan: SettingPlan): Promise<{ ok: boolean; note: string }> {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.applyPlan',[core.get('config',{}),plan]);
+    store.backup(decision.backup);applyRemainingPlan(core,decision.plan);refreshConfigurationNote();return decision.result;
+  }
   // A backup first, as any hand edit of config.json gets; then the value,
   // which every reader of these keys picks up on its next look; then the
   // vault page that says how she runs.
@@ -9449,6 +10455,18 @@ async function applyPlanAtTheirWord(plan: SettingPlan): Promise<{ ok: boolean; n
 }
 
 function quickHit(text: string, history: { role?: string; content?: string }[]) {
+  if(process.env.HARU_CORE_QUICK_HANDS==='on'){
+    const mood=getMood(),character=getActiveCharacter();
+    const hit=corePolicySync<{reply:string;tier:number}|null>('quick.hit',[text,{
+      voiceInput:voiceSense.hasInput(text),now:zonedNow(CHAT_TIMEZONE),kept:getKept(),checkIns:getCheckIns(),
+      nickname:getProfile().nickname,herName:herNameFrom(character.identity),irritation:mood.irritation,
+      ignoring:isIgnoring(mood.irritation),history,conversationRoute:conversationRoute(),
+    }]);
+    if(hit){noteUserSpoke();advanceMood(text,history);}return hit;
+  }
+
+  // A spoken greeting can carry more than its words; let her respond to it.
+  if (voiceSense.hasInput(text)) return null;
   const mood = getMood();
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
@@ -9552,6 +10570,7 @@ let recallRefreshing = false;
 
 /** The days that are already in front of her whole (history.ts) — no point finding those again. */
 function daysAlreadyShown(todayKey: string): string[] {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-recall.shown',[Object.keys(store.getArchive()),todayKey,DAYS_OF_HISTORY]);
   return Object.keys(store.getArchive()).filter(day => day < todayKey).sort().slice(-DAYS_OF_HISTORY);
 }
 
@@ -9567,6 +10586,13 @@ function keptExchanges(todayKey: string): Exchange[] {
  */
 let chatIndexCache: { key: string; index: ChatIndex } | null = null;
 function chatIndex(todayKey: string): ChatIndex {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const archive=store.getArchive() as unknown as Record<string,unknown[]>;
+    const decision=corePolicySync<{key:string;rebuild:boolean}>('final-recall.indexPlan',[Object.entries(archive).map(([day,messages])=>({day,length:messages.length})),todayKey,chatIndexCache?.key??null]);
+    if(decision.rebuild)chatIndexCache={key:decision.key,index:buildChatIndex(keptExchanges(todayKey))};
+    if(!chatIndexCache)throw Error('chat_index_cache_protocol');return chatIndexCache.index;
+  }
+
   const archive = store.getArchive() as unknown as Record<string, unknown[]>;
   const days = Object.keys(archive).filter(day => day < todayKey).sort();
   const key = `${todayKey}|${days.length}|${days[0] ?? ''}|${days.at(-1) ?? ''}|${archive[days.at(-1) ?? '']?.length ?? 0}`;
@@ -9581,6 +10607,12 @@ function chatIndex(todayKey: string): ChatIndex {
  */
 let everydayWordsCache: { index: ChatIndex; words: Set<string> } | null = null;
 function everydayWords(): Set<string> {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const index=chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
+    if(everydayWordsCache?.index!==index)everydayWordsCache={index,words:coreEveryday(index)};
+    return everydayWordsCache.words;
+  }
+
   const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
   if (everydayWordsCache?.index !== index) {
     // Counted, not merely seen: she writes "david's death? cheap…" in lowercase
@@ -9610,6 +10642,13 @@ function everydayWords(): Set<string> {
 
 /** search_chats (tools.ts): words and meaning over every kept day, dated finds with their neighbours. */
 async function searchOldChats(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly: boolean }> {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const index=chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE))),plan=corePolicySync<any>('final-chat.embeddingPlan',[getKnowledgeEmbedder()?.model??null,recallFormat,input.query]);
+    const queryVector=plan.embed?await tryEmbedQuery(plan.text):null;
+    const hits=searchChats(index,{...input,queryVector,vectors:recallVectors});
+    return corePolicySync('final-chat.result',[hits,Boolean(queryVector)]);
+  }
+
   const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
   const model = getKnowledgeEmbedder()?.model;
   // Meaning only counts when the vectors were made the way this query is; words always do.
@@ -9626,12 +10665,20 @@ async function searchOldChats(input: { query: string; from?: string; to?: string
  * them were 11 MB (2026-09-17).
  */
 function roundedVector(vector: number[]): number[] {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-recall.rounded',[vector]);
   return vector.map(value => Math.round(value * 1e4) / 1e4);
 }
 /** Set when the cache on disk should be written even with nothing new: rounded on load, or pruned. */
 let recallCacheStale = false;
 
 function loadRecallVectors(): void {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    try{const file=JSON.parse(readFileSync(RECALL_CACHE(),'utf8')),meta=corePolicySync<any>('final-recall.loadMeta',[file.format??null,Boolean(file.vectors&&typeof file.vectors==='object')]);
+      if(!meta.load)return;recallFormat=meta.format;
+      recallFrames(Object.entries(file.vectors),rows=>{const result=corePolicySync<any>('final-recall.loadBatch',[rows]);for(const [id,vector] of result.rows)recallVectors.set(id,vector);if(result.stale)recallCacheStale=true;});
+    }catch{}return;
+  }
+
   try {
     const file = JSON.parse(readFileSync(RECALL_CACHE(), 'utf8')) as { format?: unknown; vectors?: Record<string, number[]> };
     // Before 2026-09-17 the file was the bare id → vector map, embedded without
@@ -9652,7 +10699,14 @@ function loadRecallVectors(): void {
   } catch { /* nothing embedded yet, which is the state on a first run */ }
 }
 
-async function refreshRecallVectors(): Promise<void> {
+async function refreshRecallVectors(): Promise<void | {recallBacklog:boolean}> {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    const embedder=getKnowledgeEmbedder();if(recallRefreshing||!embedder)return {recallBacklog:false};
+    recallRefreshing=true;
+    try{return await coreRefreshRecall({model:embedder.model,oldFormat:recallFormat,all:keptExchanges(localDateKey(zonedNow(CHAT_TIMEZONE))),vectors:recallVectors,stale:recallCacheStale,embed:texts=>embedder.embedBatch(texts),setFormat:value=>{recallFormat=value},setStale:value=>{recallCacheStale=value},save:()=>{recallCacheStale=true;writeFileSync(RECALL_CACHE(),JSON.stringify({format:recallFormat,vectors:Object.fromEntries(recallVectors)}),'utf8');}});}
+    finally{recallRefreshing=false;}
+  }
+
   const embedder = getKnowledgeEmbedder();
   if (recallRefreshing || !embedder) return;
   recallRefreshing = true;
@@ -9709,28 +10763,21 @@ async function refreshRecallVectors(): Promise<void> {
 
 /** One day per tick at most: a backlog of weeks arrives as a trickle on the bill, not a burst. */
 const GRAPH_TICK_MS = 60_000;
-/** A day whose replies keep coming back unreadable is skipped after this many tries rather than paid for forever. */
-const GRAPH_TRIES = 3;
 let readingGraph = false;
-const graphFailures = new Map<string, number>();
-/**
- * Day → how far into it a read got before a piece failed, for the same
- * messages under the same name, so a retry starts at the piece that failed
- * instead of paying for the ones already folded in. Held in memory only: a
- * restart mid-day pays for those pieces once more, which is rare and cheap.
- */
-const graphPiecesRead = new Map<string, { of: string; pieces: number }>();
-/**
- * No answer, in a row, and when to look again. Waiting out an outage must not
- * be a call a minute for as long as it lasts, nor a day whose request is
- * refused every time (a 400 on its content) holding every later day back for
- * good: the wait doubles to half an hour, and the tenth no-answer in a row
- * counts as one of the day's tries.
- */
-const graphUnanswered = { count: 0, until: 0 };
-const GRAPH_UNANSWERED_AS_TRY = 10;
+function graphProgress(day:string,messages:unknown[],userName:string) {
+  return graphJob((store.get('graph.jobs') as Record<string,unknown>|undefined)?.[day],graphFingerprint(messages,userName));
+}
+function saveGraphProgress(day:string,job:ReturnType<typeof graphJob>) {
+  const jobs=(store.get('graph.jobs') ?? {}) as Record<string,unknown>;
+  if(process.env.HARU_CORE_GRAPH_MUTATION==='on'){store.set('graph.jobs',corePolicySync('graph-mutation.saveJobs',[jobs,day,job]));return;}
+  // Keep completed fingerprints too: a same-size archive correction is new input.
+  const kept=Object.entries(jobs);
+  if(!Object.hasOwn(jobs,day)&&kept.length>=4096)throw Error('graph_job_capacity');
+  store.set('graph.jobs',{...Object.fromEntries(kept),[day]:job});
+}
 
 function graphUserName(): string {
+  if(process.env.HARU_CORE_GRAPH_MUTATION==='on')return corePolicySync('graph-mutation.userLabel',[getProfile().nickname]);
   return getProfile().nickname.trim() || 'the user';
 }
 
@@ -9741,54 +10788,35 @@ function graphUserName(): string {
  * and wrote "Tommy works at a job"; a graph of that is worse than no graph.
  */
 function graphBrain(): ProviderConfig | null {
+  if(process.env.HARU_CORE_GRAPH_MUTATION==='on')return corePolicySync('graph-mutation.brain',[store.get('graph') ?? null,conversationRoute()]);
   if ((store.get('graph') as { enabled?: boolean } | undefined)?.enabled === false) return null;
   return conversationRoute();
 }
 
 async function readGraphTick(): Promise<void> {
-  if (readingGraph || Date.now() < graphUnanswered.until) return;
+  if (readingGraph) return;
   const brain = graphBrain();
-  if (!brain) return;
-  const today = currentChatDayKey();
-  const archive = store.getArchive();
-  const read = store.getFactGraph().read;
-  // Oldest first, finished days only; a day that has grown since it was read is read again.
-  // Finished means before the chat's own day as well as the clock's: in the
-  // minute after 05:00 the clock has rolled but performChatResetIfDue has not,
-  // and a day he pressed New chat on already has an archive entry — half of it.
-  // Read then, it was paid for twice once the reset filed the rest (2026-09-17).
-  const day = Object.keys(archive).filter(key => !key.includes('#') && key < today && key < chatDayKey()).sort()
-    .find(key => read[key] !== (archive[key] ?? []).length);
-  if (!day) return;
-  readingGraph = true;
+  if (!brain || inferencePriority.backgroundReason(brain.endpoint,brain.endpoint)) return;
+  const today = currentChatDayKey(), archive=store.getArchive(), read=store.getFactGraph().read;
+  const extractionUser=graphUserName();
+  const day=process.env.HARU_CORE_GRAPH_MUTATION==='on'
+    ?corePolicySync<string|null>('graph-mutation.selectDay',[Object.entries(archive).map(([day,messages])=>({day,messageCount:messages.length,readCount:read[day] ?? null,fingerprint:graphFingerprint(messages,extractionUser),previous:(store.get('graph.jobs') as Record<string,unknown>|undefined)?.[day] ?? null})),today,chatDayKey(),Date.now()])
+    :Object.keys(archive).filter(key=>!key.includes('#')&&key<today&&key<chatDayKey()).sort().find(key=>{
+    const messages=archive[key]??[],job=graphProgress(key,messages,graphUserName());
+    const previous=(store.get('graph.jobs') as Record<string,any>|undefined)?.[key];
+    const changed=previous&&previous.fingerprint!==job.fingerprint;
+    return (changed||read[key]!==messages.length)&&job.status!=='blocked'&&Date.now()>=job.retryAt;
+  });
+  if(!day)return;
+  readingGraph=true;
   try {
-    const outcome = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
-    if (outcome !== 'unanswered') graphUnanswered.count = 0;
-    if (outcome === 'read') { graphFailures.delete(day); graphPiecesRead.delete(day); syncGraphPage(`read ${day}`); return; }
-    // No answer at all — the network, an HTTP status, credit run out — says
-    // nothing about the day. Counting it spent all three tries in a three-minute
-    // outage and marked the day read for good, unread (2026-09-17). Only a reply
-    // that came back and could not be used is a try; this waits for the next tick.
-    if (outcome === 'unanswered') {
-      graphUnanswered.count += 1;
-      graphUnanswered.until = Date.now() + Math.min(30, 2 ** Math.min(graphUnanswered.count - 1, 5)) * 60_000;
-      if (graphUnanswered.count < GRAPH_UNANSWERED_AS_TRY) return;
-      graphUnanswered.count = 0;
-    }
-    throw new Error('the reply could not be read');
-  } catch (error) {
-    const tries = (graphFailures.get(day) ?? 0) + 1;
-    graphFailures.set(day, tries);
-    console.warn(`[graph] could not read ${day} (try ${tries} of ${GRAPH_TRIES}): ${error instanceof Error ? error.message : error}`);
-    if (tries >= GRAPH_TRIES) {
-      const graph = store.getFactGraph();
-      store.setFactGraph({ ...graph, read: { ...graph.read, [day]: (archive[day] ?? []).length } });
-      graphPiecesRead.delete(day);
-      console.warn(`[graph] skipping ${day} until it changes`);
-    }
-  } finally {
-    readingGraph = false;
-  }
+    const outcome=await inferencePriority.runBackground(brain.endpoint,brain.endpoint,signal=>readDayIntoGraph(day,(archive[day]??[]) as {role?:string;content?:unknown}[],brain,signal));
+    if(outcome==='read')syncGraphPage(`read ${day}`);
+  }catch(error){
+    // Storage uncertainty must not be interpreted as a processed day. A Core
+    // commit and its checkpoint are atomic; never acknowledge an uncertain one.
+    console.warn('[graph] job could not be confirmed; unread progress retained');
+  }finally{readingGraph=false;}
 }
 
 /**
@@ -9822,39 +10850,42 @@ function syncGraphPage(reason: string): void {
  * could not be used, 'unanswered' when a call got no reply at all — either way
  * the day is left unmarked to try again, from the piece that failed.
  */
-async function readDayIntoGraph(day: string, messages: { role?: string; content?: unknown }[], brain: ProviderConfig): Promise<'read' | 'unreadable' | 'unanswered'> {
-  const userName = graphUserName();
-  const chunks = dayChunks(messages, userName);
-  const totals = { added: 0, confirmed: 0, ended: 0, refused: 0 };
-  const of = `${messages.length}:${userName}`;
-  const already = graphPiecesRead.get(day)?.of === of ? graphPiecesRead.get(day)!.pieces : 0;
-  for (const [index, chunk] of chunks.entries()) {
-    if (index < already) continue;
-    let reply: Awaited<ReturnType<typeof ollamaPost>>;
-    try {
-      reply = await ollamaPost(
-        [{ role: 'system', content: extractionPrompt(userName) }, { role: 'user', content: extractionInput(day, knownBlock(store.getFactGraph(), chunk, userName), chunk) }],
-        brain,
-        { tools: false, temperature: 0.1, format: EXTRACTION_SCHEMA, maxTokens: 3000 },
-      );
-    } catch (error) {
-      console.warn(`[graph] no answer reading ${day} (piece ${index + 1} of ${chunks.length}), trying again next tick: ${error instanceof Error ? error.message : error}`);
+async function readDayIntoGraph(day: string, messages: { role?: string; content?: unknown }[], brain: ProviderConfig, signal?:AbortSignal): Promise<'read' | 'unreadable' | 'unanswered'> {
+  assertGraphCounter(store.getFactGraph());
+  const userName=graphUserName(),chunks=dayChunks(messages,userName);
+  let job=graphProgress(day,messages,userName);
+  if(process.env.HARU_CORE_GRAPH_MUTATION==='on'?!corePolicySync<boolean>('graph-mutation.eligible',[job,Date.now()]):job.status==='blocked'||Date.now()<job.retryAt)return 'unanswered';
+  const registry=readModelRegistry(store.get('ai.modelRegistry'),{
+    local:store.get('ai.config') as ProviderConfig,conversation:store.get('ai.conversation') as ProviderConfig|undefined,
+    specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision:readVisionConfig(store.get('vision')),
+  });
+  for(const [index,chunk] of chunks.entries()){
+    if(index<job.pieces)continue;
+    const conversation:OllamaMessage[]=[{role:'system',content:extractionPrompt(userName)},
+      {role:'user',content:extractionInput(day,knownBlock(store.getFactGraph(),chunk,userName),chunk)}];
+    saveGraphProgress(day,job);
+    const task=new TaskController(taskBridge.call,registry,graphPolicy(readTaskPolicy(store.get('ai.taskPolicy'))),true);
+    let content:string;
+    try{
+      await task.start(`Graph extraction ${day} piece ${index+1} ${job.fingerprint.slice(0,16)}`,brain.model,'background',signal);
+      content=await task.compose(()=>ollamaPost(conversation,brain,{tools:false,temperature:0.1,format:EXTRACTION_SCHEMA,maxTokens:3000}),conversation);
+    }catch(error){
+      job=graphFailure(job,'unanswered',Date.now());saveGraphProgress(day,job);
+      console.warn(`[graph] piece ${index+1} deferred without marking the day read`);
       return 'unanswered';
     }
-    const extraction = readExtraction(reply.content ?? '');
-    if (!extraction) return 'unreadable';
-    const { graph, report } = applyExtraction(store.getFactGraph(), extraction, { day, chunk, userName });
-    store.setFactGraph(graph);
-    totals.added += report.added;
-    totals.confirmed += report.confirmed;
-    totals.ended += report.ended;
-    totals.refused += report.rejected.length;
-    if (report.rejected.length) console.log(`[graph] ${day}: refused ${report.rejected.slice(0, 4).join(' | ')}${report.rejected.length > 4 ? ` and ${report.rejected.length - 4} more` : ''}`);
-    graphPiecesRead.set(day, { of, pieces: index + 1 });
+    const extraction=readExtraction(content);
+    if(!extraction){saveGraphProgress(day,graphFailure(job,'unreadable',Date.now()));return 'unreadable';}
+    const {graph,report}=applyExtraction(assertGraphCounter(store.getFactGraph()),extraction,{day,chunk,userName});
+    job=process.env.HARU_CORE_GRAPH_MUTATION==='on'?corePolicySync('graph-mutation.progress',[job,index+1]):{...job,pieces:index+1,failures:0,unanswered:0,retryAt:0};
+    store.transaction(()=>{store.setFactGraph(graph);saveGraphProgress(day,job);});
+    console.log(`[graph] committed ${day} piece ${index+1}/${chunks.length}: +${report.added}, confirmed ${report.confirmed}, refused ${report.rejected.length}`);
   }
-  const graph = store.getFactGraph();
-  store.setFactGraph({ ...graph, read: { ...graph.read, [day]: messages.length } });
-  console.log(`[graph] read ${day}: ${chunks.length} piece(s)${already ? ` (${already} read before a failed try)` : ''}, +${totals.added} fact(s), ${totals.confirmed} confirmed, ${totals.ended} ended${totals.refused ? `, ${totals.refused} refused` : ''} — ${graph.facts.length} facts about ${graph.entities.length} names in all`);
+  const graph=store.getFactGraph();
+  store.transaction(()=>{
+    store.setFactGraph({...graph,read:{...graph.read,[day]:messages.length}});
+    saveGraphProgress(day,process.env.HARU_CORE_GRAPH_MUTATION==='on'?corePolicySync('graph-mutation.done',[job]):{...job,status:'done'});
+  });
   return 'read';
 }
 
@@ -9882,6 +10913,8 @@ let overheardReadAt = 0;
  * quietly sending Sam's messages to Venice.
  */
 function overheardBrain(): ProviderConfig | null {
+  if(process.env.HARU_CORE_CONTEXT_SUPPLEMENT==='on')return supplement('brain',[store.get('ai.config')??null]);
+
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model || !config.endpoint) return null;
   if (!isLoopback(config.endpoint)) {
@@ -9893,6 +10926,8 @@ function overheardBrain(): ProviderConfig | null {
 
 /** One pass over everything said since the last one. */
 async function readOverheardTick(force = false): Promise<void> {
+  if(process.env.HARU_CORE_CONTEXT_SUPPLEMENT==='on')return coreReadOverheard(force,{core:remainingStore(app.getPath('userData')),facts:()=>({whatsapp:{enabled:(store.get('whatsapp') as any)?.enabled,reading:(store.get('whatsapp') as any)?.reading},brain:store.get('ai.config')??null,busy:readingOverheard,lines:overheard.lines,now:Date.now(),lastAt:overheardReadAt,day:currentChatDayKey(),userName:graphUserName()}),drain:()=>overheard.drain(),busy:value=>{readingOverheard=value;},stamp:at=>{overheardReadAt=at;},compose:(messages,config,options)=>ollamaPost(messages,config,options),committed:packet=>{if(packet.agendaChanged){ownedAgendaChanged({plan:{config:packet.config}});void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error));}},log:line=>console.warn(line)});
+
   const config = readWhatsAppConfig(store.get('whatsapp'));
   if (!config.enabled || !config.reading.enabled) return;
   if (readingOverheard || !overheard.lines) return;
@@ -9962,7 +10997,7 @@ async function readOverheardTick(force = false): Promise<void> {
 /** The daily sweeps, before the 05:00 roll. Missed while the app was down, they run at the next start within twenty hours. */
 const MAINTENANCE_AT = '04:30';
 
-const scheduler = createScheduler({
+const scheduler = (process.env.HARU_CORE_SCHEDULER==='on'?createCoreScheduler:createScheduler)({
   load: () => store.getSchedule(),
   save: file => store.setSchedule(file),
   handlers: {
@@ -9994,16 +11029,30 @@ const scheduler = createScheduler({
   log: line => console.log(line),
 });
 
-function bookFollowUp(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } {
+async function bookFollowUp(input: { why: string; date?: string; time?: string; inMinutes?: number }): Promise<{ booked: true; when: string } | { booked: false; reason: string }> {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+    if(process.env.HARU_CORE_SCHEDULER!=='on'||!('book' in scheduler))throw Error('core_booking_scheduler_required');
+    const now=Date.now(),packet=corePolicySync<any>('final-booking.prepare',[input,now,CHAT_TIMEZONE]);
+    if(packet.result)return packet.result;
+    const result=await scheduler.book(packet.command,`booked-${randomUUID().slice(0,8)}`);
+    return corePolicySync('final-booking.observed',[result,now,CHAT_TIMEZONE]);
+  }
+
   const now = Date.now();
   const at = resolveBookingTime(input, now, CHAT_TIMEZONE);
   if (typeof at !== 'number') return { booked: false, reason: at.error };
+  if('book' in scheduler){
+    try{
+      const result=await scheduler.book({at,why:input.why},`booked-${randomUUID().slice(0,8)}`);
+      return result.booked?{booked:true,when:describeWhen(result.at,now,CHAT_TIMEZONE)}:result;
+    }catch{return {booked:false,reason:'The follow-up could not be confirmed. Do not promise it is booked.'};}
+  }
   const admitted = admitBooking({ jobs: scheduler.list(), booked: scheduler.booked() }, { at, why: input.why }, now, `booked-${randomUUID().slice(0, 8)}`);
   if ('refused' in admitted) {
     console.log(`[booked] refused ${JSON.stringify(input.why.slice(0, 80))}: ${admitted.refused}`);
     return { booked: false, reason: admitted.refused };
   }
-  scheduler.add(admitted.job);
+  await scheduler.add(admitted.job);
   const when = describeWhen(at, now, CHAT_TIMEZONE);
   console.log(`[booked] she will come back to ${JSON.stringify(admitted.job.payload?.why)} at ${when}`);
   return { booked: true, when };
@@ -10026,6 +11075,8 @@ function herWakeAt(): number | null {
  * Shared by her bookings and her thoughts.
  */
 async function composeUnprompted(note: string): Promise<string | null> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.unpromptedStart',[note,conversationPolicyFacts()]);if(p.error)throw Error(p.error);const answer=await Promise.race([sendToProvider(p.command.messages,p.command.config,p.command.options),new Promise<never>((_,reject)=>setTimeout(()=>reject(Error('no answer in 40s')),p.command.timeoutMs))]);return corePolicySync<any>('conversation-program.unpromptedObserved',[p.state,answer.content??'',{...conversationPolicyFacts(),asides:getAsides()}]).result;}
+
   const route = conversationRoute() ?? (store.get('ai.config') as ProviderConfig | undefined);
   if (!route?.model) throw new Error('no brain to say it with');
   const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
@@ -10055,6 +11106,8 @@ async function composeUnprompted(note: string): Promise<string | null> {
  * same guards as a second thought. She may still decide it no longer fits.
  */
 async function comeBackTo(job: Job): Promise<Outcome> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const read=()=>({now:Date.now(),zone:CHAT_TIMEZONE,silenced:isSilenced(store.get('pushback') as Pushback|undefined,Date.now()),asleep:herAsleepNow(),knocked:herKnockedAwakeNow(),wakeAt:herWakeAt(),quiet:inQuietHours(getPush().prefs,zonedNow(CHAT_TIMEZONE)),up:theyAreUpNow(),lastUser:lastUserActivityAt,lastInterjection:lastInterjectionAt,gameQuiet:readGamingConfig(store.get('gaming')).quiet,gameRunning:gameIsRunning()});const p=corePolicySync<any>('conversation-program.bookedStart',[job,read()]);if(Object.hasOwn(p,'result'))return p.result;const line=await composeUnprompted(p.prompt);const done=corePolicySync<any>('conversation-program.bookedObserved',[p.state,line,read()]);if(done.publication){lastInterjectionAt=done.publication.at;noteAside(done.publication.line,done.publication.source,done.publication.about);}return done.result;}
+
   const why = String(job.payload?.why ?? '').trim();
   if (!why) return { done: true };
   const now = Date.now();
@@ -10086,7 +11139,11 @@ async function comeBackTo(job: Job): Promise<Outcome> {
  * the road has already eased or cannot be read. Returns what she is told, so
  * what she says about it is what the app will actually do (trafficwatch.ts).
  */
-function startTrafficWatch(destination: string, found: FoundPlace | null, route: Route | null): string {
+function navigationFacts(){return {now:Date.now(),where:getWhereabouts(),hasKey:Boolean(getGoogleMapsKey()),searchPlace:readSearchConfig(store.get('search')).place,weekday:zonedNow(CHAT_TIMEZONE).getDay(),timeZone:CHAT_TIMEZONE,lastPlaceFound,jobs:scheduler.list(),pushback:store.get('pushback')};}
+function navigationAdapter(){return {facts:navigationFacts,jobs:()=>scheduler.list(),book:(job:Job)=>scheduler.add(job),cancel:(id:string)=>scheduler.cancel(id),cache:(cache:any)=>{lastPlaceFound=cache;},watch:(a:any)=>startTrafficWatch(a.destination,a.found,a.route),execute:(kind:string,a:any)=>{switch(kind){case 'google':return searchGooglePlaces(a.query,getGoogleMapsKey(),a.near,(url,init)=>fetch(url,init));case 'osm':return searchPlaces(a.query,(url,init)=>fetch(url,init),a.near,a.fallback,a.options);case 'route':return computeRoute(a.start,a.target,getGoogleMapsKey(),(url,init)=>fetch(url,init));case 'compose':return composeUnprompted(a.prompt);default:throw Error('navigation_command_invalid');}},stamp:(at:number)=>{lastInterjectionAt=at;},publish:(a:any)=>noteAside(a.text,a.source,a.about,undefined,a.scheduledPush)};}
+
+async function startTrafficWatch(destination: string, found: FoundPlace | null, route: Route | null): Promise<string> {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return startCoreTrafficWatch(destination,found,route,navigationAdapter());
   const now = Date.now();
   if (route && easedEnough(route)) {
     console.log(`[traffic] no watch needed — ${route.minutes} min now, ${route.typicalMinutes} usual`);
@@ -10096,7 +11153,7 @@ function startTrafficWatch(destination: string, found: FoundPlace | null, route:
     console.log(`[traffic] cannot watch "${destination}" — ${found ? 'no maps key' : 'the place was not found'}`);
     return watchNote(destination, null, now, CHAT_TIMEZONE, false);
   }
-  scheduler.add(watchJob(destination, { name: found.name, lat: found.lat, lon: found.lon }, now));
+  await scheduler.add(watchJob(destination, { name: found.name, lat: found.lat, lon: found.lon }, now));
   console.log(`[traffic] watching the way to "${destination}" every ${WATCH_EVERY_MS / 60_000} min${route ? ` — ${route.minutes} min now, ${route.typicalMinutes} usual` : ''}`);
   return watchNote(destination, route, now, CHAT_TIMEZONE, true);
 }
@@ -10108,6 +11165,7 @@ function startTrafficWatch(destination: string, found: FoundPlace | null, route:
  * a plain line stands in when her brain lets it go or cannot be reached.
  */
 async function watchTraffic(job: Job): Promise<Outcome> {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return runCoreTrafficWatch(job,navigationAdapter());
   const payload = job.payload ?? {};
   const destination = String(payload.destination ?? 'home');
   const target = { name: String(payload.name ?? destination), lat: Number(payload.lat), lon: Number(payload.lon) };
@@ -10150,7 +11208,7 @@ async function watchTraffic(job: Job): Promise<Outcome> {
   }
   const said = line ?? (eased && route ? easedFallback(destination, route) : gaveUpFallback(destination, route));
   lastInterjectionAt = Date.now();
-  noteAside(eased ? withDirections(said, target, route ?? undefined) : said, 'booked', `traffic ${destination}`.slice(0, 80));
+  noteAside(eased ? withDirections(said, target, route ?? undefined) : said, 'booked', `traffic ${destination}`.slice(0, 80), undefined, true);
   console.log(`[traffic] ${eased ? 'eased' : 'gave up'}: ${JSON.stringify(said.slice(0, 120))}`);
   return { done: true };
 }
@@ -10174,6 +11232,7 @@ function thoughtsConfig(): { enabled: boolean; speak: boolean } {
 
 /** The app's reasons she should not start a conversation now, in words, most basic first. */
 function initiativeBlockers(): string[] {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on')return corePolicySync('publication.initiativeBlockers',[publicationSnapshot()]);
   const now = Date.now();
   const out: string[] = [];
   if (herAsleepNow() || herKnockedAwakeNow()) out.push('she is asleep');
@@ -10230,7 +11289,46 @@ function thinkingState(trigger: Trigger, now: number, lastMessageAt: number | un
   };
 }
 
+function ownedThoughtFacts() {
+  return {...publicationSnapshot(),zone:CHAT_TIMEZONE,settings:store.get('thoughts')??null,hasBrain:Boolean(nudgeBrain()),state:store.getThoughts(),
+    mood:getMood(),messages:store.get('chat.messages')??[],asides:getAsides(),days:getDays(),nights:getNights(),week:getWeek(),tasks:getKept(),memories:getMemories(),
+    moodNote:[vitalsInstruction(vitals,getMood().irritation),grudgeInstruction(getMood().grudge??0)].filter(Boolean).join(' ')};
+}
+async function ownedThoughtTick():Promise<void>{
+  if(thinkingNow)return;
+  const facts=ownedThoughtFacts(),plan=corePolicySync<any>('thoughts.begin',[facts]);if(!plan)return;
+  const original=JSON.stringify(store.getThoughts());let state=plan.state,made:Thought[]=[],spoke=false;
+  thinkingNow=true;
+  try{
+    store.transaction(()=>{if(JSON.stringify(store.getThoughts())!==original)throw Error('core_thought_state_changed');store.setThoughts(state);});
+    const expected=JSON.stringify(store.getThoughts()),moodBranch=JSON.stringify(getMood()),messagesBranch=JSON.stringify(store.get('chat.messages')??[]);
+    const fence=()=>{if(JSON.stringify(store.getThoughts())!==expected||JSON.stringify(getMood())!==moodBranch
+      ||JSON.stringify(store.get('chat.messages')??[])!==messagesBranch)throw Error('core_thought_branch_changed');};
+    const reply=await Promise.race([ollamaPost([{role:'system',content:`${getActiveCharacter().identity}\n\n${plan.rules}`},{role:'user',content:plan.input}],nudgeBrain()!,
+      {tools:false,temperature:0.8,format:'json',maxTokens:500}),new Promise<never>((_,reject)=>setTimeout(()=>reject(Error('no answer in 90s')),90000))]);
+    fence();const drafts=corePolicySync<any[]>('thoughts.drafts',[reply.content??'']);
+    for(const draft of drafts){
+      const vector=await tryEmbedQuery(draft.thought);fence();
+      const decision:any=corePolicySync<any>('thoughts.consider',[{state,draft,vector:vector??null,now:facts.now,trigger:plan.trigger,made,spoke,speak:plan.speak,
+        asides:getAsides(),publication:publicationSnapshot(),dayStart:plan.dayStart,lastMessageAt:plan.lastMessageAt}]);
+      state=decision.state;spoke=decision.spoke;
+      if(decision.action==='retain'){made.push(decision.thought);continue;}
+      const line=await composeUnprompted(decision.prompt);fence();
+      const delivery=corePolicySync<any>('thoughts.afterCompose',[decision.thought,line,facts.now,lastUserActivityAt]);
+      if(!delivery.publish){made.push(delivery.thought);continue;}
+      // The recorded aside is the application receipt; it does not mean phone playback.
+      fence();const receipt=noteAside(line!,'thought',delivery.about);lastInterjectionAt=Date.now();
+      const retained=corePolicySync<any>('thoughts.settled',[state,made,delivery.thought,line,receipt?{id:receipt.id}:null,Date.now()]);
+      made=retained.made;
+    }
+    const final=corePolicySync<ThoughtState>('thoughts.keepThoughts',[state,made,Date.now()]);
+    store.transaction(()=>{fence();store.setThoughts(final);});
+  }catch(error){console.warn(`[thought] owned decision rejected: ${error instanceof Error?error.message:error}`);}
+  finally{thinkingNow=false;}
+}
+
 async function thoughtTick(): Promise<void> {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on'){await ownedThoughtTick();return;}
   if (thinkingNow) return;
   const settings = thoughtsConfig();
   // Knocked awake is not woken: the knock moves her wake time, and the wake
@@ -10349,6 +11447,8 @@ let examplesCache: { key: string; examples: Example[] } | null = null;
 
 /** Today's few exchanges of her at her best: picked once a day, and again when a revoice pass adds rewrites. */
 function todaysExamples(): Example[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const now=zonedNow(CHAT_TIMEZONE),today=localDateKey(now),yesterday=localDateKey(new Date(now.getFullYear(),now.getMonth(),now.getDate()-1));const p=corePolicySync<any>('conversation-program.todaysExamples',[remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),today,yesterday]);examplesCache=p;return p.examples;}
+
   const local = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(local);
   const rewrites = revoiceState().rewrites;
@@ -10364,6 +11464,8 @@ function todaysExamples(): Example[] {
 }
 
 function rantRoom(latest: string, mentioned = '', answering = false): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const facts={...conversationPolicyFacts(),lastNight:nightsOn(getNights(),lastNightKey())[0]??null,interests:getInterests(),vitals,feelings:getFeelings(),roll:Math.random()};const p=corePolicySync<any>('conversation-program.rant',[facts,latest,mentioned,answering]);conversationApply(p);return p.result;}
+
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
   const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
@@ -10456,9 +11558,10 @@ function publishToVault(reason: string): void {
 }
 
 async function directionsFor(latest: string, recentUser: string[] = []): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string; about?: true } | null> {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return runCoreDirections(latest,recentUser,navigationAdapter());
   // "Never mind" or "I'm leaving now" calls off a traffic watch (trafficwatch.ts).
   if (stopsTrafficWatch(latest) && scheduler.list().some(job => job.kind === TRAFFIC_WATCH_KIND)) {
-    scheduler.cancel(TRAFFIC_WATCH_KIND);
+    await scheduler.cancel(TRAFFIC_WATCH_KIND);
     console.log('[traffic] watch called off');
   }
   // "Let me know when the traffic eases" is the road now, and a watch after.
@@ -10541,14 +11644,21 @@ async function directionsFor(latest: string, recentUser: string[] = []): Promise
   }
   console.log(`[maps] the way to "${ask.destination}": ${found ? found.name : 'not found'}`);
   const note = directionsNote(ask, found, where, Date.now(), road, facts);
-  return { ask, found, route, note: watchAsk ? `${note}\n\n${startTrafficWatch(watchAsk.destination, found, route)}` : note };
+  return { ask, found, route, note: watchAsk ? `${note}\n\n${await startTrafficWatch(watchAsk.destination, found, route)}` : note };
 }
+
+function locationFacts(){
+ const core=remainingStore(app.getPath('userData')),now=new Date(),config=core.get('config',{}),arrival=(config as any).where?.arrival;
+ return {config,now:now.getTime(),at:now.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,weekday:new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(zonedNow(CHAT_TIMEZONE)).toLowerCase(),memories:getMemories(),mood:getMood(),arrivalClock:locationClock(arrival,clockAt)};
+}
+function locationAdapter(){return {core:remainingStore(app.getPath('userData')),facts:locationFacts,moodChanged:(mood:any)=>sendToWindows('mood:changed',mood)};}
 
 function getWhereabouts(): Whereabouts {
   return readWhereabouts(store.get('whereabouts'));
 }
 
 function saveWhereabouts(next: Whereabouts) {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on'){applyCoreLocation('mutation',['save',next],locationAdapter());return;}
   store.set('whereabouts', next);
 }
 
@@ -10560,34 +11670,25 @@ function saveBody(next: Body) {
   store.set('body', next);
 }
 
-function getPush(): { devices: PushDevice[]; prefs: PushPrefs; nextNudgeAt: number; lastReachedAt: number } {
+function getPush(): { devices: PushDevice[]; prefs: PushPrefs; lastReachedAt: number } {
   const saved = (store.get('push') ?? {}) as Record<string, unknown>;
   return {
     devices: readPushDevices(saved.devices),
     prefs: readPushPrefs(saved.prefs),
-    // Both on disk rather than in memory, because the thing that kept losing
-    // them was the process ending. See scheduleNextPush and nudgeOverdue.
-    nextNudgeAt: Number(saved.nextNudgeAt ?? 0) || 0,
     lastReachedAt: Number(saved.lastReachedAt ?? 0) || 0,
   };
 }
 
-function savePush(next: { devices?: PushDevice[]; prefs?: PushPrefs; nextNudgeAt?: number; lastReachedAt?: number }) {
+function savePush(next: { devices?: PushDevice[]; prefs?: PushPrefs; lastReachedAt?: number }) {
   const merged = { ...((store.get('push') ?? {}) as Record<string, unknown>) };
+  const previous = readPushPrefs(merged.prefs);
   if (next.devices) merged.devices = next.devices;
   if (next.prefs) merged.prefs = next.prefs;
-  if (next.nextNudgeAt !== undefined) merged.nextNudgeAt = next.nextNudgeAt;
   if (next.lastReachedAt !== undefined) merged.lastReachedAt = next.lastReachedAt;
   store.set('push', merged);
-}
-
-/**
- * When something of hers last got through — a push that landed, or a message
- * from them, whichever is later. What the two-hour floor is measured from.
- */
-function lastReachedThem(): number {
-  const spoke = Date.parse(getMood().lastMessageAt ?? '');
-  return Math.max(getPush().lastReachedAt, Number.isFinite(spoke) ? spoke : 0);
+  if (next.prefs && ['random', 'held', 'quietFrom', 'quietTo'].some(key => previous[key as keyof PushPrefs] !== next.prefs![key as keyof PushPrefs])) {
+    store.set('chat.phoneNudges', { ...getPhoneNudges(), pending: [], scannedAt: 0 });
+  }
 }
 
 /**
@@ -10653,14 +11754,14 @@ function apnsBearerFor(config: NonNullable<ReturnType<typeof readApnsConfig>>) {
   return (apnsBearer ??= apnsSigner(config));
 }
 
-async function pushThroughApple(kind: string, text: string, url: string, topic: string, eventId?: string): Promise<number> {
+async function pushThroughApple(kind: string, text: string, url: string, topic: string, eventId?: string, expiresAt?: number, onUnknown?: () => void): Promise<number> {
   const { config, devices } = getApns();
   if (!config || !devices.length) return 0;
   let delivered = 0;
   const payload = apnsPayload(PUSH_TITLE, text.slice(0, 500), url, topic, { kind, eventId });
   for (const device of devices) {
     try {
-      const result = await sendApns(device, payload, config, apnsBearerFor(config)(), topic);
+      const result = await sendApns(device, payload, config, apnsBearerFor(config)(), topic, expiresAt);
       if (result.gone) {
         saveApnsDevices(getApns().devices.filter(d => d.token !== device.token));
         console.log(`[push] "${device.name}" is gone from Apple — dropped its token`);
@@ -10673,31 +11774,66 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
         savePush({ lastReachedAt: Date.now() });
       }
     } catch (error) {
+      onUnknown?.();
       console.warn('[push] could not reach Apple:', error instanceof Error ? error.message : error);
     }
   }
   return delivered;
 }
 
-async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string): Promise<boolean> {
-  const { devices, prefs } = getPush();
-  if (!devices.length && !getApns().devices.length) return false;
-  // force is the sheet's proof button: being asked to prove itself is the one
-  // time a refusal for preferences or quiet hours reads as broken.
-  if (!force && (!prefs[kind] || heldBack(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
+async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string, nudge?: { id: string; expiresAt: number; scheduled?: boolean }, urgent = false, asideContext?: { source: AsideSource; opportunityPresent: boolean }): Promise<boolean> {
+  const { devices } = getPush();
+  const deliveryKey = nudge?.id ?? `random:${Date.now()}:${Math.random()}`;
+  const capture = () => {
+    const { prefs } = getPush();
+    return {kind,id:deliveryKey,state:getPhoneNudges(),prefs:{enabled:prefs[kind],held:prefs.held,quietFrom:prefs.quietFrom,quietTo:prefs.quietTo},
+      hasDevices:Boolean(getPush().devices.length||getApns().devices.length),force,urgent,scheduled:Boolean(nudge?.scheduled),
+      momentBlocked:process.env.HARU_CORE_NUDGE_GENERAL==='on'?corePolicySync<boolean>('publication.deliveryBlocked',[publicationSnapshot()]):phoneNudgeBlocked()||chasing||Date.now()-(Date.parse(getMood().lastMessageAt??'')||0)<TALKING_RECENTLY_MS||Date.now()-lastRemindedAt<REMINDER_SPACING_MS
+        ||tooSoonToPush('random',getPush().lastReachedAt,Date.now()),
+      fromAside:Boolean(asideContext),userAwake:theyAreUpNow(),opportunityRequired:Boolean(asideContext&&['idle','thought','hanging'].includes(asideContext.source)),
+      opportunityPresent:Boolean(asideContext?.opportunityPresent),lastReachedAt:getPush().lastReachedAt,expiresAt:nudge?.expiresAt??null};
+  };
+  const before=capture(),clockMinute=Math.floor(Date.now()/60000);
+  let decision;
+  try { decision=await coreReserveDelivery(before,Date.now()); }
+  catch { console.log('[core-nudge] '+JSON.stringify({op:'reserve',reason:'admission_unavailable'})); return false; }
+  if(!decision.allowed||Math.floor(Date.now()/60000)!==clockMinute||!sameCoreDelivery(before,capture())||nudge&&nudge.expiresAt<=Date.now()&&kind==='random'&&!nudge.scheduled&&!force)return false;
+  // No await between the fresh-state fence and durable reservation. Racing grants lose this fence.
+  const deliveryId=decision.id;
+  if(deliveryId)store.set('chat.phoneNudges',decision.state);
+  const spontaneous=kind==='random'&&!nudge?.scheduled;
+  let uncertain=false;
+  const finish=async (sent:boolean) => {
+    if(deliveryId&&!sent&&uncertain) {
+      console.log('[core-nudge] '+JSON.stringify({op:'finish',reason:'carrier_outcome_unknown'}));
+      return false;
+    }
+    if(deliveryId) {
+      const state=getPhoneNudges(),target=state.deliveries.find(d=>d.id===deliveryId);
+      try {
+        const result=await coreFinishDelivery(state,deliveryId,sent,Date.now());
+        const status=result.deliveries.find(d=>d.id===deliveryId)?.status;
+        // Merge only the transport outcome, preserving newer reservations and reply-hour feedback.
+        if(target&&status)store.set('chat.phoneNudges',{...getPhoneNudges(),deliveries:getPhoneNudges().deliveries.map(d=>
+          d.id===deliveryId&&d.at===target.at&&d.status===target.status?{...d,status}:d)});
+      } catch { console.log('[core-nudge] '+JSON.stringify({op:'finish',reason:'outcome_pending'})); }
+    }
+    return sent;
+  };
   // The native app, through Apple, alongside the page's Web Push.
-  const apple = await pushThroughApple(kind, text, url, topic, eventId);
+  const apple = await pushThroughApple(kind, text, url, topic, eventId, spontaneous ? 0 : undefined,()=>{uncertain=true;});
   let delivered = apple > 0;
   let web = 0;
   // How many copies went out, in one line: two Apple tokens and three web
   // subscriptions all named "iPhone" were each taking every push (2026-09-06).
   const readout = () => console.log(`[push] ${JSON.stringify(text.slice(0, 40))} went to ${apple} Apple token(s) and ${web} web subscription(s)`);
-  if (!devices.length) { readout(); return delivered; }
-  const keys = vapidKeys();
+  if (!devices.length) { readout(); return finish(delivered); }
+  let keys: ReturnType<typeof vapidKeys>;
+  try { keys=vapidKeys(); } catch { return finish(delivered); }
   const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url, kind, eventId });
   for (const device of devices) {
     try {
-      const request = pushRequest(device, payload, keys, {}, topic);
+      const request = pushRequest(device, payload, keys, { ttlSeconds: spontaneous ? 0 : undefined }, topic);
       const response = await net.fetch(request.url, { method: 'POST', headers: request.headers, body: new Uint8Array(request.body) });
       if (response.status === 404 || response.status === 410) {
         savePush({ devices: getPush().devices.filter(d => d.endpoint !== device.endpoint) });
@@ -10711,16 +11847,16 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
         // log from one that was never attempted — which is exactly the question
         // asked when a phone stays quiet.
         console.log(`[push] delivered a ${kind} push to "${device.name.slice(0, 40)}" (${response.status})`);
-        // The clock the two-hour floor runs against. Written here, at the one
-        // point that knows a push actually left the building.
+        // The shared notification breather starts at carrier acceptance.
         savePush({ lastReachedAt: Date.now() });
       }
     } catch (error) {
+      uncertain=true;
       console.warn('[push] could not send:', error instanceof Error ? error.message : error);
     }
   }
   readout();
-  return delivered;
+  return finish(delivered);
 }
 
 /**
@@ -10756,58 +11892,33 @@ function eventIdForAside(aside: Aside): string | undefined {
 }
 
 /** Forwards an aside to the phones, when it is one of the ones worth a buzz. */
-async function forwardAsideToPush(aside: Aside) {
+async function forwardAsideToPush(aside: Aside, opportunity?: { id: string; expiresAt: number }, scheduled = false) {
+  if(process.env.HARU_CORE_ASIDES==='on') {
+    const command=corePolicySync<any>('asides.forward',[aside,{now:Date.now(),kept:getKept(),lastChased:store.get('reminders.lastChased')??null},opportunity??null,scheduled]);
+    if(!command)return;
+    const reached=await pushToPhone(command.kind,command.text,command.url,command.force,command.topic,command.eventId??undefined,command.nudge??undefined,command.urgent,command.asideContext);
+    coreAside('reached',{id:aside.id,reached});return;
+  }
   const kind = PUSH_KIND[aside.source];
   if (!kind) return;
-  // Said, but not buzzed: the line is on the page for when they next look,
-  // and is not held against them (reached: false), because they were never
-  // told it was there.
-  // Nothing but a reminder buzzes someone who is not up yet. The line is on
-  // the page for when they are.
-  if (kind !== 'events' && !theyAreUpNow()) {
-    console.log(`[push] a ${aside.source} line held back — they are not up yet`);
-    store.set('chat.asides', markReached(getAsides(), aside.id, false));
-    return;
-  }
-  if (tooSoonToPush(kind, getPush().lastReachedAt, Date.now())) {
-    console.log(`[push] a ${aside.source} line held back — one landed ${Math.round((Date.now() - getPush().lastReachedAt) / 60_000)} min ago (breather ${Math.round(PUSH_BREATHER_MS / 60_000)} min)`);
-    store.set('chat.asides', markReached(getAsides(), aside.id, false));
-    return;
-  }
   // Recorded on the line itself, because the evening tally holds unanswered
   // lines against them and a line that never left the building is not one of
   // theirs to answer. Re-read rather than closed over: this runs after the
   // await, and the log has moved on.
   const eventId = kind === 'events' ? eventIdForAside(aside) : undefined;
-  const reached = await pushToPhone(kind, aside.text, '/', false, kind === 'events' ? `ev-${aside.id}` : `haru-${kind}`, eventId);
-  store.set('chat.asides', markReached(getAsides(), aside.id, reached));
+  const reached = await pushToPhone(kind, aside.text, '/', false, kind === 'events' ? `ev-${aside.id}` : `haru-${kind}`, eventId, kind === 'random' ? { id: aside.id, expiresAt: opportunity?.expiresAt ?? Date.now() + 60_000, scheduled: scheduled || aside.source === 'anime' } : undefined, false, {source:aside.source,opportunityPresent:Boolean(opportunity)});
+  if(process.env.HARU_CORE_ASIDES==='on')coreAside('reached',{id:aside.id,reached});
+  else store.set('chat.asides', markReached(getAsides(), aside.id, reached));
 }
 
-// Hours apart, because this is the channel that makes a noise on a phone,
-// and a companion that buzzes every ten minutes gets muted.
-// ponytail: fixed interval; make it a preference if 3h ever proves wrong.
-let pushPesterTimer: ReturnType<typeof setTimeout> | null = null;
+let phoneNudgeTimer: ReturnType<typeof setInterval> | null = null;
+let phoneNudgeRunning = false;
 
-/**
- * The pestering: her chasing reminders and occasionally piping up while
- * nobody has the page open. nudgeForPhone does the chase, so being chased here
- * still counts as being chased everywhere, through the same spacing record.
- */
 /** What she has brought up lately, so a long silence does not get the same jab four times. */
 const broughtUp: string[] = [];
 /** Mid-conversation is not a silence to break. */
 const TALKING_RECENTLY_MS = 20 * 60_000;
 
-/**
- * The line for a phone that has gone quiet with nothing on the list to chase.
- *
- * Left alone she does not say she is bored; she reaches for something she
- * knows — a person in their life, a thing they were doing, a day they had —
- * and needles them with it until they answer. The something is picked here
- * and named in the prompt, so the model cannot reach for the same one every
- * time; the aim is stated outright, and the one thing she must never say is
- * stated too. One short line, because it is a notification.
- */
 /**
  * A standing instruction of his that is due at this hour and not yet done today.
  *
@@ -10816,6 +11927,7 @@ const TALKING_RECENTLY_MS = 20 * 60_000;
  * enforcing her own rules on him unprompted.
  */
 function owedOpeningNow(now: Date): DueOpening | null {
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on')return corePolicySync('general.owedOpening',[getMemories(),store.get('her.openedOn')??{},now.getHours(),localDateKey(now)]);
   const his = getMemories().filter(memory => memory.kind === 'preference'
     && !isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived');
   const due = openingsDueNow(his, now.getHours());
@@ -10829,18 +11941,39 @@ function owedOpeningNow(now: Date): DueOpening | null {
 const openingKey = (opening: DueOpening) => `${opening.when}:${opening.text.toLowerCase().replace(/[^a-z]+/g, '').slice(0, 40)}`;
 
 function markOpeningDone(opening: DueOpening, today: string): void {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on'){const c=remainingStore(app.getPath('userData'));applyRemainingPlan(c,corePolicySync('context-preparation.acceptOpening',[c.get('config',{}),opening,today]));return;}
+
   const doneOn = (store.get('her.openedOn') as Record<string, string> | undefined) ?? {};
   store.set('her.openedOn', { ...doneOn, [openingKey(opening)]: today });
 }
 
-async function boredNudge(): Promise<string | null> {
-  if (herAsleepNow() || herHasSaidGoodnight() || herKnockedAwakeNow()) return null;
-  // Her nudges' own brain (ai.nudge): the other unprompted composers already
-  // used it; this one was still on the local 9B, at 10–19 s a try (2026-09-06).
-  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
-  if (!config?.model) return null;
+function spontaneousNudgeCandidates(): NudgeCandidate[] {
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on') {
+    const now=Date.now(),local=zonedNow(CHAT_TIMEZONE),world: NudgeCandidate[]=[];
+    const capture=()=>({now,today:localDateKey(local),hour:local.getHours(),timeZone:CHAT_TIMEZONE,
+      irritation:getMood().irritation,memories:getMemories(),sessions:getSessions(),tasks:getKept(),
+      asides:getAsides(),broughtUp:[...broughtUp],opened:store.get('her.openedOn')??{},told:getTold()??null,
+      whereabouts:getWhereabouts(),errands:store.get('chat.upTo')??[],recs:getRecs(),messages:store.get('chat.messages')??[],
+      interests:getInterests(),feelings:getFeelings(),nights:getNights(),days:getDays(),finished:[],
+      conversation:nudgeConversation(),world:world.map(c=>({...c,accepted:undefined})),learning:nudgeMetadata([],[],getNudgeLearning()).learning});
+    const before=capture(),result=corePolicySync<any>('general.sources',[{...before,draws:Array.from({length:8},()=>Math.random())}]);
+    if(JSON.stringify(before)!==JSON.stringify(capture()))throw Error('core_general_snapshot_changed');
+    if(!result||!Array.isArray(result.candidates)||result.candidates.length>512||!Array.isArray(result.settled?.recs))throw Error('core_general_protocol_error');
+    if(result.settled.answered.length)store.transaction(()=>{if(JSON.stringify(getRecs())!==JSON.stringify(before.recs))throw Error('core_general_recs_changed');setRecs(result.settled.recs);});
+    return result.candidates.map((row:any)=>{
+      const {effect,adapterId,...candidate}=row;
+      return {...candidate,...(effect?{accepted:()=>{
+        store.transaction(()=>{
+          if(effect.opened){if(JSON.stringify(store.get('her.openedOn')??{})!==JSON.stringify(before.opened))throw Error('core_general_opening_changed');store.set('her.openedOn',effect.opened);}
+          if(effect.broughtUp){if(JSON.stringify(broughtUp)!==JSON.stringify(before.broughtUp))throw Error('core_general_topics_changed');broughtUp.splice(0,broughtUp.length,...effect.broughtUp);}
+          if(effect.recommendation){const recs=getRecs();if(JSON.stringify(recs)!==JSON.stringify(result.settled.recs))throw Error('core_general_recs_changed');setRecs(corePolicySync<any>('general.acceptRecommendation',[recs,effect.recommendation,new Date().toISOString(),Math.random().toString(36).slice(2,10)]));}
+        });
+        if(effect.world!==undefined)world[effect.world]?.accepted?.();
+      }}:{})};
+    });
+  }
   const mood = getMood();
-  // Not speaking to them is still a message: the beat is kept, the line is cold.
+  // A cold mood still changes the delivery; it does not supply a new subject.
   const ignoring = isIgnoring(mood.irritation);
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
@@ -10858,10 +11991,10 @@ async function boredNudge(): Promise<string | null> {
   // A task they said they were getting on with, or one just done, comes
   // before anything from the memory draw: it is what is actually on her mind.
   const nowMs = Date.now();
-  const underway = getKept().filter(item => item.kind === 'task' && !item.done && item.underway && !broughtUp.includes(`task:${item.id}`)).sort((a, b) => (b.underway ?? '').localeCompare(a.underway ?? ''))[0];
-  const justDone = getKept().filter(item => item.done && item.completedAt && nowMs - Date.parse(item.completedAt) <= FOLLOW_UP_MS && !broughtUp.includes(`task:${item.id}`)).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
-  const task = underway ? { id: `task:${underway.id}`, from: 'task' as const, text: `the "${underway.title}" they told you at ${clockAt(Date.parse(underway.underway!))} they were getting on with — it is still not ticked off. Ask how it is going, or whether it is actually done; needle them if it has gone quiet. Do not say it is done.` }
-    : justDone ? { id: `task:${justDone.id}`, from: 'task' as const, text: `they got "${justDone.title}" done at ${clockAt(Date.parse(justDone.completedAt!))}. Ask how it went, or what it was like — that is what is on your mind, not a new subject.` } : null;
+  const recentTopics = recentNudgeTopics(getAsides(), nowMs);
+  const tasks = taskNudgeCandidates(getKept(), nowMs, FOLLOW_UP_MS)
+    .filter(candidate => !broughtUp.includes(candidate.subject.key) && !recentTopics.has(candidate.subject.key));
+  const task = tasks[0] ?? null;
   // Their day, asked about: with the phone or their own word putting them
   // somewhere, no task on her mind, and no question about it in the last
   // couple of hours, the nudge is a real question rather than a jab from
@@ -10883,15 +12016,9 @@ async function boredNudge(): Promise<string | null> {
   // that shower" is a conversation, "still at home?" is a question she already
   // knows the answer to.
   const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
-  // Something of her own to say, ahead of asking after him: she had three
-  // nights behind her and eighty-eight unprompted lines about his day.
-  const mine = !ignoring && !owed && !task && Math.random() < sway('own-subject', 0.4, swayNow())
-    ? nightToRaise(getNights(), getAsides().slice(-12).map(aside => aside.text), todayKey)
-    : null;
-  // A thing of hers she told him to try: an overdue follow-up — asked once,
-  // then dropped — comes first, and otherwise there is a chance she tells him
-  // to try something new of hers. Either way it is her thing, so it sits with
-  // `mine` rather than with a question about his day.
+  // A thing of hers she told him to try: offer one follow-up, or a new
+  // recommendation, alongside the other candidates. The selected candidate
+  // alone commits its state after publication.
   let rec: { kind: 'followup'; interest: string; recId: string } | { kind: 'recommend'; interest: string; recId: null } | null = null;
   // What he has already answered about her recommendations, before anything
   // is chased or pushed again: "I have watched it already" settles one.
@@ -10899,193 +12026,304 @@ async function boredNudge(): Promise<string | null> {
   const theirsToday = ((store.get('chat.messages') as { role: string; content?: string; at?: string }[] | undefined) ?? []).filter(message => message.role === 'user');
   const settled = recsAnsweredBy(getRecs(), theirsToday);
   if (settled.answered.length) { setRecs(settled.recs); console.log(`[push] they have already answered ${settled.answered.join(', ')} — no follow-up owed`); }
-  const answeredToday = getRecs().filter(candidate => candidate.answeredAt && dayOf(candidate.answeredAt) === todayKey).map(candidate => candidate.interest);
-  if (!ignoring && !owed && !task && !mine) {
-    const due = recDueForFollowUp(getRecs(), nowMs);
+  if (!ignoring && !owed && !task) {
+    const due = recDueForFollowUp(getRecs().filter(candidate => !recentTopics.has(interestTopic(candidate.interest))), nowMs);
     if (due) rec = { kind: 'followup', interest: due.interest, recId: due.id };
     else {
-      const recommend = pickRecommend(getInterests(), getRecs(), nowMs, Math.random, recsOnDay(getRecs(), dayOf, todayKey).length);
+      const recommend = pickRecommend(getInterests().filter(interest => !recentTopics.has(interestTopic(interest.name))), getRecs(), nowMs, Math.random, recsOnDay(getRecs(), dayOf, todayKey).length);
       if (recommend) rec = { kind: 'recommend', interest: recommend, recId: null };
     }
   }
-  const askAbout = ignoring || owed || task || mine || rec || askedRecently(getAsides(), nowMs) ? null
+  const possibleAsk = ignoring || owed || task || askedRecently(getAsides(), nowMs) ? null
     // Not "how the get the website running tomorrow they said they were off to
     // do went" — the thing goes in quotes and the sentence stays a sentence.
     : errand ? `how "${errand.what}" went — the thing they said they were off to do`
     : whereNow && Math.random() < sway('ask-where', 0.6, swayNow()) ? `what they are doing at ${whereNow}` : null;
-  const thing = ignoring || owed || askAbout || mine || rec ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
-  // Counted from when the quiet ended, not from their last word: eight hours
-  // of sleep is not eight hours of ignoring her.
-  const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
-  const quietMinutes = awakeMinutesSince(mood.lastMessageAt, getPush().prefs, now);
-  // The awake count is clamped at the quiet's end; when it is, "they last
-  // wrote N minutes ago" is false — he wrote at 02:24 and she was told 41 (2026-09-06).
-  const rawMinutes = Number.isFinite(Date.parse(mood.lastMessageAt ?? '')) ? Math.round((Date.now() - Date.parse(mood.lastMessageAt!)) / 60_000) : null;
-  const sinceTheNight = quietMinutes !== null && rawMinutes !== null && rawMinutes > quietMinutes + 5;
+  const askAbout = possibleAsk && !recentTopics.has(`ask:${possibleAsk}`) ? possibleAsk : null;
+  const thing = owed || task ? null : pickToBringUp(raisable, getSessions(), broughtUp, todayKey, Math.random, recentTopics,
+    item => nudgeAffinity({ key: item.id, kind: item.from, material: item.text, instruction: '' }, getNudgeLearning(), getAsides(), nowMs));
+  const candidates: NudgeCandidate[] = ownNudgeCandidates({
+    nights: getNights(), days: getDays(), finished: [],
+    interests: getInterests(), asides: getAsides(), now: nowMs,
+  });
+  const conversation = nudgeConversation();
+  candidates.push(...[]);
+  candidates.push(...conversationNudgeCandidates(conversation, nowMs));
+  if (task) candidates.push({ ...task, accepted: () => {
+    broughtUp.push(task.subject.key);
+    while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
+  } });
+  if (owed) candidates.push({ priority: 2, weight: 1, subject: {
+    key: `opening:${openingKey(owed)}:${todayKey}`, kind: 'checkin',
+    material: owed.text, instruction: openingInstruction(owed),
+  }, accepted: () => markOpeningDone(owed, todayKey) });
+  if (rec) {
+    const recommendation = rec;
+    candidates.push({ weight: 0.7, subject: {
+      key: interestTopic(rec.interest), kind: 'recommendation',
+      material: `${rec.interest}: ${getInterests().find(interest => interest.name === rec.interest)?.stance ?? ''}`,
+      instruction: rec.kind === 'followup'
+        ? 'You previously recommended this. Ask once whether they tried it, with curiosity and your own opinion; they have not promised to try it or report back.'
+        : 'Recommend this because of your actual opinion above. Give the specific reason it is worth their time, in your voice; no sales pitch.',
+    }, accepted: () => {
+      if (recommendation.kind === 'followup') setRecs(markRecFollowed(getRecs(), recommendation.recId));
+      else setRecs(noteRecommendation(getRecs(), recommendation.interest, new Date().toISOString()));
+    } });
+  }
+  if (askAbout) candidates.push({ weight: 1.2, asked: askAbout, subject: {
+    key: `ask:${askAbout}`, kind: 'checkin', material: askAbout,
+    instruction: 'Ask this one genuine question about their day, in your way. The answer is unknown; do not fill it in or imply they owe you a report.',
+  } });
+  if (thing) candidates.push({ weight: 1, priority: thing.from === 'task' ? 1 : 0, subject: {
+    key: thing.id, kind: thing.from,
+    material: `${thing.from === 'day' ? `A previous day (${thing.id.slice(4)}): ` : ''}${thing.text}${ageNote(thing)}`,
+    instruction: thing.from === 'task'
+      ? 'Respond to this recorded task state. A completed task may be asked about, never chased as unfinished.'
+      : 'Find a specific observation or a real question in this material. Knowing a background fact is not evidence of a new event; keep the uncertainty in the question.',
+  }, accepted: () => {
+    broughtUp.push(thing.id);
+    while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
+  } });
+  return connectNudgeCandidates(candidates, conversation, nowMs);
+}
+
+async function composeSpontaneousNudge(feedback: Map<string, NudgeFeedback>, forced?: NudgeCandidate): Promise<NudgeDraft | null> {
+  if (herAsleepNow() || herHasSaidGoodnight() || herKnockedAwakeNow()) return null;
+  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (!config?.model) return null;
+  const mood = getMood();
+  const nowMs = Date.now();
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const selected = await corePickNudge(forced ? [forced] : spontaneousNudgeCandidates(), getAsides(), nowMs, getNudgeLearning()).catch(() => {
+    console.log('[core-nudge] '+JSON.stringify({op:'pick',selected:false,reason:'selection_unavailable'}));
+    return null;
+  });
+  if (!selected) return null;
+  const subject = selected.subject;
+  let delivery = process.env.HARU_CORE_NUDGE_CONTEXT === "on" ? null! : chooseNudgeDelivery(subject, getAsides(), nowMs);
   const character = getActiveCharacter();
-  const system = [
-    character.identity,
-    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
-    profileSummary(''),
-    character.style,
-    moodInstruction(mood.irritation),
-    egoInstruction(mood.ego),
-    grudgeInstruction(mood.grudge ?? 0, ignoredTodayNow()),
-    'They are away, reachable only as a notification on their phone. Nothing on their list needs you. You are messaging them first — nothing they said prompted this.',
-    answeredToday.length ? `They have told you they have already seen or played ${answeredToday.join(' and ')} — do not tell them to try it, and do not ask whether they did.` : '',
-    // The exact length, or she invents one: told nothing under an hour she wrote
-    // "playing ghost for an hour" and "10 minutes of silence" in the same line.
-    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}${sinceTheNight ? ' — their last message was last night, before the quiet' : ''}. That is the length of the silence — name no other.`
-      : quietMinutes !== null ? (sinceTheNight
-        ? `The night is over and they have been up for about ${Math.max(1, quietMinutes)} minutes without a word to you; their last message was last night. That is the length of the silence — ${Math.max(1, quietMinutes)} minutes, no more.`
-        : `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.`) : '',
-    owed ? openingInstruction(owed) :
-    rec ? rec.kind === 'followup'
-      ? `You told them to try ${rec.interest} a while ago and they never said whether they did. Ask them once, in your way — one line, no sulking, no guilt-trip, and then drop it.`
-      : `Tell them to try ${rec.interest} — one of yours, and you actually rate it. One or two lines: you are telling them, not asking, and it is not an advert.`
-      : mine ? `Tell them about ${mine.interest ?? mine.game ?? mine.about} — what you were up to and what you made of it, in your own words and only the part worth saying. This is you bringing something of yours to them, not a question about their day and not a task for them: no orders, nothing about their list. If you want to know whether they have seen it, ask them at the end.`
-      : askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
-      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}${ageNote(thing)} — this, not the weather and not anything you already remarked on.`
-      : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
-      : 'Nothing in particular to bring up: the silence itself is the subject.',
-    unansweredAsksNote(getAsides(), CHAT_TIMEZONE, nowMs),
-    // The needling is right for a nudge she chose to send and wrong for one he
-    // asked her to send: told both at once she would open a morning check-in
-    // with a guilt-trip about being ignored. "Do not greet them" in particular
-    // is the opposite of what this errand is.
-    owed
-      ? 'Ask it because you want to know, not to start a fight. You may still be short about it, but no dig, no guilt-trip about the silence, and nothing about how long it has been.'
-      : 'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
-    NO_INVENTED_HISTORY,
-    NO_ABANDON_THREAD,
-    EXPRESSIVE,
-    unpromptedContext(),
-    WRITING_TO_THEM,
-    'One short line. No quotation marks, no stage directions.',
-  ].filter(Boolean).join(' ');
+  let continuity = process.env.HARU_CORE_NUDGE_CONTEXT === "on" ? null! : nudgeContinuity({
+    conversation: todaySoFar(), whereabouts: toldNow(),
+    slate: blankSlateInstruction(getSlate(), knownSinceSlate()),
+    asides: getAsides(), now: nowMs,
+  });
+    let preparedMood: string | null = null;
+    if (process.env.HARU_CORE_NUDGE_CONTEXT === 'on') {
+        const captureContext = () => ({now:nowMs, subject, asides:getAsides(),conversation:todaySoFar(),whereabouts:toldNow(),
+            slate:blankSlateInstruction(getSlate(),knownSinceSlate()),irritation:getMood().irritation,ego:getMood().ego,
+            temperament:temperamentLine(getTemperament())});
+        try {
+            const prepared = await coreNudgeContext(captureContext(),captureContext);
+            delivery=prepared.delivery;continuity=prepared.continuity;preparedMood=prepared.mood;
+        } catch {
+            console.log('[core-nudge] '+JSON.stringify({op:'context',selected:false,reason:'context_unconfirmed'}));
+            return null;
+        }
+    }
+  if(process.env.HARU_CORE_NUDGE_COMPOSER==='on') {
+    try {
+      const result=await coreComposeNudge({subject,model:config.model,contextAtMs:nowMs,contextTokens:sideNumCtx(),
+        clock:`It is ${formatTimeOfDay(now.getHours(),now.getMinutes())} on ${new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(now)} ${todayKey}.`,
+        mood:preparedMood ?? nudgeMood(mood.irritation,mood.ego,temperamentLine(getTemperament())),continuity,
+        stranger:Boolean(strangerIdentityNote(getSlate(),knownSinceSlate())),deliveryTone:delivery.tone,correction:feedback.get(subject.key)??null},
+        (messages,options)=>ollamaPost(messages,config,options),
+        ()=>getAsides().map(a=>({atMs:Number.isFinite(Date.parse(a.at))?Date.parse(a.at):null,text:a.text})));
+      if(herAsleepNow()||herHasSaidGoodnight()||herKnockedAwakeNow()) {
+        console.log('[core-nudge] '+JSON.stringify({op:'compose',selected:false,reason:'sleep_changed'}));
+        return null;
+      }
+      if(result.feedback)feedback.set(subject.key,result.feedback);
+      if(result.line===null) {
+        if(result.reason==='review_refused')recordBrief(`bored refused (${result.feedback!.reason})`,result.system,result.feedback!.line);
+        console.log('[core-nudge] '+JSON.stringify({op:'compose',selected:false,reason:result.reason,modelCalls:result.modelCalls}));
+        return null;
+      }
+      recordBrief('bored',result.system,result.line);
+      return {line:result.line,topic:subject.key,kind:subject.kind,...(selected.asked?{asked:selected.asked}:{}),
+        keywords:subject.keywords??nudgeKeywords(subject.material),revision:subject.revision,eventAt:subject.development?.at,tone:delivery.tone,
+        accepted:()=>{selected.accepted?.();console.log(`[push] a nudge about ${subject.key} (${subject.kind})`);}};
+    } catch {
+      console.log('[core-nudge] '+JSON.stringify({op:'compose',selected:false,reason:'composition_unconfirmed'}));
+      return null;
+    }
+  }
+  const system = nudgePrompt({
+    identity: character.identity,
+    style: character.style,
+    mood: nudgeMood(mood.irritation, mood.ego, temperamentLine(getTemperament())),
+    clock: `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
+    subject,
+    continuity,
+    correction: feedback.get(subject.key),
+    delivery: delivery.instruction,
+  });
   try {
-    const raw = await ollamaQuip(system, 'Say something.', config);
-    // Told 27 minutes she wrote fourteen: the number she states is the real one.
-    const line = quietMinutes !== null && (quietHours === null || quietHours < 1) ? fixStatedMinutes(raw, Math.max(1, quietMinutes)) : raw;
-    if (line !== raw) console.log('[push] corrected the minutes she stated');
-    if (thing) {
-      broughtUp.push(thing.id);
-      while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
+    const cue = 'Write the message, or PASS.';
+    const composed = await ollamaPost(composerTurns(system, cue), config,
+      { tools: false, temperature: 1, maxTokens: 160, numCtx: sideNumCtx() });
+    const line = readNudge(composed.content ?? '');
+    if (!line || answersThePrompt(line, cue)) {
+      feedback.set(subject.key, { line: (composed.content ?? '').slice(0, 1000), reason: 'Return one complete message under 220 characters, without answering the stage direction. PASS if there is nothing fresh to say.' });
+      console.log(`[push] no usable draft about ${subject.key}`);
+      return null;
     }
-    if (rec) {
-      if (rec.kind === 'followup') setRecs(markRecFollowed(getRecs(), rec.recId));
-      else setRecs(noteRecommendation(getRecs(), rec.interest, new Date().toISOString()));
+    const problem = nudgeContentProblem(subject, line, getAsides(), nowMs);
+    if (problem) {
+      feedback.set(subject.key, { line, reason: problem });
+      console.log(`[push] nudge refused — ${problem}`);
+      return null;
     }
-    pendingAsk = askAbout;
-    // Marked here, where a line actually exists — not where it was decided, or
-    // a composer that fails marks the day done and he waits until tomorrow.
-    if (owed) markOpeningDone(owed, todayKey);
-    console.log(`[push] a bored nudge, ${owed ? `his standing ${owed.when} check-in` : rec ? `rec — ${rec.kind} ${rec.interest}` : mine ? `hers — ${mine.interest ?? mine.game ?? mine.about}` : askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
+    const checked = await ollamaPost(nudgeReviewTurns(subject, continuity, line), config,
+      { tools: false, temperature: 0, format: NUDGE_REVIEW_SCHEMA, maxTokens: NUDGE_REVIEW_MAX_TOKENS, numCtx: sideNumCtx() });
+    const review = readNudgeReview(checked.content ?? '');
+    if (!review.send) {
+      feedback.set(subject.key, { line, reason: review.reason });
+      console.log(`[push] nudge refused — ${review.reason}`);
+      recordBrief(`bored refused (${review.reason})`, system, line);
+      return null;
+    }
     recordBrief('bored', system, line);
-    return line;
+    return {
+      line, topic: subject.key, kind: subject.kind, ...(selected.asked ? { asked: selected.asked } : {}),
+      keywords: subject.keywords ?? nudgeKeywords(subject.material), revision: subject.revision, eventAt: subject.development?.at, tone: delivery.tone,
+      accepted: () => {
+        selected.accepted?.();
+        console.log(`[push] a nudge about ${subject.key} (${subject.kind})`);
+      },
+    };
   } catch (error) {
     console.warn('[push] could not compose a bored nudge:', error instanceof Error ? error.message : error);
     return null;
   }
 }
 
-/**
- * How many lines she gets to compose before the beat is given up on.
- *
- * interject() throws away a line that names a finished errand, and the 9B
- * free-associates onto old ones often enough that three of eight unprompted
- * lines in one morning went in the bin. A refusal used to end the attempt and
- * cost the whole 45-120 minutes; composing another costs seconds.
- */
-const NUDGE_TRIES = 3;
+function getPhoneNudges() { return readPhoneNudges(store.get('chat.phoneNudges'), Date.now()); }
 
-/** How long the floor waits after an attempt that was deliberately silent. */
-const FLOOR_BACKOFF_MS = 20 * 60_000;
-
-/**
- * 'sent' — something of hers went out. 'refused' — she had a line and it was
- * thrown away, so it is worth coming back soon. 'later' — the moment is wrong
- * but the reason expires: she was spoken to a minute ago, or she has just said
- * something, and `inMs` is how long that has left to run. 'quiet' — there is
- * nothing to do at all (asleep, no phone, nudges switched off), which deserves
- * a whole fresh cycle and must not turn into a retry storm.
- *
- * The split matters because it was costing whole evenings. One message to her
- * at half past nine put her inside TALKING_RECENTLY_MS, which returned 'quiet',
- * which drew a fresh 45-120 minutes, which landed after the quiet hours began
- * and was thrown over the night — 526 minutes for having said hello.
- */
-type PesterOutcome = { how: 'sent' | 'refused' | 'later' | 'quiet'; inMs?: number };
-
-async function pesterOnPush(): Promise<PesterOutcome> {
-  if (herAsleepNow() || herKnockedAwakeNow()) return { how: 'quiet' };
-  // "I'm logging off" at 21:18, then a nudge at 22:28 (2026-09-05): a goodnight is a goodnight.
-  if (herHasSaidGoodnight()) { console.log('[push] she has said goodnight — nothing more tonight'); return { how: 'quiet' }; }
+function phoneNudgeBlocked(): boolean {
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on')return corePolicySync('publication.phoneBlocked',[publicationSnapshot()]);
   const { prefs } = getPush();
-  if (!webServer || !canReachPhone()) return { how: 'quiet' };
-  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return { how: 'quiet' };
-  // Something on the list that needs chasing comes first, always.
-  if (prefs.events) {
-    const said = await nudgeForPhone();
-    if (said) {
-      // Through the aside log rather than straight to the phone: written down,
-      // it is on the page when they tap the notification, and the push goes
-      // out from there by its kind like every other unprompted line.
-      if (noteAside(said.line, 'reminder', said.about)) {
-        console.log(`[push] pestered about "${said.about}"`);
-        return { how: 'sent' };
-      }
-      return { how: 'refused' };
-    }
+  return !webServer || !canReachPhone() || !prefs.random || heldBack(prefs, zonedNow(CHAT_TIMEZONE))
+    || herAsleepNow() || herHasSaidGoodnight() || herKnockedAwakeNow() || !theyAreUpNow()
+    || isSilenced(store.get('pushback') as Pushback | undefined, Date.now());
+}
+
+function phoneNudgeMomentReady(): boolean {
+  if(process.env.HARU_CORE_NUDGE_GENERAL==='on')return corePolicySync('publication.phoneMoment',[publicationSnapshot()]);
+  if (phoneNudgeBlocked() || chasing) return false;
+  const now = Date.now();
+  return now - (Date.parse(getMood().lastMessageAt ?? '') || 0) >= TALKING_RECENTLY_MS
+    && now - lastRemindedAt >= REMINDER_SPACING_MS
+    && !tooSoonToPush('random', getPush().lastReachedAt, now)
+    && phoneDeliveryAllowed(getPhoneNudges(), now, localDateKey(zonedNow(CHAT_TIMEZONE)));
+}
+
+/** Only dated, expiring material can create a phone opportunity. */
+function legacyPhoneNudgeCandidates(): NudgeCandidate[] {
+  const now = Date.now();
+  const conversation = nudgeConversation();
+  const candidates = [
+    ...ownNudgeCandidates({ nights: getNights(), days: getDays(), finished: [],
+      interests: getInterests(), asides: getAsides(), now }),
+    ...taskNudgeCandidates(getKept(), now, FOLLOW_UP_MS),
+    ...conversationNudgeCandidates(conversation, now),
+  ];
+  const followup = relationshipNudgeCandidate(conversation, now, store.get('chat.relationshipNudgeAttemptAt') as string | undefined);
+  if (followup) candidates.push(followup);
+  const local = zonedNow(CHAT_TIMEZONE);
+  const owed = isIgnoring(getMood().irritation) ? null : owedOpeningNow(local);
+  if (owed) {
+    const day = localDateKey(local);
+    const midnight = zonedEpoch(day, 0, CHAT_TIMEZONE);
+    candidates.push({ priority: 2, weight: 2, subject: {
+      key: `opening:${openingKey(owed)}:${day}`, kind: 'checkin', revision: day,
+      occurredAt: new Date(midnight).toISOString(), expiresAt: new Date(midnight + 24 * 3_600_000).toISOString(),
+      material: owed.text, instruction: openingInstruction(owed),
+    }, accepted: () => markOpeningDone(owed, day) });
   }
-  if (!prefs.random) return { how: 'quiet' };
-  // Not yet up: come back in a while, and do not compose a line nobody is awake for.
-  if (!theyAreUpNow()) return { how: 'later', inMs: 20 * 60_000 };
-  // All three of these expire on a clock, so they say when to come back rather
-  // than handing the beat a fresh cycle.
-  if (chasing) return { how: 'later', inMs: REMINDER_SPACING_MS };
-  const sinceChase = Date.now() - lastRemindedAt;
-  if (sinceChase < REMINDER_SPACING_MS) return { how: 'later', inMs: REMINDER_SPACING_MS - sinceChase + 30_000 };
-  const silenced = isSilenced(store.get('pushback') as Pushback | undefined, Date.now());
-  if (silenced) return { how: 'quiet' };
-  const mood = getMood();
-  const sinceSpoke = mood.lastMessageAt ? Date.now() - Date.parse(mood.lastMessageAt) : Infinity;
-  if (sinceSpoke < TALKING_RECENTLY_MS) {
-    console.log(`[push] they were talking to her ${Math.round(sinceSpoke / 60_000)} min ago — back in ${Math.round((TALKING_RECENTLY_MS - sinceSpoke) / 60_000) + 1} min`);
-    return { how: 'later', inMs: TALKING_RECENTLY_MS - sinceSpoke + 60_000 };
-  }
-  let composed = false;
-  for (let attempt = 1; attempt <= NUDGE_TRIES; attempt++) {
-    // Asked before composing, and again before each retry. The tries exist for
-    // a line interject throws out on its content — one that named a finished
-    // errand — and composing another can fix that. They do nothing for a
-    // refusal about the moment: "they were talking to her 9s ago" is just as
-    // true twenty seconds later, and three of those cost three model calls and
-    // a minute of GPU to arrive at the same no. Come back when it has cleared,
-    // which for both windows is minutes rather than the whole cycle.
-    const wrongMoment = whyNotInterject();
-    if (wrongMoment) {
-      console.log(`[push] not the moment — ${wrongMoment}`);
-      return { how: 'later', inMs: NUDGE_RETRY_MS };
+  return connectNudgeCandidates(candidates, conversation, now);
+}
+
+function corePhoneSourceSnapshot(now = Date.now()): SourceSnapshot {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on'){const local=zonedNow(CHAT_TIMEZONE),day=localDateKey(local);const p=corePolicySync<any>('context-preparation.phoneSource',[{now,day,hour:local.getHours(),midnight:zonedEpoch(day,0,CHAT_TIMEZONE),mood:getMood(),memories:getMemories(),opened:store.get('her.openedOn')??{},conversation:nudgeConversation(),tasks:getKept(),nights:getNights(),days:getDays(),interests:getInterests(),asides:getAsides(),lastAttemptAt:store.get('chat.relationshipNudgeAttemptAt')}]);return {...p,candidates:p.candidates.map((entry:any)=>{const {accept,...candidate}=entry;return {...candidate,accepted:()=>markOpeningDone(accept.held,accept.day)};})};}
+
+    const local = zonedNow(CHAT_TIMEZONE), candidates: NudgeCandidate[] = [];
+    const owed = isIgnoring(getMood().irritation) ? null : owedOpeningNow(local);
+    if (owed) {
+        const day = localDateKey(local), midnight = zonedEpoch(day, 0, CHAT_TIMEZONE);
+        candidates.push({ priority: 2, weight: 2, subject: {
+            key: `opening:${openingKey(owed)}:${day}`, kind: 'checkin', revision: day,
+            occurredAt: new Date(midnight).toISOString(), expiresAt: new Date(midnight + 24 * 3600000).toISOString(),
+            material: owed.text, instruction: openingInstruction(owed),
+        }, accepted: () => markOpeningDone(owed, day) });
     }
-    const line = await boredNudge();
-    if (!line) continue;
-    composed = true;
-    if (interject(line, { source: 'idle' })) {
-      // Only once something was actually said: this is the spacing every other
-      // unprompted path reads, and a line nobody saw has not used any of it up.
-      lastRemindedAt = Date.now();
-      console.log(`[push] sent a bored nudge${attempt > 1 ? ` (on try ${attempt})` : ''}`);
-      return { how: 'sent' };
+    return {now, completionWindowMs: FOLLOW_UP_MS, tasks:getKept(),messages:nudgeConversation(),
+        nights:getNights(),days:getDays(),finished:[],
+        interests:getInterests(),asides:getAsides(),lastAttemptAt:store.get('chat.relationshipNudgeAttemptAt') as string | undefined,candidates};
+}
+async function phoneNudgeCandidates(now = Date.now()) {
+    if (process.env.HARU_CORE_NUDGE_CONTEXT !== 'on') return legacyPhoneNudgeCandidates();
+    const snapshot = corePhoneSourceSnapshot(now);
+    return await coreSourceNudges(snapshot, 'phone', () => corePhoneSourceSnapshot(now));
+}
+
+async function checkPhoneOpportunities() {
+  if (phoneNudgeRunning) return;
+  phoneNudgeRunning = true;
+  try {
+    const now = Date.now();
+    const capture = async () => ({ state: getPhoneNudges(), candidates: await phoneNudgeCandidates(now), asides: getAsides(),
+      learning: getNudgeLearning(), messages: nudgeConversation(), now, blocked: phoneNudgeBlocked(),
+      hourAt: (at: number) => zonedNow(CHAT_TIMEZONE, new Date(at)).getHours() });
+    const before = await capture();
+    const state = await coreScanPhoneNudges(before);
+    if (!sameCorePhoneScan(before, await capture())) return;
+    const candidates = before.candidates;
+    store.set('chat.phoneNudges', state);
+    if (!phoneNudgeMomentReady() || whyNotInterject()) return;
+    const selected = await coreSelectPhoneNudge(state, candidates, getAsides(), getNudgeLearning(), nudgeConversation(), Date.now());
+    if (!selected) return;
+    // Claim before composition. PASS, a refusal or a crash never retries the
+    // same event. Other pending subjects may expire unused while she is quiet.
+    if (!phoneNudgeMomentReady() || whyNotInterject()) return;
+    const claimed = claimCorePhoneNudge(getPhoneNudges(), selected.opportunity.id, Date.now());
+    if (!claimed) return;
+    store.set('chat.phoneNudges', claimed);
+    if (selected.candidate.subject.key.startsWith('followup:')) store.set('chat.relationshipNudgeAttemptAt', new Date(now).toISOString());
+    const lastMessageAt = getMood().lastMessageAt;
+    const draft = await composeSpontaneousNudge(new Map(), selected.candidate);
+    if (!draft || !phoneNudgeMomentReady() || whyNotInterject() || getMood().lastMessageAt !== lastMessageAt
+      || !getPhoneNudges().scannedAt) return;
+    // The model may have taken a while. Rebuild facts, feedback and topic state
+    // immediately before publishing; never send a cached sentence after a change.
+    const validationAt = Date.now();
+    const validationSource = process.env.HARU_CORE_NUDGE_CONTEXT === 'on' ? corePhoneSourceSnapshot(validationAt) : null;
+    const currentCandidates = await phoneNudgeCandidates(validationAt);
+    const current = currentCandidates.find(c => c.subject.key === selected.candidate.subject.key
+      && c.subject.revision === selected.candidate.subject.revision);
+    // A claimed relationship offer is intentionally absent from the next draw.
+    const candidate = selected.candidate.subject.key.startsWith('followup:') ? selected.candidate : current;
+    if (!candidate || selected.opportunity.expiresAt <= Date.now()
+      || !phoneCandidateRelevant(candidate, getAsides(), getNudgeLearning(), nudgeConversation(), Date.now())) return;
+    draft.phoneOpportunity = selected.opportunity;
+    if (await publishOwnedNudge(draft, nudge => {
+      if (validationSource && !sameSourceSnapshot(validationSource, corePhoneSourceSnapshot(validationAt))) return false;
+      const fresh=(validationSource ? currentCandidates : legacyPhoneNudgeCandidates()).find(c=>c.subject.key===candidate.subject.key&&c.subject.revision===candidate.subject.revision);
+      if(!phoneNudgeMomentReady()||getMood().lastMessageAt!==lastMessageAt||!getPhoneNudges().scannedAt
+        ||!candidate.subject.key.startsWith('followup:')&&!fresh
+        ||!phoneCandidateRelevant(fresh??candidate,getAsides(),getNudgeLearning(),nudgeConversation(),Date.now()))return false;
+      return interject(nudge.line,{source:'idle',nudge});
+    })) {
+      console.log(`[push] published an opportunity about ${draft.topic}`);
     }
-  }
-  if (composed) console.log(`[push] she had ${NUDGE_TRIES} goes and every one was refused — coming back in ${Math.round(NUDGE_RETRY_MS / 60_000)} min`);
-  return { how: composed ? 'refused' : 'quiet' };
+  } catch (error) {
+    console.warn('[push] opportunity check failed:', error instanceof Error ? error.message : error);
+  } finally { phoneNudgeRunning = false; }
 }
 
 // ---- Speaking up on her own: left hanging, the weather, what is coming up ----
 //
-// A five-minute beat of its own, apart from the random one above and from the
+// A five-minute beat of its own, apart from opportunity scanning and the
 // desktop's life loop (which gates on the machine being idle, which a headless
 // box never meaningfully is). Each check composes a line in her voice and
 // hands it to interject(), so it is an aside she remembers making and the
@@ -11097,8 +12335,7 @@ const PROACTIVE_TICK_MS = 5 * 60_000;
 // ---- Chasing on time ------------------------------------------------------
 //
 // The desk's reminder loop is gated on the machine being idle, which a headless
-// box never passes, and the random push beat above can land two hours from a
-// task's time. So the phone has a minute hand of its own: the same chase rules
+// box never passes. Opportunities must not delay a task's scheduled time. So the phone has a minute hand of its own: the same chase rules
 // as everywhere else (lead, staleness, spacing, the escalation ladder), asked
 // once a minute, pushed only when they say so. Quiet hours are the push
 // preferences', as for every other push.
@@ -11124,12 +12361,18 @@ type WeatherState = { last: WeatherSample | null; notified: Record<string, numbe
   /** When they last said it is not raining where they are — their window over the forecast's model, for a while. */
   disputedAt?: number };
 function getWeather(): WeatherState {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.weatherState',[store.get('weather')??null]);
+
   const saved = (store.get('weather') ?? {}) as Partial<WeatherState>;
   return { last: saved.last ?? null, notified: saved.notified ?? {}, where: saved.where ?? '', ...(typeof saved.disputedAt === 'number' ? { disputedAt: saved.disputedAt } : {}) };
 }
-function saveWeather(next: WeatherState) { store.set('weather', next); }
+function saveWeather(next: WeatherState) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')throw Error('weather_write_requires_core_plan');
+ store.set('weather', next); }
 /** "where they are" when the phone's fix is fresh, "at home" when that is all she has. */
-function weatherWhere(): string { return getWeather().where || 'Where they are'; }
+function weatherWhere(): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-program.weatherWhere',[store.get('weather')??null]);
+ return getWeather().where || 'Where they are'; }
 
 /** The spot to ask the weather for: the phone's fresh fix, else home, else nowhere. */
 function weatherPlace(): { lat: number; lon: number; where: string } | null {
@@ -11139,6 +12382,8 @@ function weatherPlace(): { lat: number; lon: number; where: string } | null {
 }
 
 async function pollWeather(): Promise<{ previous: WeatherSample | null; current: WeatherSample } | null> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const read=()=>({...conversationPolicyFacts(),place:weatherPlace(),lastPoll:lastWeatherPollAt});const p=corePolicySync<any>('conversation-program.weatherPollStart',[read()]);if(Object.hasOwn(p,'result'))return p.result;lastWeatherPollAt=p.pollAt;let obs:any;try{const response=await fetch(weatherUrl(p.command.lat,p.command.lon),{signal:AbortSignal.timeout(p.command.timeoutMs)});if(!response.ok)throw Error('forecast_http_'+response.status);obs={ok:true,value:await response.json()};}catch(error){obs={ok:false,error:error instanceof Error?error.message:String(error)};}const done=corePolicySync<any>('conversation-program.weatherPollObserved',[p.state,obs,read()]);conversationApply(done);return done.result;}
+
   const place = weatherPlace();
   if (!place) return null;
   if (Date.now() - lastWeatherPollAt < WEATHER_POLL_MS - 30_000) return null;
@@ -11177,6 +12422,7 @@ function proactiveOccasion(subjectNow: string, ...facts: string[]): string {
 }
 
 function proactivePrompt(facts: string[], mustSurvive: boolean, subjectNow?: string): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<string>('agenda-life.proactivePrompt',[facts,mustSurvive,getActiveCharacter(),agendaClock(zonedNow(CHAT_TIMEZONE)),unpromptedContext(subjectNow),EXPRESSIVE,WRITING_TO_THEM]);
   const character = getActiveCharacter();
   const now = zonedNow(CHAT_TIMEZONE);
   return [
@@ -11193,87 +12439,20 @@ function proactivePrompt(facts: string[], mustSurvive: boolean, subjectNow?: str
   ].filter(Boolean).join('\n\n');
 }
 
-/**
- * Whether the question she is about to chase him over is one he owes her.
- *
- * Her own nudge brain, at temperature nothing, one word back: on the eight
- * chases it was measured against it agreed with the reading every time, and
- * gave the same answer on four runs of each. When it cannot be reached or will
- * not answer plainly, the fallback is ridesOnHisAsk, which is much blunter —
- * it reads a question mark in what he last said, so his questions typed
- * without one come back as debts. Over 2026-09-06..20 it still held five
- * chases that should never have gone, at the cost of one that should have.
- */
-async function heOwesHerAnAnswer(hanging: Hanging): Promise<boolean> {
-  const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
-  if (judge?.model) {
-    try {
-      const message = await ollamaPost(
-        [{ role: 'system', content: judgePrompt() }, { role: 'user', content: judgeInput(hanging) }],
-        judge,
-        // One word back, but the budget is for a reasoning model: both brains
-        // she might use here spend their allowance thinking first and return
-        // an empty string if they run out mid-thought. At 200 the local 27B
-        // answered nothing at all, every time.
-        { tools: false, temperature: 0, maxTokens: 700 },
-      );
-      const verdict = readJudgement(message.content ?? '');
-      if (verdict) {
-        console.log(`[push] the question she asked is ${verdict === 'blocking' ? 'holding up something he asked for — chasing' : 'a rider on an answer he already got — not chasing'}`);
-        return verdict === 'blocking';
-      }
-      console.warn(`[push] the judge would not say ("${(message.content ?? '').trim().slice(0, 60)}") — falling back`);
-    } catch (error) {
-      console.warn('[push] could not judge her question:', error instanceof Error ? error.message : error);
-    }
-  }
-  const owed = !hanging.ridesOnHisAsk;
-  console.log(`[push] no judgement on her question — ${owed ? 'chasing' : 'not chasing, it came off the back of his own question'}`);
-  return owed;
-}
-
-async function checkHanging(config: ProviderConfig) {
-  const history = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string }[] | undefined) ?? [];
-  const hanging = leftHanging(history);
-  if (!hanging) return;
-  const nudged = (store.get('hanging.nudgedFor') as string | undefined) ?? '';
-  if (nudged === hanging.key) return;
-  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
-  // Left hanging means she asked and got nothing. A reply that asked nothing,
-  // a conversation they closed, a "going for a shower", or an afternoon they
-  // said they were at work — none of that is being left, and four chases in
-  // one morning came from treating every pause as one.
-  const why = !hanging.sheAsked ? 'she asked nothing'
-    : isClosing(hanging.theirLast.content) ? 'they closed the conversation'
-    : saidTheyWereLeaving(hanging.theirLast.content) ? 'they said they were going'
-    : toldTheyAreBusy(getTold(), Date.now()) ? `they said they are ${getTold()?.where}`
-    : null;
-  if (why) {
-    store.set('hanging.nudgedFor', hanging.key);
-    console.log(`[push] not chasing — ${why}`);
-    return;
-  }
-  const lastChase = Number(store.get('hanging.lastAt') ?? 0) || 0;
-  if (Date.now() - lastChase < HANGING_COOLDOWN_MS) return;
-  // A question mark is not a debt. Asked after the cheap gates and the
-  // cooldown, so the call is only paid for on a chase that would otherwise go
-  // out — see judgePrompt for what it decides and why no pattern can.
-  if (hanging.sheAsked && !(await heOwesHerAnAnswer(hanging))) {
-    store.set('hanging.nudgedFor', hanging.key);
-    return;
-  }
-  store.set('hanging.nudgedFor', hanging.key);
-  store.set('hanging.lastAt', Date.now());
-  const system = proactiveSystem(
-    `They were mid-conversation with you and then went silent ${hanging.quietMin} minutes ago — ${hanging.quietMin} minutes, not hours; if you mention how long, say it in minutes, and never give a clock time. Their last message: ${hanging.theirLast.content.slice(0, 300)}`,
-    `Your reply, which they left unanswered: ${hanging.herLast.content.slice(0, 300)}${hanging.sheAsked ? ' — you asked them something and got nothing back.' : ''}`,
-    'Call them out for leaving you hanging and get them back to finish the conversation. Needle; do not plead. Never say you miss them, never ask whether they are there.',
-  );
-  const line = await ollamaQuip(system, 'Say it.', config);
-  if (line && interject(line, { source: 'hanging' })) console.log(`[push] chased them for leaving her hanging ${hanging.quietMin} min ago`);
+async function checkHanging(_config: ProviderConfig) {
+  // The same rare, grounded follow-up as morning/evening. A question she
+  // appended to a reply is not itself a reason to chase him.
+  await maybeRaiseConversationFollowup();
 }
 
 async function checkUpcoming(config: ProviderConfig) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){
+    const core=ownedAgendaCore(),packet=corePolicySync<any>('agenda-life.upcomingStart',[agendaFacts(core),agendaClock(zonedNow(CHAT_TIMEZONE)),config,Date.now()]);
+    applyAgendaPlan(core,packet,()=>{});if(!packet.run)return;
+    const line=await ollamaQuip(proactiveSystem(packet.fact),'Remind them.',config);
+    if(!corePolicySync<boolean>('agenda-life.upcomingCurrent',[packet.source,agendaFacts(core),store.get('ai.config')??{}]))return;
+    if(line)interject(line,{source:'upcoming'});return;
+  }
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const marked = (store.get('upcoming.marked') as Record<string, number[]> | undefined) ?? {};
@@ -11294,6 +12473,8 @@ async function checkUpcoming(config: ProviderConfig) {
 const WEATHER_NEEDS_QUIET_MS = 90 * 60_000;
 
 async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const polled=await pollWeather();const p=corePolicySync<any>('conversation-program.weatherCheck',[{...conversationPolicyFacts(),asides:getAsides(),today:localDateKey(zonedNow(CHAT_TIMEZONE))},polled,prefs]);conversationApply(p);if(!p.result)return;const system=proactiveOccasion('The weather',p.result.fact);const line=await ollamaQuip(system,'Say something about it.',config);recordBrief('weather '+p.result.kind,system,line);if(line)interject(line,{source:'weather'});return;}
+
   const polled = await pollWeather();
   if (!polled || !prefs.weather) return;
   const state = getWeather();
@@ -11334,22 +12515,88 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   if (line && interject(line, { source: 'weather' })) console.log(`[push] brought up the weather (${event.kind})`);
 }
 
+async function improveCoreDreams():Promise<void>{
+  const now=zonedNow(CHAT_TIMEZONE),route=conversationRoute(),local=store.get('ai.config') as ProviderConfig|undefined;
+  if(!corePolicySync<boolean>('dreams.ready',[{busy:dreamingNow,prefs:getPush().prefs,localNow:now,now:Date.now(),speaking:speakingNow,lastWord:hisLastWordMs(),route,local}]))return;
+  const registry=readModelRegistry(store.get('ai.modelRegistry'),{local:local as ProviderConfig,conversation:route??undefined});
+  const character=getActiveCharacter(),policy=readTaskPolicy(store.get('ai.taskPolicy'));
+  const decision=corePolicySync<any>('dreams.admission',[{busy:dreamingNow,prefs:getPush().prefs,localNow:now,now:Date.now(),speaking:speakingNow,lastWord:hisLastWordMs(),route,local,registry,taskPolicy:policy,identity:character.identity,style:character.style}]);
+  if(!decision)return;
+  const idle=()=>corePolicySync<boolean>('dreams.idle',[speakingNow,hisLastWordMs(),Date.now()]);
+  dreamingNow=true;
+  try{
+    const ask=async(messages:OllamaMessage[],maxTokens:number):Promise<string>=>{
+      if(!idle())throw Error('dream_interrupted_by_conversation');
+      const task=new TaskController(taskBridge.call,registry,decision.taskPolicy,decision.taskPolicy.enabled);
+      await task.start('Nighttime dream practice (no actions)',decision.route.model,'background');
+      return task.compose(()=>sendToProvider(messages,decision.route,{tools:false,maxTokens,temperature:0.2}));
+    };
+    const core=remainingStore(app.getPath('userData')),config=core.get('config',{}),archive=core.get('archive',{});
+    const recent=corePolicySync<any>('dreams.context',[config,archive,decision.days]);
+    const context={root:app.getPath('userData'),day:decision.day,now:Date.now(),entry:decision.entry,ask,idle};
+    const result=await runDreamLearning({...context,messages:recent,persona:decision.persona});
+    if(result)console.log(`[dream-learning] ${result.status}; reserved $${(result.spentMicros/1_000_000).toFixed(4)}`);
+    const notebook=await runDreamNotebook({...context,nights:getNights(),memories:getMemories()});
+    if(notebook)console.log(`[dream-notebook] ${notebook.status}`);
+  }catch(error){console.warn('[dream-learning]',error instanceof Error?error.message:error);}
+  finally{dreamingNow=false;}
+}
+
+let dreamingNow = false;
+async function improveHerDreams(): Promise<void> {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){await improveCoreDreams();return;}
+  const now = zonedNow(CHAT_TIMEZONE);
+  const idle = () => !speakingNow && Date.now() - hisLastWordMs() >= 5 * 60_000;
+  if (dreamingNow || !inQuietHours(getPush().prefs, now) || !idle()) return;
+  const route = conversationRoute();
+  if (!route) return;
+  const local = store.get('ai.config') as ProviderConfig | undefined;
+  if (!local) return;
+  const registry = readModelRegistry(store.get('ai.modelRegistry'), {
+    local,
+    conversation: route,
+  });
+  const entry = registry.find(e => e.enabled && e.config.model === route.model && e.config.endpoint === route.endpoint);
+  if (!entry || (!entry.local && !entry.pricing)) return;
+  dreamingNow = true;
+  try {
+    const policy = readTaskPolicy(store.get('ai.taskPolicy'));
+    const ask = async (messages: OllamaMessage[], maxTokens: number): Promise<string> => {
+      if (!idle()) throw new Error('dream_interrupted_by_conversation');
+      const task = new TaskController(taskBridge.call, registry, { ...policy, maxAttempts: 1, maxToolCalls: 0, maxEscalations: 0,
+        taskBudgetMicros: Math.min(policy.taskBudgetMicros, 50_000), deadlineMs: Math.min(policy.deadlineMs, 45_000) }, policy.enabled);
+      await task.start('Nighttime dream practice (no actions)', route.model,'background');
+      return task.compose(() => sendToProvider(messages, route, { tools: false, maxTokens, temperature: 0.2 }));
+    };
+    const day = nightKey(now);
+    const recent = day === localDateKey(now) ? messagesOn(day) : [...messagesOn(day), ...messagesOn(localDateKey(now))];
+    const character = getActiveCharacter();
+    const context = { root: app.getPath('userData'), day, now: Date.now(), entry, ask, idle };
+    const result = await runDreamLearning({ ...context, messages: recent, persona: [character.identity, character.style].join('\n') });
+    if (result) console.log(`[dream-learning] ${result.status}: ${result.scores?.filter(s => s.candidate).length ?? 0}/${result.scores?.length ?? 0} candidate checks; reserved $${(result.spentMicros / 1_000_000).toFixed(4)}`);
+    const notebook = await runDreamNotebook({ ...context, nights: getNights(), memories: getMemories() });
+    if (notebook) console.log(`[dream-notebook] ${notebook.status}; ${notebook.review.duplicateIds.length} duplicate groups for review; follow-up ${Boolean(notebook.followup)}`);
+  } catch (error) { console.warn('[dream-learning]', error instanceof Error ? error.message : error); }
+  finally { dreamingNow = false; }
+}
+
 async function proactiveTick() {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const config=store.get('ai.config') as ProviderConfig;const map:Record<string,()=>Promise<unknown>|unknown>={tally:()=>tallyIgnored(config),sleep:()=>decideHerNight(config),goodnight:()=>maybeSayHerGoodnight(config),dreams:()=>improveHerDreams(),night:()=>haveANight(config),day:()=>haveADay(config),week:()=>reflectOnHerWeek(config),standing:()=>formHerStanding(config),diary:()=>writeDiary(config),nightfall:()=>noteNightfall(),doze:()=>dozeOffIfLeftAlone(),morning:()=>sayItInTheMorning(config),poll:()=>pollWeather(),hanging:()=>checkHanging(config),upcoming:()=>checkUpcoming(config),weather:()=>checkWeather(config,getPush().prefs)};const first=corePolicySync<string[]>('conversation-program.proactive',['start',{local:config??null}]);if(!first.length)return;for(const name of first){if(!map[name])throw Error('core_proactive_command_protocol');await map[name]();}const next=corePolicySync<string[]>('conversation-program.proactive',['phone',{reachable:canReachPhone(),quiet:inQuietHours(getPush().prefs,zonedNow(CHAT_TIMEZONE)),prefs:getPush().prefs}]);try{for(const name of next){if(!map[name])throw Error('core_proactive_command_protocol');await map[name]();}}catch(error){console.warn('[proactive]',error instanceof Error?error.message:'failed');}return;}
+
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
   await tallyIgnored(config);
   await decideHerNight(config);
   await maybeSayHerGoodnight(config);
+  await improveHerDreams();
   await haveANight(config);
-  await readSomeManga(config);
   await haveADay(config);
   await reflectOnHerWeek(config);
   await formHerStanding(config);
   await writeDiary(config);
-  sulkAtNightfall();
+  noteNightfall();
   await dozeOffIfLeftAlone();
   await sayItInTheMorning(config);
-  await checkNudgeFloor();
   const { prefs } = getPush();
   // The weather is read even with no phone to buzz: it is in her prompt.
   if (!canReachPhone()) { await pollWeather(); return; }
@@ -11369,7 +12616,22 @@ async function proactiveTick() {
  * and if there were any, she says so — through interject, so it is an aside
  * she remembers making and the phone gets it under the usual preferences.
  */
+function remainingGrudge(mode:'tally'|'settle'|'morning'|'tell',day:string,heard:unknown){
+  const now=zonedNow(CHAT_TIMEZONE),mood=getMood(),core=remainingStore(app.getPath('userData'));
+  const decision=corePolicySync<any>('grudge.transition',[mode,core.get('config',{}),mood,day,now.getHours()*60+now.getMinutes(),getAsides(),heard,Date.now(),ordinaryHanging(),null,IRRITATION_MAX]);
+  if(decision.plan){applyRemainingPlan(core,decision.plan);sendToWindows('mood:changed',getMood());}
+  for(const event of decision.events){
+    if(event.kind==='vitals')nudgeVitals(event.event);
+    else if(event.kind==='slight')noteSlight(event.event,event.text);
+    else throw Error('core_grudge_event_protocol');
+  }
+  return decision;
+}
 async function tallyIgnored(config: ProviderConfig) {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){
+    const decision=remainingGrudge('tally',localDateKey(zonedNow(CHAT_TIMEZONE)),store.get('chat.messages')??[]);
+    if(decision.followup)await maybeRaiseConversationFollowup();return;
+  }
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const mood = getMood();
@@ -11395,7 +12657,8 @@ async function tallyIgnored(config: ProviderConfig) {
 
 /** The lines of hers on a day that got nothing back, from what was heard that day (grudge.ts). */
 function countIgnored(day: string, heard: { role: string; at?: string; replyTo?: string | { id: string } }[]): Said[] {
-  const pushed = new Set(Object.keys(PUSH_KIND).filter(source => !NOT_HELD_AGAINST_THEM.includes(source)));
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on')return corePolicySync('grudge.countDay',[getAsides(),day,heard,Date.now()]);
+  const pushed = new Set(['hanging']); // Unsolicited nudges, news and reminders are not owed replies.
   // Nothing before their first word of the day counts: they cannot ignore
   // what they have not been up to see.
   const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
@@ -11419,6 +12682,7 @@ function countIgnored(day: string, heard: { role: string; at?: string; replyTo?:
  * evening's, and by now they are asleep.
  */
 function settleTally(day: string, heard: { role: string; at?: string }[]) {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){remainingGrudge('settle',day,heard);return;}
   const mood = getMood();
   const counted = mood.talliedDay === day;
   const ignored = countIgnored(day, heard);
@@ -11431,6 +12695,15 @@ function settleTally(day: string, heard: { role: string; at?: string }[]) {
 }
 
 // ---- Her own night -------------------------------------------------------
+
+function ownedSleepFacts(){return {prefs:store.get('her.sleep')??null,state:getHerSleepSchedule(),wakes:getWakes(),mood:getMood(),
+  local:zonedNow(CHAT_TIMEZONE),now:Date.now(),zone:CHAT_TIMEZONE,explicit:explicitModeNow(),messages:store.get('chat.messages')??[]};}
+function ownedSleepFence(facts:ReturnType<typeof ownedSleepFacts>){
+  if(JSON.stringify(store.get('her.sleep')??null)!==JSON.stringify(facts.prefs)||JSON.stringify(getHerSleepSchedule())!==JSON.stringify(facts.state)
+    ||JSON.stringify(getWakes())!==JSON.stringify(facts.wakes)||JSON.stringify(getMood())!==JSON.stringify(facts.mood)
+    ||JSON.stringify(store.get('chat.messages')??[])!==JSON.stringify(facts.messages)||explicitModeNow()!==facts.explicit
+    ||localDateKey(zonedNow(CHAT_TIMEZONE))!==localDateKey(facts.local))throw Error('core_sleep_branch_changed');
+}
 
 function getHerSleepPrefs() {
   return readHerSleep(store.get('her.sleep'));
@@ -11481,37 +12754,15 @@ function asleepReply(): string {
   return asleepLine(before + 1);
 }
 
-/** Their messages into her sleep lately, as clock times — the knocking at the door. */
-const knocks: number[] = [];
-
-/**
- * The door, knocked on.
- *
- * Every message that lands while she sleeps is a knock; enough of them in a
- * few minutes (hersleep.ts) and she gets up early, and the wake note says
- * how. He sent "Wake up" five times in a row on 2026-09-06 and got the same
- * line five times. Returns the door's line, or null when she is up now and
- * the message is to be answered for real.
- */
+/** A direct nighttime message gets a contextual reply, even after an earlier goodnight. */
 function knockWhileAsleep(): string | null {
-  const now = Date.now();
   const schedule = getHerSleepSchedule();
-  knocks.push(now);
-  while (knocks.length && now - knocks[0] > KNOCK_WINDOW_MS) knocks.shift();
-  // She has said they are not to wake her again tonight: the door stays shut —
-  // but it says so differently each time he tries. The paragraph above is about
-  // exactly this and only fixed it for the asleep lines; he got the refusal
-  // three times word for word and answered "You just repeated yourself again"
-  // (2026-09-09).
-  if (schedule?.blocked) return blockedLine(knocks.length - 1);
-  if (schedule && enoughKnocking(knocks, now)) {
-    const woken = wokenAt(schedule, zonedNow(CHAT_TIMEZONE), knocks.length, new Date().toISOString());
-    setHerSleepSchedule(woken);
-    console.log(`[her-sleep] woken early — ${knocks.length} messages in ${Math.max(1, Math.round((now - knocks[0]) / 60_000))} min; up at ${clockMinutes(woken.wake)}`);
-    knocks.length = 0;
-    return null;
+  if (schedule) {
+    const woken = wokenAt(schedule, zonedNow(CHAT_TIMEZONE), 1, new Date().toISOString());
+    setHerSleepSchedule({ ...woken, responsiveWake: true, blocked: false, wokenForNothing: false, wakeHandled: true });
+    console.log('[her-sleep] briefly awake for a direct message');
   }
-  return asleepReply();
+  return null;
 }
 
 /**
@@ -11526,39 +12777,13 @@ function ignoredTodayNow(): number {
 
 /** Between her goodnight and her bedtime she has logged off: nothing more of her own tonight. */
 function herHasSaidGoodnight(): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on')return corePolicySync<any>('sleep.availability',[store.get('her.sleep'),store.get('her.sleepState'),zonedNow(CHAT_TIMEZONE),explicitModeNow()]).goodnight;
   const state = getHerSleepSchedule();
   if (!state?.announced) return false;
   const now = zonedNow(CHAT_TIMEZONE);
   const window = sleepWindowOn(state, localDateKey(now));
   if (!window) return false;
   return now.getHours() * 60 + now.getMinutes() < window.fromMin;
-}
-
-/** When she got up this morning, on the real clock — or 0 when this is not the morning after a night. */
-function herWokeAtMs(): number {
-  const state = getHerSleepSchedule();
-  if (!state) return 0;
-  const now = zonedNow(CHAT_TIMEZONE);
-  if (localDateKey(now) !== dayAfter(state.day)) return 0;
-  const midnight = new Date(now.getTime());
-  midnight.setHours(0, 0, 0, 0);
-  const wokeAt = midnight.getTime() + state.wake * 60_000;
-  if (wokeAt > now.getTime()) return 0;
-  // A zoned date is shifted by a constant from real time; the difference carries over.
-  return Date.now() - (now.getTime() - wokeAt);
-}
-
-/** Why she takes them to be up right now, for the log. */
-function upBecause(): string {
-  const prefs = getPush().prefs;
-  const now = zonedNow(CHAT_TIMEZONE);
-  const since = quietEndedAt(prefs, now)?.getTime() ?? 0;
-  const log = store.getActivityLog();
-  const days = Object.keys(log).sort();
-  const latest = days.length ? (log[days[days.length - 1]] ?? []).map(entry => entry.until ?? entry.at).sort().at(-1) : undefined;
-  const signs: [string, string | undefined][] = [['they wrote', getMood().lastMessageAt], ['the page or app was opened', store.get('web.lastOpenedAt') as string | undefined], ['the desk was in use', latest]];
-  const seen = signs.filter(([, at]) => Number.isFinite(Date.parse(at ?? '')) && Date.parse(at!) >= since).sort((a, b) => Date.parse(b[1]!) - Date.parse(a[1]!))[0];
-  return seen ? `${seen[0]} at ${clockAt(Date.parse(seen[1]!))}` : `past their up-by (${prefs.upBy || 'unset'})`;
 }
 
 /**
@@ -11572,6 +12797,7 @@ function herGroggyNow(): boolean {
 
 /** Up because they got her up, and not yet at the wake she chose. Nothing of her own goes out meanwhile. */
 function herKnockedAwakeNow(): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on')return corePolicySync<any>('sleep.availability',[store.get('her.sleep'),store.get('her.sleepState'),zonedNow(CHAT_TIMEZONE),explicitModeNow()]).knockedAwake;
   return knockedAwake(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE));
 }
 
@@ -11607,9 +12833,17 @@ function noteSlight(kind: Slight['kind'], what: string): void {
  * a word about it in the morning, and — once it is a habit — a shut door.
  */
 function goBackToSleep(input: { pointless: boolean; block: boolean; why: string }): { asleep: boolean; blocked: boolean } | null {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts=ownedSleepFacts(),decision=corePolicySync<any>('sleep.back',[facts,input]);if(!decision)return null;
+    store.transaction(()=>{ownedSleepFence(facts);setHerSleepSchedule(decision.state);store.set('her.wakes',decision.wakes);
+      if(decision.irritation!==null)setMood({...facts.mood,irritation:decision.irritation});});
+    if(decision.memory)addMemory(decision.memory,'event',undefined,{source:'conversation',emotion:'annoyed',emotionIntensity:0.7});
+    return decision.result;
+  }
   const state = getHerSleepSchedule();
   const now = zonedNow(CHAT_TIMEZONE);
   if (!state || !knockedAwake(state, now)) return null;
+  if (state.responsiveWake) input = { ...input, pointless: false, block: false };
   const at = new Date().toISOString();
   const wakes = [...getWakes(), { at: state.knockedAt ?? at, pointless: input.pointless }].slice(-WAKES_KEPT);
   const habit = input.pointless && pointlessWakesLately(wakes, Date.now()) >= BLOCK_AFTER_POINTLESS;
@@ -11645,6 +12879,13 @@ function theirsSinceKnock(state: HerSleepSchedule): { content?: string; at?: str
  * word count: she is her own person.
  */
 async function wakeWasForNothing(state: HerSleepSchedule): Promise<boolean> {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts={...ownedSleepFacts(),state,hasBrain:Boolean((nudgeBrain()??(store.get('ai.config') as ProviderConfig|undefined))?.model)};
+    const prompt=corePolicySync<string|null>('sleep.judge',[facts]);let raw:string|null=null;
+    if(prompt){try{raw=await ollamaQuip(`${getActiveCharacter().identity} ${prompt}`,'Judge it.',nudgeBrain()??store.get('ai.config') as ProviderConfig);}catch{}}
+    ownedSleepFence(facts);return corePolicySync<boolean>('sleep.verdict',[facts,raw]);
+  }
+  if (state.responsiveWake) return false;
   const theirs = theirsSinceKnock(state);
   const plain = pointlessWake(theirs, state.knockedAt ?? new Date().toISOString());
   const brain = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
@@ -11670,6 +12911,11 @@ async function goBackToSleepOnHerWord() {
 
 /** Left alone after being got up, she drifts off again — and judges the wake as she goes. */
 async function dozeOffIfLeftAlone() {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts=ownedSleepFacts();if(!corePolicySync<boolean>('sleep.doze',[facts]))return;
+    const pointless=await wakeWasForNothing(facts.state!);ownedSleepFence(facts);goBackToSleep({pointless,block:false,why:'Core doze decision'});return;
+  }
+  if (explicitModeNow()) return;
   const state = getHerSleepSchedule();
   if (!state) return;
   const now = zonedNow(CHAT_TIMEZONE);
@@ -11678,9 +12924,132 @@ async function dozeOffIfLeftAlone() {
   goBackToSleep({ pointless, block: false, why: `nothing from them for ${Math.round((Date.now() - Date.parse(getMood().lastMessageAt ?? '')) / 60_000)} min` });
 }
 
+/** Whether Explicit mode is the brain she is running (self.ts holds the alias). */
+function explicitModeNow(): boolean {
+  return explicitModeOn((store.get('ai.config') as { model?: string } | undefined)?.model);
+}
+
+/** Where her own pictures are kept, beside everything else she makes. */
+function pictureFolder(): string {
+  return path.join(app.getPath('userData'), 'pictures');
+}
+
+/**
+ * Pictures he has chosen to keep, by id. Everything else she draws is swept a
+ * week after it was made: it is his to keep, not hers to hoard.
+ */
+function keptPictures(): string[] {
+  if(process.env.HARU_CORE_PICTURE_MAINTENANCE==='on')return corePolicySync('picture-maintenance.kept',[store.get('pictures.kept')??null]);
+  const saved = store.get('pictures.kept');
+  return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : [];
+}
+
+function keepPicture(id: string): boolean {
+  if(process.env.HARU_CORE_PICTURE_MAINTENANCE==='on')return corePictureMutation('keep',id,remainingStore(app.getPath('userData')),pictureFolder);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return false;
+  const kept = keptPictures();
+  if (!kept.includes(id)) store.set('pictures.kept', [...kept, id]);
+  return true;
+}
+
+function forgetPicture(id: string): boolean {
+  if(process.env.HARU_CORE_PICTURE_MAINTENANCE==='on')return corePictureMutation('forget',id,remainingStore(app.getPath('userData')),pictureFolder);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return false;
+  store.set('pictures.kept', keptPictures().filter(kept => kept !== id));
+  try { rmSync(path.join(pictureFolder(), `${id}.png`), { force: true }); } catch { /* already gone */ }
+  return true;
+}
+
+/** Unkept pictures go after a week. Runs at startup and after each one is made. */
+const PICTURE_KEEP_DAYS = 7;
+function sweepPictures(): number {
+  if(process.env.HARU_CORE_PICTURE_MAINTENANCE==='on')return coreSweepPictures(pictureFolder,keptPictures,line=>console.log(line));
+  const kept = new Set(keptPictures());
+  const cutoff = Date.now() - PICTURE_KEEP_DAYS * 24 * 60 * 60 * 1000;
+  let swept = 0;
+  try {
+    for (const name of readdirSync(pictureFolder())) {
+      if (!name.endsWith('.png')) continue;
+      const id = name.slice(0, -4);
+      if (kept.has(id)) continue;
+      const file = path.join(pictureFolder(), name);
+      try { if (statSync(file).mtimeMs < cutoff) { rmSync(file, { force: true }); swept += 1; } } catch { /* skip */ }
+    }
+  } catch { /* no folder yet */ }
+  if (swept) console.log(`[picture] swept ${swept} unkept picture(s) older than ${PICTURE_KEEP_DAYS} days`);
+  return swept;
+}
+
+/** The secret a picture link is signed with, made once and kept. */
+function pictureSecret(): string {
+  const saved = store.get('pictures.secret');
+  if (typeof saved === 'string' && saved.length >= 32) return saved;
+  const made = randomBytes(32).toString('hex');
+  store.set('pictures.secret', made);
+  return made;
+}
+
+/** The signature a link carries, so a lock screen can fetch it with no cookie. */
+function pictureSignature(id: string): string {
+  return createHmac('sha256', pictureSecret()).update(id).digest('base64url').slice(0, 32);
+}
+
+/** The address his phone can reach her door on. */
+function pictureBase(): string {
+  if(process.env.HARU_CORE_PICTURE_MAINTENANCE==='on')return corePolicySync('picture-maintenance.base',[store.get('desktop.serverUrl')??null,(store.get('evi') as {publicUrl?:string}|undefined)?.publicUrl??'']);
+  const saved = store.get('desktop.serverUrl');
+  if (typeof saved === 'string' && saved.trim()) return saved.trim().replace(/\/+$/, '');
+  // The door answers on loopback and is reachable only through the tunnel, so
+  // the tunnel's own name is the address a phone can use. EVI's public URL
+  // names the same host, which is how it is known here.
+  const evi = (store.get('evi') as { publicUrl?: string } | undefined)?.publicUrl ?? '';
+  try {
+    // The hostname only: the door is served on 443 through the tunnel, and the
+    // port on EVI's URL belongs to EVI.
+    const host = new URL(evi).hostname;
+    if (host) return `https://${host}`;
+  } catch { /* not configured */ }
+  return 'http://127.0.0.1:8787';
+}
+
+/**
+ * Make one picture and push it. Asked for by him, so the push is forced: quiet
+ * hours are for lines she chose to send, not for the one he asked for.
+ */
+async function makeAndSendPicture(prompt: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return runCorePicture(prompt,{
+    hasKey:()=>String(store.get('veniceApiKey')??'').startsWith('plain:')&&String(store.get('veniceApiKey')).length>6,
+    generate:async text=>{const made=await makePicture({key:String(store.get('veniceApiKey')).slice(6),prompt:text,folder:pictureFolder()});return {made:{...made,saved:path.basename(made.file)},url:`${pictureBase()}/api/picture/${made.id}?k=${pictureSignature(made.id)}`};},
+    push:c=>pushToPhone(c.kindName,c.text,c.url,c.force,c.tag),windows:c=>sendToWindows(c.channel,c.payload),sweep:sweepPictures,
+  });
+
+  const key = (store.get('veniceApiKey') as string | undefined) ?? '';
+  const plain = key.startsWith('plain:') ? key.slice('plain:'.length) : '';
+  if (!plain) return { ok: false, error: 'There is no Venice key set, so there is nothing to make it with.' };
+  try {
+    const made = await makePicture({ key: plain, prompt, folder: pictureFolder() });
+    const url = `${pictureBase()}/api/picture/${made.id}?k=${pictureSignature(made.id)}`;
+    const pushed = await pushToPhone('random', 'A picture, since you asked.', url, true, 'haru-picture');
+    // The renderer owns the transcript, so the message is handed to it rather
+    // than written behind its back.
+    sendToWindows('chat:picture', { id: made.id, name: 'a picture', saved: path.basename(made.file), url, bytes: made.bytes, private: true });
+    sweepPictures();
+    console.log(`[picture] made ${Math.round(made.bytes / 1024)}KB with ${made.model} in ${pictureFolder()} (pushed ${pushed ? 'to a phone' : 'nowhere — no device'})`);
+    return { ok: true, url };
+  } catch (error) {
+    const said = error instanceof PictureRefused ? error.message : error instanceof Error ? error.message : String(error);
+    console.warn('[picture] it did not come out:', said);
+    return { ok: false, error: `It did not come out (${said}).` };
+  }
+}
+
 function herAsleepNow(): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on')return corePolicySync<any>('sleep.availability',[store.get('her.sleep'),store.get('her.sleepState'),zonedNow(CHAT_TIMEZONE),explicitModeNow()]).asleep;
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return false;
+  // Explicit mode keeps her up: turning it on is a decision to stay available,
+  // and her bedtime is hers again the moment it is off.
+  if (explicitModeNow()) return false;
   return herAsleep(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE));
 }
 
@@ -11692,6 +13061,12 @@ function herAsleepNow(): boolean {
  * made of it.
  */
 async function decideHerNight(config: ProviderConfig) {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts=ownedSleepFacts(),plan=corePolicySync<any>('sleep.decision',[facts]);if(!plan)return;
+    let raw:string|null=null;try{raw=await ollamaQuip(plan.prompt,'Decide.',config);}catch{}
+    ownedSleepFence(facts);const chosen=corePolicySync<HerSleepSchedule>('sleep.decided',[facts,raw,[Math.random(),Math.random()],vitals.sleepiness]);
+    store.transaction(()=>{ownedSleepFence(facts);setHerSleepSchedule(chosen);});return;
+  }
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return;
   const now = zonedNow(CHAT_TIMEZONE);
@@ -11726,6 +13101,13 @@ async function pickHerTimes(prefs: ReturnType<typeof getHerSleepPrefs>, config: 
  * nobody.
  */
 async function maybeSayHerGoodnight(config: ProviderConfig) {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts=ownedSleepFacts(),prompt=corePolicySync<string|null>('sleep.goodnight',[facts]);if(!prompt)return;
+    try{const character=getActiveCharacter(),line=await ollamaQuip([character.identity,character.style,prompt].filter(Boolean).join(' '),'Say goodnight.',config);
+      ownedSleepFence(facts);if(line&&interject(line,{source:'goodnight'}))store.transaction(()=>{ownedSleepFence(facts);setHerSleepSchedule({...facts.state!,announced:true});});
+    }catch(error){console.warn(`[her-sleep] goodnight not committed: ${error instanceof Error?error.message:error}`);}return;
+  }
+  if (explicitModeNow()) return;
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return;
   const state = getHerSleepSchedule();
@@ -11761,10 +13143,16 @@ async function maybeSayHerGoodnight(config: ProviderConfig) {
  * marked done rather than held against a later day.
  */
 function wakeNoteNow(): string {
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on'){
+    const facts=ownedSleepFacts(),heard=facts.state?[...messagesOn(facts.state.day),...messagesOn(dayAfter(facts.state.day))]:[];
+    const decision=corePolicySync<any>('sleep.wake',[{...facts,messages:heard}]);if(!decision)return '';
+    store.transaction(()=>{ownedSleepFence(facts);setHerSleepSchedule(decision.state);if(decision.irritation!==null)setMood({...facts.mood,irritation:decision.irritation});});return decision.note;
+  }
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return '';
   const state = getHerSleepSchedule();
   if (!state || state.wakeHandled) return '';
+  if (state.responsiveWake) { setHerSleepSchedule({ ...state, wakeHandled: true }); return ''; }
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const wakeDay = dayAfter(state.day);
@@ -11794,20 +13182,8 @@ function wakeNoteNow(): string {
   return note;
 }
 
-/**
- * The voice reading, consumed once: the note she is handed when he sounded
- * rough. Fresh only — a reading older than a few minutes is stale, and a
- * message in between means the moment is gone.
- */
-function takeVoiceRoom(): string {
-  const reading = store.get('hume.reading') as { rough?: boolean; why?: string; at?: string } | undefined;
-  if (!reading?.why) return '';
-  store.delete('hume.reading' as never);
-  if (Date.now() - Date.parse(reading.at ?? '') > 10 * 60_000) return '';
-  return `When they said that, ${reading.why}. Read the room: still you — still dry, still short — but no needling, nothing about their list, and do not bring it up unless it fits.`;
-}
-
 function getInterests(): Interest[] {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<Interest[]>('projects.readInterests',[store.get('tastes')]);
   const saved = store.get('tastes') as Interest[] | undefined;
   return Array.isArray(saved) ? saved.filter(interest => interest && typeof interest.name === 'string' && typeof interest.id === 'string') : [];
 }
@@ -11828,6 +13204,11 @@ function getNights(): Night[] {
  * the night she actually works on it.
  */
 function getProjects(): Project[] {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    const saved=store.get('her.wants'),interests=getInterests(),plan=coreEntropyPolicy<{ledger:Project[];write:boolean}>('projects.ledgerWire',[interests,saved,new Date().toISOString()],interests.length,()=>Math.random().toString(36).slice(2,10));
+    if(plan.write){if(JSON.stringify(store.get('her.wants'))!==JSON.stringify(saved))throw Error('core_project_stale_snapshot');store.set('her.wants',plan.ledger);}
+    return plan.ledger;
+  }
   const projects = readProjects(store.get('her.wants'));
   const merged = reconcileWants(getInterests(), projects, new Date().toISOString());
   // Length alone no longer says whether anything moved: a rewording clears one
@@ -11902,24 +13283,6 @@ let lastNightThingAt: number | null = null;
  * the GPU is answering them.
  */
 /**
- * A night spent reading the thing itself, rather than reading about it.
- *
- * Her nights were spent on reviews and forum threads, which is how a stance
- * gets built out of a fandom's opinion of a story instead of the story. She
- * reads pages now: her own vision model on the server takes a manga page about
- * as well as it takes his screen, and given the first chapter of Chainsaw Man
- * it returned the debt tally in order, "38,040,000 yen", "You know the drill,
- * Pochita!" — right, and in sequence.
- *
- * A stretch a night, not a volume. A page costs about a hundred seconds on that
- * card, so a 53-page chapter would be an hour and a half of it, and someone who
- * reads a chapter a night is a better character than one who inhales a series
- * between midnight and two. It also means she is genuinely partway through
- * something, which is the part he cannot get from a summary.
- */
-let readingMangaNow = false;
-
-/**
  * A tool call, kept if it did something.
  *
  * The result is inspected rather than trusted: a tool that came back with an
@@ -11929,6 +13292,12 @@ let readingMangaNow = false;
  */
 const deedFeelings = new DeedFeelings();
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('deeds.note',[core.get('config',{}),tool,call,result,new Date().toISOString()]);
+    if(decision.plan)applyRemainingPlan(core,decision.plan);
+    for(const event of decision.events)feelNow(event);
+    if(decision.deed)console.log(`[deed] you ${decision.deed.what}`);return;
+  }
   if (!isADeed(tool)) return;
   let failed = false;
   try {
@@ -11986,6 +13355,8 @@ function rememberDelivery(raw: string, clean: string): void {
  */
 let hisShelf: { at: number; titles: HisTitle[] } = { at: 0, titles: [] };
 async function refreshHisShelf(): Promise<void> {
+  if(process.env.HARU_CORE_CONTEXT_SUPPLEMENT==='on')return coreRefreshShelf({held:()=>hisShelf,link:suwayomiLink,config:()=>readSuwayomiConfig(store.get('manga')),save:value=>{hisShelf=value;}});
+
   const link = suwayomiLink();
   if (!link) { hisShelf = { at: Date.now(), titles: [] }; return; }
   try {
@@ -11997,11 +13368,13 @@ async function refreshHisShelf(): Promise<void> {
   }
 }
 function hisReadingLine(): string {
+  if(process.env.HARU_CORE_CONTEXT_SUPPLEMENT==='on')return coreShelfLine({held:()=>hisShelf,refresh:refreshHisShelf,grudge:()=>getMood().grudge??0,sway:swayNow,log:line=>console.log(line)});
+
   if (Date.now() - hisShelf.at > 10 * 60_000) void refreshHisShelf();
   const grudge = getMood().grudge ?? 0;
   const spite = spiteful(grudge, Math.random(), undefined, sway('spite', SPITE_ODDS, swayNow()));
   if (spite && hisShelf.titles.length) console.log(`[manga] spiteful today — grudge ${grudge}, a spoiler is on the table`);
-  return hisReadingNote(hisShelf.titles, readReading(store.get('her.reading')), Date.now(), grudge, spite);
+  return hisReadingNote(hisShelf.titles, null, Date.now(), grudge, spite);
 }
 
 /**
@@ -12013,6 +13386,18 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
   const link = suwayomiLink();
   const config = readSuwayomiConfig(store.get('manga'));
   if (!link || !config) return null;
+  if(process.env.HARU_CORE_MANGA_FETCH==='on'){
+    const expected=JSON.stringify(config);
+    const memory={effects:()=>store.get('manga.fetchEffects')??null,
+      assertCurrent:()=>{if(JSON.stringify(readSuwayomiConfig(store.get('manga')))!==expected)throw Error('manga_configuration_stale');},
+      commit:(plan:{expected:unknown;ledger:unknown})=>{if(JSON.stringify(store.get('manga.fetchEffects')??null)!==JSON.stringify(plan.expected))throw Error('manga_effect_storage_stale');if(JSON.stringify(plan.ledger)!==JSON.stringify(plan.expected))store.set('manga.fetchEffects',plan.ledger);}};
+    const dispatch=async(op:string,args:any[])=>{
+      memory.assertCurrent();
+      if(op==='disk'){const fs=statfsSync(config.downloadsDir);return (fs.bavail*fs.bsize)/2**30;}
+      return link.fetchCommand(op,args);
+    };
+    return {get:input=>runMangaFetch(input,config,dispatch,memory),status:title=>runMangaFetch({title},config,dispatch,memory,'status')};
+  }
   const freeGb = () => { try { const fs = statfsSync(config.downloadsDir); return (fs.bavail * fs.bsize) / 2 ** 30; } catch { return Number.POSITIVE_INFINITY; } };
   const shelfTitle = async (title: string) => {
     const library = await link.library();
@@ -12061,7 +13446,39 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
  */
 let herHandsBusy = false;
 let herHandsWhyNot = '';
+async function herOwnedHandsTick(): Promise<void> {
+  // Process-local exclusion only; Core evaluates all domain admission.
+  if(herHandsBusy)return;
+  herHandsBusy=true;
+  try{
+    const core=remainingStore(app.getPath('userData')),turn=createTurnContext({hands:true});
+    const read=()=>{
+      const now=zonedNow(CHAT_TIMEZONE),character=getActiveCharacter(),config=core.get('config',{});
+      const ledger=readHands(config.her?.hands);
+      return {scope:activeScheduledJob.getStore(),config,nowMs:Date.now(),at:new Date().toISOString(),today:localDateKey(now),
+        days:ledger.map(entry=>localDateKey(zonedNow(CHAT_TIMEZONE,new Date(entry.at)))),
+        moment:{level:readSystemConfig().level,minutes:now.getHours()*60+now.getMinutes(),asleep:herAsleepNow(),speaking:speakingNow,idleMs:Date.now()-hisLastWordMs(),busy:false},
+        tools:chatTools(availableTools(turn),''),identity:character.identity,style:character.style,interests:getInterests(),projects:getProjects()};
+    };
+    await runOwnedHands({core,read,dispatch:async request=>{
+      const config=request.config as ProviderConfig,menu=request.menu as ChatTool[],deps=toolDeps(turn),results:any[]=[];
+      const registry=readModelRegistry(store.get('ai.modelRegistry'),{local:config,conversation:store.get('ai.conversation') as ProviderConfig|undefined,
+        specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision:readVisionConfig(store.get('vision'))});
+      const result=await runCoreHands(request.messages,config,{
+        requireToolContract:true,ask:(sending,{tools})=>ollamaPost(sending as Parameters<typeof ollamaPost>[0],config,{tools,turn,table:menu}),
+        runTool:async call=>{const output=await runChatTool(call,'',deps);results.push({call,result:output});noteDeed(call.function?.name??'tool',call,output);return output;},
+        pageWasRead:turn.pageWasRead,handsAllowed:turn.handsAllowed,withdrawHands:turn.withdrawHands,hasOpenTask:()=>false,canSearch:()=>false,
+        log:line=>console.log(line),warn:line=>console.warn(line),
+      },{rpc:taskBridge.call,registry,policy:readTaskPolicy(store.get('ai.taskPolicy'))});
+      return {content:result.content,results};
+    }});
+  }catch(error){console.warn('[hands] owned pass unresolved:',error instanceof Error?error.message:error);}
+  finally{herHandsBusy=false;}
+}
+
 async function herHandsTick(): Promise<void> {
+  if(process.env.HARU_CORE_QUICK_HANDS==='on'){await herOwnedHandsTick();return;}
+
   const system = readSystemConfig();
   if (system.level < 4) return;
   const hands = readHandsConfig(store.get('system.config'));
@@ -12070,11 +13487,11 @@ async function herHandsTick(): Promise<void> {
   const dayOf = (iso: string) => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)));
   const ledger = readHands(store.get('her.hands'));
   const last = ledger.at(-1);
-  const why = whyNotAct({
+  const why = await coreHandsWhyNotAct({
     level: system.level, config: hands, minutes: now.getHours() * 60 + now.getMinutes(),
     asleep: herAsleepNow(), speaking: speakingNow, idleMs: Date.now() - hisLastWordMs(),
     sinceLastMs: last ? Date.now() - Date.parse(last.at) : Number.MAX_SAFE_INTEGER,
-    doneToday: handsToday(ledger, today, dayOf), busy: herHandsBusy || pokemonSitting !== null || readingMangaNow,
+    doneToday: handsToday(ledger, today, dayOf), busy: herHandsBusy,
   });
   if (why) {
     // Said once per reason, not once per tick.
@@ -12093,8 +13510,6 @@ async function herHandsTick(): Promise<void> {
     const character = getActiveCharacter();
     const interests = getInterests();
     const own = [
-      readingNote(readReading(store.get('her.reading'))),
-      runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), false),
       tastesInstruction(interests),
       projectsNote(getProjects(), Date.now()),
       handsNote(ledger, Date.now(), dayOf, today),
@@ -12103,29 +13518,24 @@ async function herHandsTick(): Promise<void> {
       { role: 'system', content: [character.identity, character.style, FIRST_PERSON_NOTE, NOBODY_HERE, own, handsInstruction(menu.map(tool => tool.function.name))].join('\n\n') },
       { role: 'user', content: HANDS_TURN },
     ];
-    // In her own time a read runs to its end, and a game she starts is hers, not his idea.
-    const base = toolDeps(turn);
-    const pokemon = pokemonDeps();
-    const deps: ToolDeps = { ...base, pokemon: pokemon ? { ...pokemon, start: () => startPokemon('her') } : null };
-    const { content, ran } = await runToolLoop(conversation as Parameters<typeof runToolLoop>[0], {
+    const deps = toolDeps(turn);
+    const registry = readModelRegistry(store.get('ai.modelRegistry'), { local: config,
+      conversation: store.get('ai.conversation') as ProviderConfig | undefined,
+      specialist: store.get('escalate.provider') as ProviderConfig | undefined, vision: readVisionConfig(store.get('vision')) });
+    const { content, ran } = await runCoreHands(conversation as Parameters<typeof runToolLoop>[0], config, {
+      requireToolContract: true,
       ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: menu }),
       runTool: async call => {
         const fn = (call as { function?: { name?: string; arguments?: unknown } }).function ?? {};
         const tool = fn.name ?? 'tool';
-        let asked = call;
-        if (tool === 'read_manga') {
-          let args: Record<string, unknown> = {};
-          try { args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments as Record<string, unknown>) ?? {}; } catch { args = {}; }
-          asked = { ...call, function: { ...fn, arguments: JSON.stringify({ ...args, wait: true }) } } as typeof call;
-        }
-        const result = await runChatTool(asked, '', deps);
+        const result = await runChatTool(call, '', deps);
         noteDeed(tool, call, result);
         return result;
       },
       pageWasRead: turn.pageWasRead, handsAllowed: turn.handsAllowed, withdrawHands: turn.withdrawHands,
       hasOpenTask: () => false, canSearch: () => false,
       log: line => console.log(line), warn: line => console.warn(line), maxRounds: 3,
-    });
+    }, { rpc: taskBridge.call, registry, policy: readTaskPolicy(store.get('ai.taskPolicy')) });
     const acted = [...ran].filter(name => (HER_HANDS_TOOLS as readonly string[]).includes(name));
     const deed = readDeeds(store.get('her.deeds')).filter(item => Date.parse(item.at) >= startedAt && acted.includes(item.tool)).at(-1);
     const said = content.trim().slice(0, 400);
@@ -12143,452 +13553,20 @@ async function herHandsTick(): Promise<void> {
   }
 }
 
-/**
- * Her own reading as a tool (tools.ts read_manga): the same pass as the small
- * hours, run now. On a chat turn it starts and answers at once — a stretch is
- * minutes of her eyes on pages — and in her own time (herHandsTick) it runs to
- * the end, a few pages, so what she says about it is what she read.
- */
-const HANDS_PAGES = 4;
-function mangaLink(): ToolDeps['manga'] {
-  const vision = readVisionConfig(store.get('vision'));
-  const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!vision.enabled || !config?.model) return null;
-  return {
-    read: async ({ title, wait }) => {
-      if (readingMangaNow) return { error: 'You are already partway through a stretch of reading. Say so.' };
-      // The one she is on, read to the end (manga.ts readToTheEnd), asked for
-      // by name or on a chat turn: answered before anything starts, so she is
-      // not sent off to read pages that are not there. In her own time with
-      // no title the pass itself takes up something else of hers. A chapter
-      // out since is read as usual.
-      const current = readReading(store.get('her.reading'));
-      const same = !!title && !!current && title.toLowerCase() === current.title.toLowerCase();
-      if (current && readToTheEnd(current) && (same || (!title && !wait))) {
-        const next = await chapterAfter(suwayomiLink(), current).catch(error => { console.warn('[manga] could not look for a chapter after hers:', error instanceof Error ? error.message : error); return null; });
-        if (!next) {
-          rememberFinished(current);
-          console.log(`[manga] read_manga: ${current.title} is read to the end — nothing after chapter ${current.chapter}`);
-          return finishedResult(current.title, current.chapter, false);
-        }
-      }
-      const run = readSomeManga(config, { force: true, title, pages: wait ? HANDS_PAGES : undefined });
-      if (!wait) {
-        void run.then(got => { if (!got) console.log('[manga] the read she started came to nothing'); }).catch(error => console.warn('[manga] the read she started failed:', error instanceof Error ? error.message : error));
-        return { started: true, title: title || readReading(store.get('her.reading'))?.title || 'your manga', note: 'It has started and takes a few minutes. Say you are off to read — do not describe pages you have not read yet.' };
-      }
-      const got = await run;
-      if (!got) return { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
-      if ('finished' in got) return finishedResult(got.title, got.chapter, got.nothingElse);
-      return { read: true, ...got };
-    },
-  };
-}
-
-/**
- * Her Game Boy (pokemon.ts): the worker at ~/haru-pokemon, and the loop that
- * plays it. One move per tick from the local brain — her persona, the rules
- * of play, the game in words — while a sitting is on; the sitting ends when
- * he speaks, at bedtime, on time, or on her share of the day, and what came
- * of it goes into her game memory and her own-life block.
- */
-/**
- * When he last said anything, by any door. The live stamp is only set on the
- * model path and starts at zero: five minutes after "set your machine level
- * to 4" — answered in code, right after a restart — her own time opened as
- * though he had been silent for ever (2026-09-18). The transcript knows.
- */
-function hisLastWordMs(): number {
-  const messages = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
-  const last = [...messages].reverse().find(message => message.role === 'user' && message.at);
-  return Math.max(lastUserActivityAt, last?.at ? Date.parse(last.at) || 0 : 0);
-}
-
-let pokemonSitting: Sitting | null = null;
-let pokemonTicking = false;
-function pokemonLink(): PokemonLink | null {
-  const config = readPokemonConfig(store.get('games'));
-  return config.enabled ? new PokemonLink(config, (url, init) => net.fetch(url, init)) : null;
-}
-function pokemonPlayedToday(): number {
-  const saved = store.get('her.pokemon.played') as { day?: string; ms?: number } | undefined;
-  return saved?.day === currentChatDayKey() ? Number(saved.ms ?? 0) : 0;
-}
-async function pokemonMoment(link: PokemonLink): Promise<PokemonMoment> {
-  return { now: Date.now(), lastUserActivityAt: hisLastWordMs(), asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
-}
-async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, unknown>> {
-  const link = pokemonLink();
-  if (!link) return { error: 'Your Game Boy is switched off.' };
-  const config = readPokemonConfig(store.get('games'));
-  const why = whyNotStartPokemon(await pokemonMoment(link), config, pokemonSitting);
-  if (why) return { started: false, note: `Not now: ${why}. Say so plainly.` };
-  const state = await link.state();
-  pokemonSitting = newSitting(Date.now(), state, startedBy);
-  store.set('her.pokemon.lastState', state);
-  console.log(`[pokemon] she sat down to play (${startedBy === 'him' ? 'at his word' : 'her own idea'}) — ${state.map?.map_name ?? 'somewhere'}, ${state.player?.badge_count ?? 0} badge(s)`);
-  return { started: true, where: state.map?.map_name, badges: state.player?.badge_count ?? 0, note: `You have sat down to play; it goes on in the background for up to ${config.sessionMinutes} minutes and stops when they talk to you. Say you are off to play — do not narrate moves you have not made yet.` };
-}
-async function endPokemon(why: string): Promise<string> {
-  const sitting = pokemonSitting;
-  pokemonSitting = null;
-  store.set('her.pokemon.sitting', null);
-  if (!sitting) return '';
-  const link = pokemonLink();
-  let state = (store.get('her.pokemon.lastState') ?? {}) as GameState;
-  try { if (link) { state = await link.state(); await link.save('haru-last'); } } catch { /* the worker went away: the last state she saw stands */ }
-  const summary = sittingSummary(sitting, state, Date.now(), why);
-  store.set('her.pokemon.lastState', state);
-  store.set('her.pokemon.lastSummary', summary);
-  store.set('her.pokemon.played', { day: currentChatDayKey(), ms: pokemonPlayedToday() + (Date.now() - sitting.startedAt) });
-  try { noteInGameMemory(gamesRoot(), 'Pokemon Red', summary, new Date()); } catch (error) { console.warn('[pokemon] could not write her game memory:', error instanceof Error ? error.message : error); }
-  console.log(`[pokemon] sitting over — ${summary}`);
-  return summary;
-}
-async function pokemonTick(): Promise<void> {
-  if (!pokemonSitting || pokemonTicking) return;
-  pokemonTicking = true;
-  try {
-    const link = pokemonLink();
-    const config = readPokemonConfig(store.get('games'));
-    if (!link) { await endPokemon('it was switched off'); return; }
-    const stop = whyStopPokemon(pokemonSitting, await pokemonMoment(link), config);
-    if (stop) { await endPokemon(stop); return; }
-    const brain = store.get('ai.config') as ProviderConfig | undefined;
-    if (!brain?.model) return;
-    // The emulator only runs while an action does, so a line that prints letter by letter was
-    // read half-written ("This w", 2026-09-18). A second of frames lets the screen settle first.
-    await link.act(['wait_60']).catch(() => null);
-    const state = await link.state();
-    const map = await link.map();
-    // The words on the screen: /state carries none, and its dialog flag sleeps through Oak's intro.
-    const screen = await link.text();
-    const character = getActiveCharacter();
-    const raw = await ollamaQuipLong([character.identity, character.style, POKEMON_PLAY_RULES].join('\n\n'), describeGame(state, map, screen, pokemonSitting.lastThought, pokemonSitting.stillFor >= 3), brain);
-    // Nothing usable from her: words on the screen are pressed past, anything else waits a turn.
-    const move = parseMove(raw) ?? (screen.length || state.dialog?.active ? { thought: '', actions: ['press_a'] } : null);
-    if (!pokemonSitting) return;
-    const after = move ? await link.act(move.actions) : state;
-    pokemonSitting = afterTurn(pokemonSitting, move, after ?? state, move ? await link.text() : screen);
-    // Kept between turns: a restart mid-game used to lose the sitting without a word in her game memory (2026-09-18, 106 turns).
-    store.set('her.pokemon.sitting', pokemonSitting);
-    store.set('her.pokemon.lastState', after ?? state);
-    if (move) console.log(`[pokemon] turn ${pokemonSitting.turns}: ${move.thought || '…'} — ${move.actions.join(' ')}`);
-    if (pokemonSitting.turns % config.saveEvery === 0) await link.save('haru-auto').catch(() => {});
-  } catch (error) {
-    console.warn('[pokemon] a turn came to nothing:', error instanceof Error ? error.message : error);
-  } finally {
-    pokemonTicking = false;
-  }
-}
-/** A sitting that was cut off by a restart is closed out properly: summary, save, her share of the day. */
-async function recoverPokemonSitting(): Promise<void> {
-  const saved = store.get('her.pokemon.sitting') as Sitting | null | undefined;
-  if (!saved || typeof saved !== 'object' || typeof saved.startedAt !== 'number' || pokemonSitting) return;
-  pokemonSitting = saved;
-  // The clock stopped when she did: the sitting is as long as it had run, not as long as she was down.
-  const ranMs = Math.max(0, Math.min(Date.now() - saved.startedAt, saved.turns * readPokemonConfig(store.get('games')).tickSeconds * 1000));
-  pokemonSitting = { ...saved, startedAt: Date.now() - ranMs };
-  await endPokemon('she was restarted in the middle of it');
-}
-
-function pokemonDeps(): ToolDeps['pokemon'] {
-  if (!pokemonLink()) return null;
-  return {
-    start: () => startPokemon('him'),
-    stop: async () => { const summary = await endPokemon('they asked her to stop'); return summary ? { stopped: true, summary } : { stopped: false, note: 'You were not playing.' }; },
-    status: async () => {
-      const link = pokemonLink()!;
-      const up = await link.up();
-      const state = up ? await link.state() : (store.get('her.pokemon.lastState') as GameState | undefined) ?? null;
-      if (!state) return { outcome: 'no-run', note: up ? 'The Game Boy is on but you have not started a game.' : 'The Game Boy is not running — there is no ROM in it yet. Say so plainly.' };
-      return { outcome: 'status', playing: pokemonSitting !== null, workerUp: up, playedTodayMinutes: Math.round(pokemonPlayedToday() / 60_000), run: runNote(state, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null), note: 'Say how your run stands in your own words, from these facts only.' };
-    },
-  };
-}
-
-/**
- * Her shelf on Suwayomi (suwayomi.ts), when the server's password file is
- * there. One client for the process, so the login is kept; null when the
- * block is switched off or the file is missing — then she reads MangaDex
- * directly as before.
- */
 let suwayomiClient: Suwayomi | null = null;
+let suwayomiClientConfig: string | null = null;
 function suwayomiLink(): Suwayomi | null {
   const config = readSuwayomiConfig(store.get('manga'));
   if (!config || !existsSync(config.passwordFile)) { suwayomiClient = null; return null; }
+  if(process.env.HARU_CORE_MANGA_FETCH==='on' && suwayomiClientConfig!==JSON.stringify(config)){suwayomiClient=null;suwayomiClientConfig=JSON.stringify(config);}
   if (!suwayomiClient) suwayomiClient = new Suwayomi(config, (url, init) => net.fetch(url, init), { log: line => console.log(line) });
   return suwayomiClient;
 }
 
-/** A Suwayomi chapter as the bookmark's ChapterRef. */
-const shelfChapterRef = (chapter: ShelfChapter): ChapterRef => ({ id: String(chapter.id), chapter: String(chapter.number), title: chapter.name, pages: chapter.pages > 0 ? chapter.pages : 0 });
-
-/**
- * The chapter after hers — from her shelf, or the feed — or null at the end
- * of what there is. A chapter of hers that the list no longer has is the end
- * too: the old arithmetic (index -1, plus one) made it the first chapter, and
- * a finished series would have started over.
- */
-async function chapterAfter(link: Suwayomi | null, reading: Reading): Promise<ChapterRef | null> {
-  if (link && reading.source === 'suwayomi' && typeof reading.mangaId === 'number') {
-    const chapters = await link.chapters(reading.mangaId);
-    const index = chapters.findIndex(c => String(c.id) === reading.chapterId);
-    return index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
-  }
-  const chapters = await chaptersOf(reading.seriesId);
-  const index = chapters.findIndex(c => c.id === reading.chapterId);
-  return index >= 0 ? chapters[index + 1] ?? null : null;
-}
-
-/** A series read to the end, written down (her.finished) so the picker does not take it up again from the start. */
-function rememberFinished(reading: Reading): void {
-  store.set('her.finished', withFinished(readFinished(store.get('her.finished')), reading, new Date().toISOString()));
-}
-
-/** What the tool says of a series read to the end. `read: false`: not a deed and not a failure (deeds.ts, deed-feelings.ts). */
-function finishedResult(title: string, chapter: string, nothingElse: boolean): Record<string, unknown> {
-  return {
-    read: false, finished: true, title, chapter,
-    note: `You have read ${title} to the end — there is nothing after chapter ${chapter}, so there was nothing to read. Do not ask for it again.${nothingElse ? ' Nothing else of yours is a manga you could take up.' : ' If you want to read, it is something else, by name — or leave it.'}`,
-  };
-}
-
-/** A title taken up on her shelf: searched, put in her category, chapters fetched, bookmark at the first. */
-async function startReadingOnShelf(link: Suwayomi, title: string): Promise<Reading | null> {
-  const found = await link.search(title);
-  const hit = found[0];
-  if (!hit) return null;
-  await link.takeUp(hit.id);
-  const chapters = await link.chapters(hit.id);
-  if (!chapters.length) return null;
-  const first = shelfChapterRef(chapters[0]);
-  const now = new Date().toISOString();
-  console.log(`[manga] taking up ${hit.title} on her shelf — ${chapters.length} chapter(s)`);
-  return { seriesId: String(hit.id), title: hit.title, chapter: first.chapter, chapterId: first.id, page: 0, pages: first.pages, startedAt: now, lastAt: now, finished: 0, source: 'suwayomi', mangaId: hit.id };
-}
-
-/**
- * The bookmark she had on MangaDex, carried to the same chapter on her shelf
- * the first time the shelf is there, so a change of server is not a lost
- * place. Best effort: if the title or the chapter is not found she reads on
- * where she was.
- */
-async function carryReadingToShelf(link: Suwayomi, reading: Reading): Promise<Reading> {
-  try {
-    const found = await link.search(reading.title);
-    const hit = found.find(item => item.title.toLowerCase() === reading.title.toLowerCase()) ?? found[0];
-    if (!hit) return reading;
-    await link.takeUp(hit.id);
-    const chapters = await link.chapters(hit.id);
-    const same = chapters.find(chapter => String(chapter.number) === reading.chapter) ?? chapters[0];
-    if (!same) return reading;
-    const moved: Reading = { ...reading, seriesId: String(hit.id), title: hit.title, chapter: String(same.number), chapterId: String(same.id), pages: same.pages > 0 ? same.pages : 0, page: String(same.number) === reading.chapter ? reading.page : 0, source: 'suwayomi', mangaId: hit.id };
-    store.set('her.reading', moved);
-    await link.mark(hit.id, moved.chapter, moved.page).catch(() => {});
-    console.log(`[manga] carried ${reading.title} to her shelf — chapter ${moved.chapter}, page ${moved.page + 1}`);
-    return moved;
-  } catch (error) {
-    console.warn('[manga] could not carry her bookmark to the shelf:', error instanceof Error ? error.message : error);
-    return reading;
-  }
-}
-
-/** A series taken up by name — on her shelf when there is one, MangaDex otherwise. */
-async function startReading(title: string): Promise<Reading | null> {
-  const link = suwayomiLink();
-  if (link) return startReadingOnShelf(link, title);
-  const found = await mangaGet(searchUrl(title)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
-  const hit = found?.data?.[0];
-  if (!hit) return null;
-  const chapters = await chaptersOf(hit.id);
-  if (!chapters.length) return null;
-  const first = chapters[0];
-  const name = hit.attributes?.title?.en ?? title;
-  console.log(`[manga] taking up ${name} — ${chapters.length} readable chapter(s)`);
-  const now = new Date().toISOString();
-  return { seriesId: hit.id, title: name, chapter: first.chapter, chapterId: first.id, page: 0, pages: first.pages, startedAt: now, lastAt: now, finished: 0, source: 'mangadex' };
-}
-
-type MangaRead = { title: string; chapter: string; pages: [number, number]; note: string; stands: string };
-/** Read to the end with nothing after it: not a failed read. `nothingElse`: no other title of hers to take up either. */
-type MangaFinished = { finished: true; title: string; chapter: string; chapters: number; nothingElse: boolean };
-
-async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | MangaFinished | null> {
-  const now = zonedNow(CHAT_TIMEZONE);
-  const { prefs } = getPush();
-  if (!options.force && !inQuietHours(prefs, now)) return null;
-  if (readingMangaNow) return null;
-  const vision = readVisionConfig(store.get('vision'));
-  if (!vision.enabled) return null;
-  const today = nightKey(now);
-  if (!options.force && (store.get('her.readingOn') as string | undefined) === today) return null;
-
-  let reading = readReading(store.get('her.reading'));
-  readingMangaNow = true;
-  try {
-    const link = suwayomiLink();
-    if (options.title && (!reading || reading.title.toLowerCase() !== options.title.toLowerCase())) reading = await startReading(options.title);
-    // Read to the end (manga.ts readToTheEnd). A chapter may have come out
-    // since, and she goes on with it; otherwise the series is finished, which
-    // is not a failed read. Asked for it by name she is told so; in her own
-    // time and the small hours she takes up something else of hers.
-    if (reading && readToTheEnd(reading)) {
-      const next = await chapterAfter(link, reading);
-      if (next) {
-        reading = { ...reading, chapter: next.chapter, chapterId: next.id, page: 0, pages: next.pages, lastAt: new Date().toISOString() };
-        store.set('her.reading', reading);
-        console.log(`[manga] a chapter of ${reading.title} came out since — on to chapter ${next.chapter}`);
-      } else {
-        const done = reading;
-        rememberFinished(done);
-        reading = options.title ? null : await pickSomethingToRead();
-        if (!reading) {
-          console.log(`[manga] ${done.title} is read to the end — nothing after chapter ${done.chapter}${options.title ? '' : ', and nothing else of hers to take up'}`);
-          return { finished: true, title: done.title, chapter: done.chapter, chapters: done.finished, nothingElse: !options.title };
-        }
-        console.log(`[manga] ${done.title} is read to the end — taking up ${reading.title}`);
-      }
-    }
-    if (!reading) reading = await pickSomethingToRead();
-    if (!reading) return null;
-    // A bookmark from before the shelf: carried over once, to the same chapter.
-    if (link && reading.source !== 'suwayomi') reading = await carryReadingToShelf(link, reading);
-    const onShelf = link !== null && reading.source === 'suwayomi' && typeof reading.mangaId === 'number';
-    // The pages: from her shelf with her token, or from MangaDex as before.
-    let files: string[] = [];
-    if (onShelf) {
-      files = await link!.pages(Number(reading.chapterId));
-      // Suwayomi does not count pages until they are fetched.
-      if (reading.pages <= 0 && files.length) { reading = { ...reading, pages: files.length }; store.set('her.reading', reading); }
-    } else {
-      const at = await mangaGet(pagesUrl(reading.chapterId)) as { baseUrl?: string; chapter?: { hash?: string; data?: string[] } } | null;
-      files = at?.baseUrl && at.chapter?.hash ? (at.chapter.data ?? []).map(file => `${at.baseUrl}/data/${at.chapter!.hash}/${file}`) : [];
-    }
-    const { from, to } = tonightsPages(reading, options.pages);
-    if (!files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return null; }
-    // Not reachable from the end of a chapter any more (above), and said if another way in turns up: this returned in silence for three days.
-    if (to <= from) { console.warn(`[manga] nothing to read: ${reading.title} ch ${reading.chapter} is at page ${reading.page} of ${reading.pages}`); return null; }
-    const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
-    const read: string[] = [];
-    for (let page = from; page < Math.min(to, files.length); page++) {
-      try {
-        const bytes = onShelf ? await link!.page(files[page]) : await mangaBytes(files[page]);
-        if (!bytes) continue;
-        // Held between pages: a cold start costs more than the page does.
-        const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch,
-          { ask: PAGE_PROMPT, keepAlive: eyesHold(vision, '10m'), timeoutMs: 180_000 });
-        const text = sighting.description.trim();
-        if (text) read.push(`PAGE ${page + 1}\n${text}`);
-      } catch (error) {
-        console.warn(`[manga] could not read page ${page + 1}:`, error instanceof Error ? error.message : error);
-      }
-    }
-    if (!read.length) { console.warn('[manga] nothing came off the pages tonight'); return null; }
-    // Where she got to, not how many came back. Two of tonight's twelve pages
-    // timed out, and counting successes moved the bookmark to 10 — which skips
-    // the two that failed for ever and re-reads the two after them tomorrow. A
-    // page she could not read is a page she has been past; the alternative is a
-    // sitting that sticks on a bad page and never advances.
-    const readTo = Math.min(to, files.length);
-    const raw = await ollamaQuipLong([getActiveCharacter().identity, NOBODY_HERE].join(' '),
-      readingInstruction(reading, from, readTo, read.join('\n\n')), nudgeBrain() ?? config);
-    const take = parseReadingTake(raw);
-    // The bookmark moves whether or not she had anything to say: the pages were
-    // read either way, and re-reading them tomorrow is the one outcome to avoid.
-    const next = await chapterAfter(link, reading);
-    const moved = afterReading(reading, readTo, next, new Date().toISOString());
-    store.set('her.reading', moved);
-    store.set('her.readingOn', today);
-    // Her place, mirrored where his reader never looks (suwayomi.ts).
-    if (onShelf) await link!.mark(reading.mangaId!, moved.chapter, moved.page).catch(error => console.warn('[manga] could not mirror her bookmark:', error instanceof Error ? error.message : error));
-    if (!take) { console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}, nothing to say about it`); return { title: reading.title, chapter: reading.chapter, pages: [from + 1, readTo], note: '', stands: '' }; }
-    store.set('nights', keepNights(getNights(), {
-      day: today, at: new Date().toISOString(),
-      about: `${reading.title}, chapter ${reading.chapter}`,
-      note: take.note, sources: [onShelf ? `${readSuwayomiConfig(store.get('manga'))?.url ?? ''}/manga/${reading.mangaId}` : `https://mangadex.org/chapter/${reading.chapterId}`], interest: reading.title,
-    }));
-    if (take.stands) {
-      const held = getInterests();
-      const mine = held.find(entry => entry.name.toLowerCase() === reading!.title.toLowerCase());
-      // Where it stands, from having read it rather than from a review — which
-      // is the fault this whole pass exists to correct.
-      if (mine) setInterests(held.map(entry => (entry.id === mine.id ? { ...entry, stands: take.stands, lastAt: new Date().toISOString() } : entry)));
-    }
-    console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}${onShelf ? ' (her shelf)' : ''} — ${take.note.length} chars${take.stands ? ` — stands: ${take.stands.slice(0, 60)}` : ''}`);
-    return { title: reading.title, chapter: reading.chapter, pages: [from + 1, readTo], note: take.note, stands: take.stands || '' };
-  } catch (error) {
-    console.warn('[manga] the night\'s reading came to nothing:', error instanceof Error ? error.message : error);
-  } finally {
-    readingMangaNow = false;
-  }
-  return null;
-}
-
-/** Their public API asks for a real name and a gentle hand; this gives both. */
-let lastMangaCallAt = 0;
-async function mangaWait(): Promise<void> {
-  const since = Date.now() - lastMangaCallAt;
-  if (since < REQUEST_GAP_MS) await new Promise(resolve => setTimeout(resolve, REQUEST_GAP_MS - since));
-  lastMangaCallAt = Date.now();
-}
-
-async function mangaGet(url: string): Promise<unknown | null> {
-  await mangaWait();
-  const response = await net.fetch(url, { headers: { 'User-Agent': USER_AGENT } });
-  if (!response.ok) { console.warn(`[manga] ${response.status} from ${url.slice(0, 60)}`); return null; }
-  return response.json();
-}
-
-async function mangaBytes(url: string): Promise<Buffer | null> {
-  await mangaWait();
-  const response = await net.fetch(url, { headers: { 'User-Agent': USER_AGENT } });
-  if (!response.ok) return null;
-  return Buffer.from(await response.arrayBuffer());
-}
-
-async function chaptersOf(seriesId: string): Promise<ChapterRef[]> {
-  const feed = await mangaGet(feedUrl(seriesId)) as { data?: { id: string; attributes?: Record<string, unknown> }[] } | null;
-  return readableChapters(feed?.data ?? []);
-}
-
-/**
- * Something of hers that exists as a manga.
- *
- * Only from what she has already taken up, so this never becomes her reading a
- * stranger: the interests are the things she chose, and the manga of one of
- * them is the same interest by another route.
- */
-async function pickSomethingToRead(): Promise<Reading | null> {
-  const link = suwayomiLink();
-  // Not one she has read to the end. This only ever ran with no bookmark at
-  // all, so it never had to know; now it runs when the bookmark is a finished
-  // series, and the first interest on the list is usually that very series.
-  const finished = readFinished(store.get('her.finished'));
-  for (const interest of getInterests()) {
-    if (alreadyFinished(finished, interest.name)) continue;
-    if (link) {
-      try {
-        const taken = await startReadingOnShelf(link, interest.name);
-        if (taken) return taken;
-      } catch (error) {
-        console.warn(`[manga] her shelf would not take ${interest.name}:`, error instanceof Error ? error.message : error);
-      }
-      continue;
-    }
-    const found = await mangaGet(searchUrl(interest.name)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
-    const hit = found?.data?.[0];
-    if (!hit || alreadyFinished(finished, interest.name, hit.id)) continue;
-    const chapters = await chaptersOf(hit.id);
-    if (!chapters.length) continue;
-    const first = chapters[0];
-    console.log(`[manga] taking up ${interest.name} — ${chapters.length} readable chapter(s)`);
-    return {
-      seriesId: hit.id, title: interest.name, chapter: first.chapter, chapterId: first.id,
-      page: 0, pages: first.pages, startedAt: new Date().toISOString(), lastAt: new Date().toISOString(), finished: 0,
-    };
-  }
-  return null;
+function hisLastWordMs(): number {
+  const messages = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
+  const last = [...messages].reverse().find(message => message.role === 'user' && message.at);
+  return Math.max(lastUserActivityAt, last?.at ? Date.parse(last.at) || 0 : 0);
 }
 
 /**
@@ -12600,6 +13578,11 @@ async function pickSomethingToRead(): Promise<Reading | null> {
  * back. The second one is the whole reason the ladder is worth having.
  */
 function tendProjects(): void {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    const observed=getProjects(),plan=corePolicySync<{ledger:Project[];expected:Project[]}|null>('projects.tend',[observed,Date.now(),new Date().toISOString()]);
+    if(plan){if(JSON.stringify(getProjects())!==JSON.stringify(plan.expected))throw Error('core_project_stale_snapshot');setProjects(plan.ledger);}
+    return;
+  }
   const all = getProjects();
   const nowMs = Date.now();
   let next = all;
@@ -12630,6 +13613,10 @@ function tendProjects(): void {
  * covered here, and the thing she names is hers.
  */
 async function askForSomethingToTry(interest: { name: string; stance: string } | null, config: ProviderConfig): Promise<void> {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    try{await runCoreProjectBirth({read:getProjects,write:setProjects,identity:getActiveCharacter().identity,interest,now:()=>new Date().toISOString(),dispatch:r=>ollamaQuip(r.system,r.user,corePolicySync<ProviderConfig>('projects.nudgeConfig',[store.get('ai.nudge'),config]))});}catch(error){console.warn('[project] Core birth failed:',error instanceof Error?error.message:error);}
+    return;
+  }
   const all = getProjects();
   if (!interest || !needsSomethingNew(all)) return;
   const standing = standingIn(all, interest.name);
@@ -12655,6 +13642,7 @@ async function askForSomethingToTry(interest: { name: string; stance: string } |
  * so a step that waits on him is asked for once more and then done without.
  */
 async function stepFor(project: Project, config: ProviderConfig): Promise<Worked> {
+  if(process.env.HARU_CORE_PROJECTS==='on')return runCoreProjectStep(project,getActiveCharacter().identity,r=>ollamaQuip(r.system,r.user,corePolicySync<ProviderConfig>('projects.nudgeConfig',[store.get('ai.nudge'),config])));
   const had = asProject(project);
   const last = had.attempts.at(-1);
   if (had.step && last?.outcome !== 'no') return had;
@@ -12681,12 +13669,13 @@ const FROM_THE_COIN: Record<'slog' | 'clicked' | 'gave_up' | 'nothing', NightOut
  * Whether what she read actually let her do the step.
  *
  * Her own nudge brain, at temperature nothing, one word back — the same shape
- * as heOwesHerAnAnswer, including the 700-token allowance, because both brains
+ * as the other structured judges, including the 700-token allowance, because both brains
  * that might answer this spend theirs thinking first and come back empty at
  * 200. When it will not answer, the old coin decides and the log says so: a
  * judge that shrugs must not be read as a judge that said the night was wasted.
  */
 async function whatCameOfIt(project: Worked, reading: string): Promise<NightOutcome> {
+  if(process.env.HARU_CORE_PROJECTS==='on')return runCoreReadingOutcome(project,reading,store.get('ai.nudge'),store.get('ai.config'),Math.random,async(r,chosen)=>{const reply=await ollamaPost(r.messages,chosen as ProviderConfig,r.options);return reply.content??'';});
   const fallback = FROM_THE_COIN[wantOutcome(Math.random(), project.nights).kind];
   const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
   if (judge?.model) {
@@ -12720,6 +13709,11 @@ async function whatCameOfIt(project: Worked, reading: string): Promise<NightOutc
  * frustration into an afternoon and leave her short with the world for good.
  */
 function feelAboutIt(before: Project, after: Project): void {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    const observed=store.get('her.stungOn'),plan=corePolicySync<{ownTimeAt:number;feelings:('own-time'|'worked'|'broke')[];stungOn:string|null}>('projects.feelingPlan',[before,after,observed,localDateKey(zonedNow(CHAT_TIMEZONE)),Date.now()]);
+    if(JSON.stringify(store.get('her.stungOn'))!==JSON.stringify(observed))throw Error('core_project_stale_snapshot');
+    herOwnTimeAt=plan.ownTimeAt;if(plan.stungOn!==null)store.set('her.stungOn',plan.stungOn);for(const cause of plan.feelings)feelNow(cause);return;
+  }
   herOwnTimeAt = Date.now();
   feelNow('own-time');
   if (after.status === 'done') { feelNow('worked'); return; }
@@ -12732,6 +13726,10 @@ function feelAboutIt(before: Project, after: Project): void {
 
 /** A night on one of hers, written up and written down. Null when nothing came of it. */
 async function settleTheNight(project: Worked, reading: string, config: ProviderConfig, stamp: string): Promise<Worked | null> {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    const result=await runCoreProjectSettlement({project,reading,outcome:await whatCameOfIt(project,reading),identity:getActiveCharacter().identity,stamp,dispatch:r=>ollamaQuipLong(r.system,r.user,config),read:getProjects,write:setProjects});
+    if(result)feelAboutIt(project,result);return result;
+  }
   const outcome = await whatCameOfIt(project, reading);
   let raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading)].join(' '), 'Write it.', config);
   if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading), NOBODY_HERE].join(' '), 'Write it.', config);
@@ -12755,6 +13753,10 @@ async function settleTheNight(project: Worked, reading: string, config: Provider
  * generated curriculum stays a curriculum instead of becoming a pile.
  */
 async function growFromIt(project: Worked, config: ProviderConfig): Promise<void> {
+  if(process.env.HARU_CORE_PROJECTS==='on'){
+    try{await runCoreProjectBirth({read:getProjects,write:setProjects,identity:getActiveCharacter().identity,parent:project,now:()=>new Date().toISOString(),dispatch:r=>ollamaQuip(r.system,r.user,corePolicySync<ProviderConfig>('projects.nudgeConfig',[store.get('ai.nudge'),config]))});}catch(error){console.warn('[project] Core growth failed:',error instanceof Error?error.message:error);}
+    return;
+  }
   const all = getProjects();
   if (!roomForNew(all)) return;
   const kind = project.status === 'done' ? 'child'
@@ -12774,7 +13776,61 @@ async function growFromIt(project: Worked, config: ProviderConfig): Promise<void
   }
 }
 
+/** Core owns the sequence. This adapter only observes and executes commands. */
+async function haveCoreOwnTime(mode:'day'|'night',config:ProviderConfig){
+  const core=coreStoreFor(app.getPath('userData'));if(!core)throw Error('core_day_night_storage_required');
+  const scope=activeScheduledJob.getStore();if(!scope)throw Error('core_day_night_scope_required');
+  const now=zonedNow(CHAT_TIMEZONE);
+  const assertCurrent=()=>{
+    activeTask.getStore()?.signal.throwIfAborted();
+    if(JSON.stringify(activeScheduledJob.getStore())!==JSON.stringify(scope))throw Error('core_day_night_scope_changed');
+    corePolicySync('day-night.assertCurrent',[scope]);
+  };
+  const read=()=>{
+    const documents={config:core.get('config',{}),dreams:core.get('dreams',null)};
+    const character=getActiveCharacter();
+    return {scope,now,nowMs:Date.now(),at:new Date().toISOString(),documents,
+      prefs:getPush().prefs,search:readSearchConfig(store.get('search')),asleep:herAsleepNow(),
+      nights:documents.config.nights,days:documents.config.her?.days,
+      lastNightAttemptAt:documents.config.her?.ownTimeNightAttemptAt??null,
+      oddsByMode:{night:sway('own-time',NIGHT_ODDS,swayNow()),day:sway('own-time',DAY_ODDS,swayNow())},
+      activity:store.getActivityLog(),theirs:getMemories().map(memory=>memory.text),
+      notebook:core.get('dream-notebook',[]),identity:character.identity,style:character.style,
+      transcriptsAvailable:transcriptsAvailable()};
+  };
+  try{return await runCoreDayNight(mode,{core,read,assertCurrent,dispatch:async(command,bindings)=>{
+    switch(command.kind){
+      case 'steam':return recentlyPlayed(getSteamWebKey(),readSteamWebConfig(store.get('steam')),url=>net.fetch(url));
+      case 'tend':return tendProjects();
+      case 'birth':return askForSomethingToTry(command.interest,config);
+      case 'projects':return getProjects();
+      case 'step':return bindDayNightProject(bindings,await stepFor(command.project,config));
+      case 'settle':{
+        const next=await settleTheNight(boundDayNightProject(bindings,command) as Worked,command.reading,config,command.at);
+        return next?{...bindDayNightProject(bindings,next),at:command.at}:null;
+      }
+      case 'grow':return growFromIt(boundDayNightProject(bindings,command) as Worked,config);
+      case 'search':return searchWeb(command.query,command.config,net.fetch,getSearchKey());
+      case 'page':return readWebPage(command.url,net.fetch);
+      case 'transcript':return fetchTranscript(command.videoId);
+      case 'model':{
+        const request=command.request;
+        switch(request.kind){
+          case 'quip':return ollamaQuip(request.system,request.user,config);
+          case 'longQuip':return ollamaQuipLong(request.system,request.user,config);
+          default:throw Error('core_day_night_model_protocol');
+        }
+      }
+      case 'document':
+        if(typeof command.name!=='string'||!/^game:[a-z0-9-]+\.md$/.test(command.name))throw Error('core_day_night_document_protocol');
+        return core.get(command.name,null);
+      default:throw Error('core_day_night_command_protocol');
+    }
+  }});}catch(error){console.warn('[own-time] Core stopped the sequence:',error instanceof Error?error.message:error);}
+}
+
 async function haveANight(config: ProviderConfig) {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return haveCoreOwnTime('night',config);
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
   if (!inQuietHours(prefs, now)) return;
@@ -12826,12 +13882,13 @@ async function haveANight(config: ProviderConfig) {
     // and not the whole ambition: "how to learn piano" comes back with the same
     // beginner's page every night, which is how two years of that would read.
     const want = picked ? await stepFor(picked, config) : null;
-    if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
+    if(process.env.HARU_CORE_GAME_GUIDE==='on')game=chooseGuide(adopting,interest,played,getNights(),nightKey(now),Math.random);
+    else if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
 
     const before = getNights().map(night => night.about);
     const about = adopting ? `${adopting.name} review`
       : want ? projectQuery(want)
-      : interest ? nightQuery(interest)
+      : interest ? followupQuery(app.getPath('userData'), interest.name, getNights()) ?? nightQuery(interest)
       : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[night] she could not settle on anything'); return; }
@@ -12941,6 +13998,7 @@ function messagesOn(day: string): { role: string; content?: string; at?: string 
  * her life, which is the point of it.
  */
 async function haveADay(config: ProviderConfig) {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return haveCoreOwnTime('day',config);
   if (herAsleepNow()) return;
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
@@ -12997,6 +14055,13 @@ async function haveADay(config: ProviderConfig) {
  * hers-shaped answer.
  */
 async function reflectOnHerWeek(config: ProviderConfig) {
+  if(process.env.HARU_CORE_OWN_TIME==='on') {
+    try {await runCoreWeek({
+      read:()=>{const now=zonedNow(CHAT_TIMEZONE);return {now,nowMs:Date.now(),today:localDateKey(now),identity:getActiveCharacter().identity,week:getWeek(),days:getDays(),nights:getNights(),projects:getProjects(),interests:getInterests()};},
+      dispatch:(system,user)=>ollamaQuipLong(system,user,config),write:setWeek,
+    });}catch(error){console.warn('[week] Core reflection failed:',error instanceof Error?error.message:error);}
+    return;
+  }
   const now = zonedNow(CHAT_TIMEZONE);
   if (!weekSummaryDue(now, getWeek())) return;
   const today = localDateKey(now);
@@ -13033,6 +14098,14 @@ async function reflectOnHerWeek(config: ProviderConfig) {
  * up with two or three rules she means, not a rulebook.
  */
 async function formHerStanding(config: ProviderConfig) {
+  if(process.env.HARU_CORE_OWN_TIME==='on') {
+    try {await runCoreStanding({
+      read:()=>({now:zonedNow(CHAT_TIMEZONE),attemptedAt:new Date().toISOString(),identity:getActiveCharacter().identity,lastAt:(store.get('her.standingAt') as string|undefined)??null,slights:getSlights(),wakes:getWakes(),memories:getMemories()}),
+      stamp:at=>store.set('her.standingAt',at),dispatch:(system,user)=>ollamaQuipLong(system,user,config),
+      write:(text,kind,subject,options)=>addMemory(text,kind,subject,options),
+    });}catch(error){console.warn('[standing] Core standing failed:',error instanceof Error?error.message:error);}
+    return;
+  }
   const now = zonedNow(CHAT_TIMEZONE);
   if (!standingDue(store.get('her.standingAt') as string | undefined, now)) return;
   // Her own record of what happened, in the words it was written in. The wake
@@ -13076,7 +14149,43 @@ async function formHerStanding(config: ProviderConfig) {
  * — because a diary that invents its days is a novel, and hers is a record.
  * Lands in diary.md in her data folder, hers to build over months.
  */
+async function writeCoreDiary(config:ProviderConfig){
+  const core=coreStoreFor(app.getPath('userData'));if(!core)throw Error('core_diary_storage_required');
+  const scope=activeScheduledJob.getStore();if(!scope)throw Error('core_diary_scope_required');
+  const now=zonedNow(CHAT_TIMEZONE);let sourceDays:string[]=[];
+  const assertCurrent=()=>{
+    activeTask.getStore()?.signal.throwIfAborted();
+    if(JSON.stringify(activeScheduledJob.getStore())!==JSON.stringify(scope))throw Error('core_diary_scope_changed');
+    corePolicySync('day-night.assertCurrent',[scope]);
+  };
+  const read=()=>{
+    const mood=getMood(),all=core.get('archive',{}),config=core.get('config',{});
+    const archive=Object.fromEntries(sourceDays.map(day=>[day,all[day]??[]]));
+    const messages=[...Object.values(archive).flat() as {at?:string}[],...(config.chat?.messages??[])];
+    const clocks=Object.fromEntries(messages.filter(message=>message.at).map(message=>[message.at,Number.isFinite(Date.parse(message.at!))?clockAt(Date.parse(message.at!)):null]));
+    return {scope,now,at:new Date().toISOString(),prefs:getPush().prefs,mood,slate:getSlate(),archive,
+      archiveExpected:Object.fromEntries(sourceDays.map(day=>[day,all[day]??null])),
+      clocks,asides:getAsides(),kept:getKept(),timezone:CHAT_TIMEZONE,
+      documents:{config,diary:core.get('diary',null)},identity:getActiveCharacter().identity,
+      profile:profileSummary(''),examples:diaryExamples(),
+      weather:describeWeather(getWeather().last,weatherWhere(),Date.now(),getWeather().disputedAt)};
+  };
+  try{return await runCoreContinuation('diary',[],{core,read,assertCurrent,dispatch:async command=>{
+    switch(command.kind){
+      case 'sources':sourceDays=[command.day,command.nextDay];return null;
+      case 'model':switch(command.request.kind){
+        case 'longQuip':return ollamaQuipLong(command.request.system,command.request.user,config);
+        case 'quip':return ollamaQuip(command.request.system,command.request.user,config);
+        default:throw Error('core_diary_model_protocol');
+      }
+      case 'publish':sendToWindows('mood:changed',getMood());return publishToVault('diary');
+      default:throw Error('core_diary_command_protocol');
+    }
+  }});}catch(error){console.warn('[diary] Core stopped the sequence:',error instanceof Error?error.message:error);}
+}
+
 async function writeDiary(config: ProviderConfig) {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return writeCoreDiary(config);
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
   const due = diaryDueFor(now, prefs, at => nightKey(at));
@@ -13170,20 +14279,10 @@ async function writeDiary(config: ProviderConfig) {
   }
 }
 
-/**
- * Bedtime: were they ever going to say anything about today?
- *
- * Silent here — it runs at the top of the quiet hours, and waking somebody to
- * complain that they went to sleep is not the point. It costs them on the spot
- * and leaves a note for the morning, which sayItInTheMorning picks up the
- * moment the quiet is over.
- *
- * Deliberately not folded into the eight o'clock tally: that counts lines of
- * hers that got no answer, and a day where neither of them said anything has
- * none of those. By the tally it reads as a clean day and even earns a point
- * back, which is the wrong answer to being ignored all day.
- */
-function sulkAtNightfall() {
+/** Record the day at bedtime; quiet alone does not create a grievance. */
+function noteNightfall() {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const today=localDateKey(zonedNow(CHAT_TIMEZONE));const p=corePolicySync<any>('conversation-program.nightfall',[{...conversationPolicyFacts(),prefs:getPush().prefs,today,journal:getJournal(),checkins:checkInsOn(getCheckIns(),today),conversation:nudgeConversation()}]);conversationApply(p);if(p.result)sendToWindows('mood:changed',getMood());return;}
+
   // Not gated on her being awake. This only writes the day down — nothing is
   // said until the morning line — and it comes due at the quiet hours, which is
   // when she goes to bed: with her bedtime at 23:00 and quiet hours from 23:00
@@ -13203,115 +14302,46 @@ function sulkAtNightfall() {
   const toldElsewhere = getJournal().some(entry => entry.date === todayKey)
     || checkInsOn(getCheckIns(), todayKey).length > 0;
   const went = howTheDayWent(said, toldElsewhere);
-  const grudge = sulkGrudge(mood.grudge ?? 0, went);
-  if (went === 'silent') nudgeVitals('let-down');
-  setMood({ ...mood, grudge, nightfallDay: todayKey, owedMorning: went === 'fine' ? undefined : { day: todayKey, went, said } });
-  console.log(`[nightfall] ${todayKey}: ${said} real message(s)${toldElsewhere ? ' plus a journal or check-in' : ''} — ${went}, grudge ${mood.grudge ?? 0} -> ${grudge}${went === 'fine' ? '' : ', owed a word in the morning'}`);
+  // A quiet day is not an offence. Keep the day marker without banking a
+  // punishment or generating an obligation to report in the morning.
+  const pending = relationshipNudgeCandidate(nudgeConversation(), Date.now(), store.get('chat.relationshipNudgeAttemptAt') as string | undefined);
+  setMood({ ...mood, nightfallDay: todayKey, owedMorning: pending ? { day: todayKey, went, said } : undefined });
 }
 
-/** Not before this: interject refuses mid-conversation, and that passes. */
-let morningQuietUntil = 0;
+/** At most one attempt every three days, grounded in his actual offer to share. */
+async function maybeRaiseConversationFollowup(): Promise<boolean> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const p=corePolicySync<any>('conversation-program.followup',[{...conversationPolicyFacts(),reachable:canReachPhone(),prefs:getPush().prefs,asleep:herAsleepNow(),goodnight:herHasSaidGoodnight(),knocked:herKnockedAwakeNow(),quiet:inQuietHours(getPush().prefs,zonedNow(CHAT_TIMEZONE)),up:theyAreUpNow(),whyNot:whyNotInterject(),conversation:nudgeConversation()}]);if(Object.hasOwn(p,'result'))return p.result;conversationApply(p);const draft=await composeSpontaneousNudge(new Map(),p.candidate);return Boolean(draft&&await publishOwnedNudge(draft,nudge=>interject(nudge.line,{source:'idle',nudge})));}
 
-/**
- * The note she went to bed with, said the moment the quiet is over.
- *
- * Gated on the quiet ending rather than on a clock of its own, so it follows
- * whatever hours they have set. Kept until it actually gets out — the same
- * lesson as the evening tally, where marking it done before the line was said
- * lost the whole thing to one refusal — and dropped after a day, because
- * bringing up Tuesday on Thursday is not holding a grudge, it is a non sequitur.
- */
-async function sayItInTheMorning(config: ProviderConfig) {
-  if (herAsleepNow()) return;
+  if (canReachPhone()) return false;
+  const now = Date.now();
+  if (!getPush().prefs.random || herAsleepNow() || herHasSaidGoodnight() || herKnockedAwakeNow()
+    || inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE)) || !theyAreUpNow() || whyNotInterject()) return false;
+  const candidate = relationshipNudgeCandidate(nudgeConversation(), now, store.get('chat.relationshipNudgeAttemptAt') as string | undefined);
+  if (!candidate) return false;
+  // A deliberate PASS also uses this opportunity; no ten-minute retry loop.
+  store.set('chat.relationshipNudgeAttemptAt', new Date(now).toISOString());
+  const draft = await composeSpontaneousNudge(new Map(), candidate);
+  return Boolean(draft && await publishOwnedNudge(draft, nudge => interject(nudge.line, { source: 'idle', nudge })));
+}
+
+async function sayItInTheMorning(_config: ProviderConfig) {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const decision=remainingGrudge('morning',localDateKey(zonedNow(CHAT_TIMEZONE)),[]);if(decision.followup)await maybeRaiseConversationFollowup();return;}
   const mood = getMood();
-  const owed = mood.owedMorning;
-  if (!owed) return;
-  const now = zonedNow(CHAT_TIMEZONE);
-  const todayKey = localDateKey(now);
-  const { prefs } = getPush();
-  if (inQuietHours(prefs, now)) return;
-  // The first thing she says when they are up — not the first thing after six.
-  if (!theyAreUpNow()) return;
-  if (!sulkStillStands(owed.day, todayKey)) {
-    console.log(`[nightfall] the word owed for ${owed.day} has gone stale — dropping it`);
-    setMood({ ...getMood(), owedMorning: undefined });
-    return;
-  }
-  // The night it is about has to be over: at 23:05 the quiet has begun, but a
-  // check that ran a minute earlier would otherwise fire straight back out.
-  if (owed.day === todayKey) return;
-  if (Date.now() < morningQuietUntil) return;
-  const character = getActiveCharacter();
-  const system = [
-    character.identity,
-    character.style,
-    moodInstruction(mood.irritation),
-    grudgeInstruction(mood.grudge ?? 0, 0),
-    sulkInstruction(owed.went, owed.said, mood.grudge ?? 0),
-    EXPRESSIVE,
-    'No quotation marks, no stage directions.',
-  ].filter(Boolean).join(' ');
-  try {
-    const clock = zonedNow(CHAT_TIMEZONE);
-    const line = fixStatedClock(await ollamaQuip(system, 'Say it.', config), clock.getHours(), clock.getMinutes());
-    if (line && interject(line, { source: 'idle' })) {
-      setMood({ ...getMood(), owedMorning: undefined });
-      console.log(`[nightfall] said it — they had gone ${owed.went} on her`);
-      return;
-    }
-  } catch (error) {
-    console.warn('[nightfall] could not compose the morning line:', error instanceof Error ? error.message : error);
-  }
-  morningQuietUntil = Date.now() + TALLY_RETRY_MS;
-  console.log(`[nightfall] the morning line did not get out — trying again in ${Math.round(TALLY_RETRY_MS / 60_000)} min`);
+  if (!mood.owedMorning) return;
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  if (mood.owedMorning.day === today) return;
+  // Legacy silence-based obligations are retired, too. The actual conversation
+  // is checked afresh; the old message count never reaches the composer.
+  setMood({ ...mood, owedMorning: undefined });
+  await maybeRaiseConversationFollowup();
 }
 
-/** Not before this: interject refuses mid-conversation, and that passes. */
-let tallyQuietUntil = 0;
-const TALLY_RETRY_MS = 10 * 60_000;
-
-/**
- * Saying it, which is the point of counting it.
- *
- * Separate from the counting because the two fail differently. The count must
- * happen once; the line has to get past interject's rate limiter, which
- * deliberately refuses while they are talking to her — and at eight in the
- * evening they very often are. Marking the day done before the line was out
- * meant one refusal cost the whole evening and she never mentioned it again.
- */
-async function tellThemTheTally(config: ProviderConfig, todayKey: string) {
+async function tellThemTheTally(_config: ProviderConfig, todayKey: string) {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const decision=remainingGrudge('tell',todayKey,[]);if(decision.followup)await maybeRaiseConversationFollowup();return;}
   const mood = getMood();
   if (mood.talliedDay !== todayKey || mood.toldDay === todayKey) return;
-  const ignored = mood.ignoredToday ?? 0;
-  // A clean day is not something she brings up; it is just quieter than usual.
-  if (!ignored) { setMood({ ...mood, toldDay: todayKey }); return; }
-  if (Date.now() < tallyQuietUntil) return;
-  const character = getActiveCharacter();
-  const system = [
-    character.identity,
-    character.style,
-    moodInstruction(mood.irritation),
-    grudgeInstruction(mood.grudge ?? 0, ignored),
-    tallyInstruction(ignored, mood.grudge ?? 0, mood.ignoredSamples ?? []),
-    EXPRESSIVE,
-    'No quotation marks, no stage directions.',
-  ].filter(Boolean).join(' ');
-  try {
-    // Through the clock fixer: the samples she is quoting are her own earlier
-    // lines, and some of them open with the time they were said ("8:37 PM — ..."),
-    // which she lifts out and announces as though it were now.
-    const clock = zonedNow(CHAT_TIMEZONE);
-    const line = fixStatedClock(await ollamaQuip(system, 'Say it.', config), clock.getHours(), clock.getMinutes());
-    if (line && interject(line, { source: 'idle' })) {
-      setMood({ ...getMood(), toldDay: todayKey });
-      console.log(`[grudge] told them about the ${ignored} they left`);
-      return;
-    }
-  } catch (error) {
-    console.warn('[grudge] could not compose the evening line:', error instanceof Error ? error.message : error);
-  }
-  tallyQuietUntil = Date.now() + TALLY_RETRY_MS;
-  console.log(`[grudge] the evening line did not get out — trying again in ${Math.round(TALLY_RETRY_MS / 60_000)} min`);
+  setMood({ ...mood, toldDay: todayKey });
+  await maybeRaiseConversationFollowup();
 }
 
 function startProactive() {
@@ -13320,42 +14350,22 @@ function startProactive() {
   setTimeout(() => { void proactiveTick(); }, 20_000);
 }
 
-/**
- * The next beat: a random while off, never in the quiet hours. One timer,
- * rebooked after each — and written down, because it used to die with the
- * process.
- *
- * Every restart drew a fresh 45-120 minutes and threw away whatever was
- * pending, so a morning of eleven deploys meant eleven cancelled bookings and
- * not one nudge. `resume` picks the old booking back up; if it came due while
- * she was down, she takes it shortly after coming back rather than pretending
- * it never existed. A refused line comes back in minutes, not the full cycle.
- */
-function scheduleNextPush(resume = false, after: PesterOutcome | null = null) {
-  if (pushPesterTimer) clearTimeout(pushPesterTimer);
-  const now = Date.now();
-  const booked = resume ? getPush().nextNudgeAt : 0;
-  let delay: number;
-  if (after?.how === 'refused') {
-    delay = NUDGE_RETRY_MS;
-  } else if (after?.how === 'later') {
-    // Long enough for the reason to have expired, and never so long that a
-    // passing condition costs the rest of the day.
-    delay = Math.min(Math.max(after.inMs ?? NUDGE_RETRY_MS, 60_000), NUDGE_GAP_MS[0]);
-  } else if (booked > now) {
-    delay = booked - now;
-    console.log(`[push] picking the booking back up where the restart left it: ${Math.round(delay / 60_000)} min`);
-  } else if (booked) {
-    // Due while she was off. Soon, with a little slack, so a crash loop cannot
-    // turn a missed nudge into a burst of them.
-    delay = (3 + Math.random() * 5) * 60_000;
-    console.log(`[push] the nudge booked for ${new Date(booked).toISOString()} came due while she was down — in ${Math.round(delay / 60_000)} min instead`);
-  } else {
-    delay = nextNudgeDelay(getPush().prefs, zonedNow(CHAT_TIMEZONE));
+/** Restart discards pending messages and establishes a fresh event baseline. */
+function startPhoneOpportunities() {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){if(phoneNudgeTimer)return;const p=corePolicySync<any>('conversation-program.phoneInit',[remainingStore(app.getPath('userData')).get('config',{}),getAsides(),Date.now(),CHAT_TIMEZONE]);conversationApply(p);if(!corePeriodic){phoneNudgeTimer=setInterval(()=>{void checkPhoneOpportunities();},PHONE_SCAN_MS);void checkPhoneOpportunities();}return;}
+
+  if (phoneNudgeTimer) return;
+  if (!store.get('chat.phoneNudges')) {
+    store.set('chat.phoneNudges', migratePhoneDeliveries(getAsides(), Date.now(), at => {
+      const local = zonedNow(CHAT_TIMEZONE, new Date(at));
+      return { day: localDateKey(local), hour: local.getHours() };
+    }));
   }
-  savePush({ nextNudgeAt: now + delay });
-  console.log(`[push] next unprompted push in ${Math.round(delay / 60_000)} min`);
-  pushPesterTimer = setTimeout(() => { void pesterOnPush().then(outcome => scheduleNextPush(false, outcome), () => scheduleNextPush()); }, delay);
+  store.set('chat.phoneNudges', { ...getPhoneNudges(), pending: [], scannedAt: 0 });
+  store.delete('push.nextNudgeAt');
+  if (!corePeriodic) phoneNudgeTimer = setInterval(() => { void checkPhoneOpportunities(); }, PHONE_SCAN_MS);
+  console.log(`[push] opportunity scheduler ready: at most ${PHONE_NUDGE_LIMIT}/day, ${PHONE_NUDGE_GAP_MS / 60_000} min apart; spontaneous notifications ${getPush().prefs.random ? 'enabled' : 'disabled'}`);
+  if (!corePeriodic) void checkPhoneOpportunities();
 }
 
 /**
@@ -13364,17 +14374,20 @@ function scheduleNextPush(resume = false, after: PesterOutcome | null = null) {
  */
 /** Where they last said they were (told.ts), and a clock for saying when. */
 function getTold(): Told | undefined {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return locationFlow('readTold',[store.get('told')])??undefined;
   const saved = store.get('told') as Told | undefined;
   return saved && typeof saved.where === 'string' && typeof saved.at === 'string' ? saved : undefined;
 }
 const clockAt = (ms: number) => new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: CHAT_TIMEZONE }).format(new Date(ms));
 function getArrival(): Arrival | null {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return locationFlow('readArrival',[store.get('where.arrival')]);
   const saved = store.get('where.arrival') as Partial<Arrival> | undefined;
   return saved && typeof saved.place === 'string' && typeof saved.at === 'string' ? { place: saved.place, at: saved.at } : null;
 }
 
 /** What she was told lately, in their words: their messages today, and the place they said they were at or heading for. */
 function theirWordsLately(): string[] {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return locationFlow('words',[remainingStore(app.getPath('userData')).get('config',{}),Date.now()]);
   const messages = (store.get('chat.messages') as { role?: string; content?: string; at?: string }[] | undefined) ?? [];
   const since = Date.now() - 3 * 60 * 60_000;
   const said = messages
@@ -13392,6 +14405,7 @@ function theirWordsLately(): string[] {
  * stops answering: this is a thing to be sharp about, not to go silent over.
  */
 function noteArrival(place: string): void {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on'){applyCoreLocation('arrival',[place],locationAdapter());return;}
   if (saidTheyWereGoing(place, theirWordsLately())) {
     console.log(`[where] they turned up at ${place}, and they had said so`);
     return;
@@ -13429,58 +14443,12 @@ function theyAreUpNow(): boolean {
   const log = store.getActivityLog();
   const days = Object.keys(log).sort();
   const latest = days.length ? (log[days[days.length - 1]] ?? []).map(entry => entry.until ?? entry.at).sort().at(-1) : undefined;
+  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on')return corePolicySync('sleep.theyAreUp',[{lastMessageAt:getMood().lastMessageAt,lastOpenedAt:store.get('web.lastOpenedAt'),lastActivityAt:latest},getPush().prefs,zonedNow(CHAT_TIMEZONE)]);
   return theyAreUp({
     lastMessageAt: getMood().lastMessageAt,
     lastOpenedAt: store.get('web.lastOpenedAt') as string | undefined,
     lastActivityAt: latest,
   }, getPush().prefs, zonedNow(CHAT_TIMEZONE));
-}
-
-/**
- * The floor: two hours without a word from her and she says something,
- * whatever the random beat is doing.
- *
- * On the five-minute proactive beat rather than its own timer, so that none of
- * the things that swallow the random one — a restart, a refused line, a guard
- * that returned early — can swallow this as well.
- */
-/**
- * Not before this, whatever the floor says.
- *
- * The floor rides the five-minute beat, and an attempt that comes to nothing
- * leaves it overdue — so without this it would compose three lines every five
- * minutes for as long as the cause lasted. A refused line is worth coming back
- * to soon; a deliberate silence is not going to change in five minutes.
- */
-let floorQuietUntil = 0;
-
-async function checkNudgeFloor() {
-  const { prefs } = getPush();
-  if (!webServer || !canReachPhone() || !prefs.random) return;
-  if (Date.now() < floorQuietUntil) return;
-  // Two hours of silence from someone asleep is not two hours of silence.
-  if (!theyAreUpNow() || herHasSaidGoodnight() || herKnockedAwakeNow()) return;
-  const reached = lastReachedThem();
-  if (!reached) {
-    // First run since this existed: start the clock now rather than treating an
-    // unknown as overdue and buzzing them the moment she boots.
-    savePush({ lastReachedAt: Date.now() });
-    return;
-  }
-  // From her own wake when that is later: a push before her night is not two
-  // hours of her silence, and counted that way it buzzed him ten minutes after she got up (2026-09-06).
-  const since = Math.max(reached, herWokeAtMs());
-  if (!nudgeOverdue(since, Date.now(), prefs, zonedNow(CHAT_TIMEZONE))) return;
-  console.log(`[push] ${Math.round((Date.now() - since) / 60_000)} min since anything of hers landed — going on the floor, not the beat (they are up: ${upBecause()})`);
-  const outcome = await pesterOnPush();
-  // Rebook the random beat from here, so the floor and the beat do not end up
-  // firing on top of each other.
-  if (outcome.how === 'sent') return scheduleNextPush();
-  const backOff = outcome.how === 'refused' ? NUDGE_RETRY_MS
-    : outcome.how === 'later' ? Math.max(outcome.inMs ?? NUDGE_RETRY_MS, 60_000)
-    : FLOOR_BACKOFF_MS;
-  floorQuietUntil = Date.now() + backOff;
-  console.log(`[push] the floor came to nothing (${outcome.how}) — not trying again for ${Math.round(backOff / 60_000)} min`);
 }
 
 const DEFAULT_WEB_PORT = 8787;
@@ -13554,10 +14522,10 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
       // taken when it is there and the keyword pass stands in when it is not,
       // so a model that ignores the rule costs nothing. Groggy still overrides
       // both: half asleep she sounds half asleep whatever she wrote.
-      const heuristic = herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
+      const heuristic = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('mood',[streamedSoFar,null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
       for (const sentence of sentences) {
         for (const said of splitDelivery(sentence)) {
-          onSentence(said.text, herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
+          onSentence(said.text, process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('sentenceMood',[heuristic,said.mood??null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
         }
       }
     },
@@ -13569,9 +14537,9 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
       if (!onSentence) return;
       const tail = buffer.trim();
       if (tail) {
-        const heuristic = herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
+        const heuristic = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('mood',[streamedSoFar,null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
         for (const said of splitDelivery(tail)) {
-          onSentence(said.text, herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
+          onSentence(said.text, process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('sentenceMood',[heuristic,said.mood??null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
         }
       }
       buffer = '';
@@ -13582,7 +14550,31 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
 const refusedShotDays = new Set<string>();
 
 function webDeps(): WebDeps {
+  const prepareHearing = async (audio:Uint8Array, mime:string, signal?:AbortSignal):Promise<(() => string)&{text:string}> => {
+      // Protect preparation before ASR/model dispatch. This notification is
+      // metadata only and does not delay recognition or change audio gates.
+      noteCoreUserActivity('speech');
+      const listen = readListenConfig(store.get('listen'));
+      const vocabulary = wordsToListenFor();
+      const [said, voiceReading] = await Promise.all([
+        transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint), vocabulary, signal ? AbortSignal.any([signal,AbortSignal.timeout(10000)]) : undefined),
+        voiceSense.analyze(audio, mime),
+      ]);
+      const usable=!looksLikeNothing(said,vocabulary);
+      const preview=usable ? (process.env.HARU_CORE_HEARING_POLICY==='on'?coreHearing('preview',[said]).text:correct(readHearing(store.get('hearing')),said).text) : '';
+      return Object.assign(() => {
+      signal?.throwIfAborted();
+      if (!usable) return '';
+      // Through the same corrections she has been taught at the desk. A name she
+      // keeps mishearing is misheard the same way down a phone.
+      const fixed=process.env.HARU_CORE_HEARING_POLICY==='on'?coreHearing('use',[said]):(()=>{const heard=readHearing(store.get('hearing'));const fixed=correct(heard,said);if(fixed.applied.length)store.set('hearing',noteUsed(heard,fixed.applied));return fixed;})();
+      voiceSense.heard(fixed.text, voiceReading);
+      return fixed.text;
+      },{text:preview});
+  };
   const deps: WebDeps = {
+    worldWork: workWorld,
+    elsewhereKey: getVeniceKey,
     attentionInput: (source, report) => {
       const now = Date.now();
       if (activityObservations.note(source, report, now) && report.kind === 'input') attention.webInput(now);
@@ -13600,7 +14592,8 @@ function webDeps(): WebDeps {
       // there. The page shows the day as it was heard, so they go in beside
       // the conversation, where they were said.
       const day = (store.get('chat.dayKey') as string | undefined) ?? localDateKey(zonedNow(CHAT_TIMEZONE));
-      const said = asidesOn(getAsides(), day).map(aside => ({ id: aside.id, role: 'assistant', content: aside.text, at: aside.at, aside: aside.source as string }));
+      const said = asidesOn(getAsides(), day).map(aside => ({ id: aside.id, role: 'assistant', content: aside.text, at: aside.at, aside: aside.source as string,
+        nudge: isNudgeAside(aside), nudgeFeedback: aside.nudgeFeedback }));
       if (!said.length) return messages;
       // A message without a stamp keeps its place after the last stamped one.
       let seen = '';
@@ -13618,6 +14611,7 @@ function webDeps(): WebDeps {
      * (feedback.ts). A note alone, or the same thumb twice, moves nothing and
      * gets no comeback — the desk ignores a re-pick too.
      */
+    nudgeFeedback: (id, choice) => saveNudgePreference(id, choice),
     async rate(id, reaction, note) {
       const history = (store.get('chat.messages') as { id?: string; role: string; content: string; reaction?: string }[] | undefined) ?? [];
       const target = history.find(message => message.id === id && message.role === 'assistant');
@@ -13649,10 +14643,12 @@ function webDeps(): WebDeps {
       // What the page hands back is what stage() gave it, but it has been to a
       // browser and back — re-read it, and let ollamaChat's path check judge it.
       const files = readAttachments(attachments).slice(0, 6);
-      // Her night: unreachable until she wakes. The message is already on the
-      // way into the transcript, and the away line stands in for a reply — no
-      // model call, no voice, nothing composed.
-      const door = herAsleepNow() ? knockWhileAsleep() : null;
+      // Direct messages briefly wake her so the reply can follow the conversation.
+      // Read before the door: "turn on explicit mode" arrives at exactly the
+      // hour she would be asleep, and a rule that needs her awake cannot be the
+      // one that wakes her.
+      const saidSetting = files.length ? null : await settingSaid(text);
+      const door = saidSetting ? null : herAsleepNow() ? knockWhileAsleep() : null;
       if (door) {
         const trace = newTrace();
         const line = door;
@@ -13666,7 +14662,7 @@ function webDeps(): WebDeps {
       // start a hosted pod pays. Falls through when the message needs judgement
       // — and a message carrying a file always does.
       const trace = newTrace();
-      const quick = files.length ? null : (await settingSaid(text)) ?? quickHit(text, history);
+      const quick = saidSetting ?? (files.length ? null : quickHit(text, history));
       trace.mark('intent');
       if (quick) {
         announceQuick(quick, text);
@@ -13696,6 +14692,7 @@ function webDeps(): WebDeps {
       return { reply, ignored: answer.ignored };
     },
     async sayStream(text, onChunk, attachments, options, onSentence) {
+      options?.signal?.throwIfAborted();
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
@@ -13705,7 +14702,9 @@ function webDeps(): WebDeps {
       // the label is how it learns the mood and is the one thing he must never
       // see. A no-op until the delivery rule is switched on.
       let showClean = cleaningChunks(onChunk);
-      const door = herAsleepNow() ? knockWhileAsleep() : null;
+      const saidSettingDesk = files.length ? null : await settingSaid(text);
+      options?.signal?.throwIfAborted();
+      const door = saidSettingDesk ? null : herAsleepNow() ? knockWhileAsleep() : null;
       if (door) {
         const trace = newTrace();
         const line = door;
@@ -13718,7 +14717,8 @@ function webDeps(): WebDeps {
         return { reply: line, ignored: false };
       }
       const trace = newTrace();
-      const quick = files.length ? null : (await settingSaid(text)) ?? quickHit(text, history);
+      const quick = saidSettingDesk ?? (files.length ? null : quickHit(text, history));
+      if(options?.callTrace)console.log('[call-turn] '+JSON.stringify({callId:options.callTrace.id,turn:options.callTrace.turn,trace:trace.id}));
       trace.mark('intent');
       if (quick) {
         onChunk(quick.reply);
@@ -13745,14 +14745,15 @@ function webDeps(): WebDeps {
       if (named && !answering) console.log('[web] a reply named a line of hers that could not be found — sent as an ordinary message');
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
-      // Stopped mid-sentence, by a tap on her or by being talked over.
-      if (options?.interrupted) { nudgeVitals('cut-off'); feelNow('cut-off'); }
+      // Barge-in is ordinary turn-taking. The interruption flag describes the
+      // audio transport, not rejection: only their words may move her mood.
       const answer = await ollamaChat(messages, config, {
         hands: false,
         web: true,
         away: 'it came in from the phone',
         ...(options?.call ? { aside: callAside(Boolean(options.interrupted)), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
+        signal:options?.signal,
         onSending: () => trace.mark('sending'),
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); showClean(chunk); voice.feed(chunk); },
@@ -13764,6 +14765,7 @@ function webDeps(): WebDeps {
         // a thrown-away round may be spoken.
         onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
       });
+      options?.signal?.throwIfAborted();
       const reply = stripDelivery(answer.content ?? '');
       // The last sentence arrives without the space the splitter waits for —
       // this is the reply's end, so what is left is hers to say.
@@ -13786,11 +14788,7 @@ function webDeps(): WebDeps {
     async retryStream(onChunk, onSentence) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
-      if (herAsleepNow()) {
-        const line = asleepReply();
-        onSentence?.(line, localEmotion(line));
-        return { reply: line, ignored: false };
-      }
+      if (herAsleepNow()) knockWhileAsleep();
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string; attachments?: Attachment[] }[] ?? []);
       const last = history.at(-1);
       const prompt = history.at(-2);
@@ -13858,6 +14856,7 @@ function webDeps(): WebDeps {
     // it is in a different timezone. Computed once here, against the timezone
     // she actually keeps.
     agenda: () => {
+      if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.phone',[getKept(),localDateKey(zonedNow(CHAT_TIMEZONE))]);
       const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
       const timeRank = (time?: string) => {
         const parsed = time ? parseTimeOfDay(time) : null;
@@ -13877,9 +14876,10 @@ function webDeps(): WebDeps {
     },
     tickOff(id) {
       const updated = toggleKept(id);
-      if (updated?.done) void remarkOnTickOff(updated);
+      if (process.env.HARU_CORE_AGENDA_LIFECYCLE==='on' ? corePolicySync<boolean>('agenda-life.manualRemark',[updated]) : updated?.done) void remarkOnTickOff(updated!);
     },
     addAgenda(title, date, time) {
+      if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const value=corePolicySync<any>('agenda-life.phoneAdd',[title,date,time??null]);if(!value)return null;const item=addKeptItem(value);return corePolicySync<any>('agenda-life.phoneResult',[item]);}
       // "9:00 AM" as she writes it, or "09:00" as a phone does; anything else
       // is refused rather than saved wrong.
       const parsed = time ? parseTimeOfDay(time) : null;
@@ -13890,6 +14890,7 @@ function webDeps(): WebDeps {
     },
     checkIns: () => checkInsOn(getCheckIns(), localDateKey(zonedNow(CHAT_TIMEZONE))),
     addCheckIn(note, anxiety) {
+      if(process.env.HARU_CORE_USER_RECORDS==='on')return coreUserRecord('checkins.add',{note,anxiety});
       const now = zonedNow(CHAT_TIMEZONE);
       setCheckIns(addCheckIn(getCheckIns(), note, anxiety, new Date(), localDateKey(now)));
       console.log(`[web] check-in noted${typeof anxiety === 'number' ? ` (anxiety ${anxiety}/10)` : ''}`);
@@ -13919,6 +14920,7 @@ function webDeps(): WebDeps {
     where: {
       get: () => whereForPage(getWhereabouts()),
       enable(on) {
+        if(process.env.HARU_CORE_LOCATION_POLICY==='on')return applyCoreLocation('mutation',['enable',on],locationAdapter());
         const state = getWhereabouts();
         if (state.enabled === on) return;
         // Switching off forgets the last fix as well as the switch: off means
@@ -13927,6 +14929,7 @@ function webDeps(): WebDeps {
         console.log(`[where] the phone ${on ? 'now says' : 'no longer says'} where it is`);
       },
       report(body) {
+        if(process.env.HARU_CORE_LOCATION_POLICY==='on')return applyCoreLocation('mutation',['report',body],locationAdapter());
         const spot = readSpot(body);
         if (!spot) return false;
         const state = getWhereabouts();
@@ -13941,14 +14944,16 @@ function webDeps(): WebDeps {
         return true;
       },
       name(name) {
+        if(process.env.HARU_CORE_LOCATION_POLICY==='on')return applyCoreLocation('mutation',['name',name],locationAdapter());
         const state = getWhereabouts();
         if (!state.last) return false;
         saveWhereabouts(namePlace(state, name));
         console.log(`[where] the phone's spot is now called "${name}"`);
         return true;
       },
-      forget(name) { saveWhereabouts(forgetPlace(getWhereabouts(), name)); },
+      forget(name) {if(process.env.HARU_CORE_LOCATION_POLICY==='on'){applyCoreLocation('mutation',['forget',name],locationAdapter());return;}saveWhereabouts(forgetPlace(getWhereabouts(),name));},
       async lookUp() {
+        if(process.env.HARU_CORE_LOCATION_POLICY==='on')return lookUpPlace(applyCoreLocation('mutation',['lookup',null],locationAdapter()),(url,init)=>fetch(url,init));
         const state = getWhereabouts();
         if (!state.enabled || !state.last) throw new Error('The phone has not said where it is yet.');
         // The same blurred, once-when-asked lookup the desktop's search place
@@ -14002,8 +15007,10 @@ function webDeps(): WebDeps {
       // refused outright on a machine with no ffmpeg to pull it apart.
       stage(name, bytes) {
         const kind = classify(name);
+        if(process.env.HARU_CORE_ATTACHMENTS==='on'){const command=attachmentPolicy('stageCheck',[name,path.basename(name),path.extname(name),Boolean(findFfmpeg()),'phone']);if(command.error)throw Error(command.error);}else{
         if ((kind === 'audio' || kind === 'video') && !findFfmpeg()) {
           throw new Error(`${name} needs ffmpeg, which is not installed on her machine.`);
+        }
         }
         const staged = stageBytes(name, bytes);
         console.log(`[web] staged ${staged.name} (${staged.kind}, ${(staged.bytes / 1024).toFixed(0)}KB)`);
@@ -14030,6 +15037,17 @@ function webDeps(): WebDeps {
         if (!state.last || state.last.day !== report.day || state.last.sleepMinutes !== report.sleepMinutes) console.log(`[body] ${report.day}: ${bits}`);
         return true;
       },
+    },
+    /** Kept, or forgotten, from the thread he is looking at. */
+    keepPicture: (id, keep) => (keep ? keepPicture(id) : forgetPicture(id)),
+    picture: (id, signature) => {
+      // The signature is checked before anything is read off the disk: a lock
+      // screen's extension has no cookie, so the link is the whole credential.
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+      const expected = pictureSignature(id);
+      if (signature.length !== expected.length) return null;
+      if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+      try { return { body: readFileSync(path.join(pictureFolder(), `${id}.png`)), type: 'image/png' }; } catch { return null; }
     },
     portrait: () => {
       // The app icon doubles as her face on the phone. Read each time rather than
@@ -14071,12 +15089,19 @@ function webDeps(): WebDeps {
     },
     quiet: () => isMuted(getMute(), Date.now()),
     attachedFile(saved) {
-      const folder = path.resolve(photoFolder());
-      const target = path.resolve(folder, path.basename(String(saved ?? '')));
-      if (!target.startsWith(folder + path.sep) || classify(target) !== 'image') return null;
-      const mime = ({ '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic' } as Record<string, string>)[path.extname(target).toLowerCase()];
-      if (!mime) return null;
-      try { return { bytes: new Uint8Array(readFileSync(target)), mime }; } catch { return null; }
+      // Two places a picture can live: the folder he hands his photos in, and
+      // the folder she draws her own into. The phone asks by name and neither
+      // knows nor cares which of the two answered.
+      const name = path.basename(String(saved ?? ''));
+      const mimeFor: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic' };
+      for (const folder of [path.resolve(photoFolder()), path.resolve(pictureFolder())]) {
+        const target = path.resolve(folder, name);
+        if (!target.startsWith(folder + path.sep) || classify(target) !== 'image') continue;
+        const mime = mimeFor[path.extname(target).toLowerCase()];
+        if (!mime) continue;
+        try { return { bytes: new Uint8Array(readFileSync(target)), mime }; } catch { /* try the other folder */ }
+      }
+      return null;
     },
     async sigh(emotion) {
       const voice = readVoiceConfig(store.get('voice'));
@@ -14101,9 +15126,9 @@ function webDeps(): WebDeps {
       // The phone sends the mood the page read from the line; when it sends
       // none (or one she has not got), the line is read here instead of falling
       // flat to neutral — localEmotion, no model call.
-      const felt: EmotionName = herGroggyNow() ? 'sleepy' : emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
-      const reference = referenceFor(voice, felt);
-      const chosen = hasShout(text) ? shoutReference(voice, reference) : reference;
+      const felt: EmotionName = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('mood',[text,emotion??null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
+      const reference = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[voice,felt]) : referenceFor(voice, felt);
+      const chosen = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[voice,felt,hasShout(text)]) : hasShout(text) ? shoutReference(voice, reference) : reference;
       // Narrowed the same way referenceFor does: a string from the phone that is
       // not one of her emotions means her usual voice.
       const mood = felt;
@@ -14116,20 +15141,22 @@ function webDeps(): WebDeps {
         const clip = await synthesise(say, voice, chosen, voiceAuth(voice), mood);
         // Ended early — see looksClipped. One more go; the sampling that cut it
         // is the same sampling that will not, next time.
-        if (clip && looksClipped(clip.audio, say)) {
+        if (clip && (process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('clipped',[speechClipObservation(clip),say]) : looksClipped(clip.audio, say))) {
           console.warn('[voice] that came back cut short — saying it again');
           const again = await synthesise(say, voice, chosen, voiceAuth(voice), mood);
+          if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'){if(speechBoundary('retryResult',[speechClipObservation(clip),speechClipObservation(again),say])==='second')return again;}else{
           if (again && !looksClipped(again.audio, say)) return again;
           if (again && again.audio.length > clip.audio.length) return again;
+          }
         }
         return clip;
       } catch (error) {
         // A mood clip the server will not take — four of hers ran over the
         // 3-10 second limit — costs the mood, not the line: her usual voice.
         const why = error instanceof Error ? error.message : String(error);
-        if (chosen.clip !== voice.voice && /3-10 second|reference audio/i.test(why)) {
+        if (process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('refusedReference',[voice,chosen,why]) : chosen.clip !== voice.voice && /3-10 second|reference audio/i.test(why)) {
           console.warn(`[voice] the clip for "${emotion}" was refused (${chosen.clip.split('/').pop()}) — speaking in her usual voice instead`);
-          return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), voiceAuth(voice), null);
+          return synthesise(spokenCase(speakableText(text)), voice, process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[voice]) : referenceFor(voice), voiceAuth(voice), null);
         }
         throw error;
       }
@@ -14144,18 +15171,19 @@ function webDeps(): WebDeps {
       // Breeze streams its own PCM; wrapped in a WAV here so the phone can play
       // it progressively. Same clone + instruction as the buffered path.
       if (voice.engine === 'breeze') {
-        const mood: EmotionName = herGroggyNow() ? 'sleepy' : emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
+        const mood: EmotionName = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('mood',[text,emotion??null,herGroggyNow()]) : herGroggyNow() ? 'sleepy' : emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
         // A sentence that is all emoji or marks has nothing to say aloud;
         // Breeze answered it with 400 "text is required" (2026-09-18).
         const spoken = spokenCase(speakableText(text));
         if (!spoken.trim()) return null;
-        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spoken, mood, options?.seed);
+        return synthesiseBreezeStream(voice, process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('reference',[voice,mood]) : referenceFor(voice, mood), spoken, mood, options?.seed, options?.rawPCM, options?.signal);
       }
       if (voice.engine !== 'hume') return null;
       const key = getHumeKey();
       if (!key || !voice.voice) return null;
       const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
-      const directions = [mood ? HUME_DESCRIPTIONS[mood] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
+      const planned = planVoice(voice, referenceFor(voice, mood), mood);
+      const directions = process.env.HARU_CORE_SPEECH_BOUNDARY==='on' ? speechBoundary('directions',[planned.config.deliveryInstruction??'',mood ? HUME_DESCRIPTIONS[mood] : '',hasShout(text)]) : planned.config.deliveryInstruction || [mood ? HUME_DESCRIPTIONS[mood] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
       try {
         const response = await net.fetch(HUME_STREAM_URL, {
           method: 'POST',
@@ -14163,19 +15191,20 @@ function webDeps(): WebDeps {
           body: JSON.stringify({
             // The same pace as the desk path: the phone was speaking at 1.0
             // while voice.speed said 0.9.
-            utterances: [{ text, voice: { id: voice.voice }, ...(directions ? { description: directions } : {}), ...(voice.speed !== 1 ? { speed: voice.speed } : {}) }],
+            utterances: [{ text, voice: { id: voice.voice }, ...(directions ? { description: directions } : {}), ...(planned.config.speed !== 1 ? { speed: planned.config.speed } : {}) }],
             format: { type: 'mp3' },
             instant_mode: true,
           }),
         });
         if (!response.ok || !response.body) return null;
-        return { mime: 'audio/mpeg', body: response.body };
+        return { mime: 'audio/mpeg', body: voiceSense.stream(text, planned.plan, voice.engine, response.body, 'audio/mpeg') };
       } catch {
         return null;
       }
     },
     corrections: () => readHearing(store.get('hearing')).corrections,
     teach: (heard, meant) => {
+      if(process.env.HARU_CORE_HEARING_POLICY==='on')return coreHearing('teach',[heard,meant]);
       const after = remember(readHearing(store.get('hearing')), heard, meant, new Date().toISOString());
       store.set('hearing', after);
       // The pair, not the sentence: what she took from it is what will fire next time.
@@ -14184,6 +15213,7 @@ function webDeps(): WebDeps {
       return { learned: pair, count: after.corrections.length };
     },
     forgetCorrection: heard => {
+      if(process.env.HARU_CORE_HEARING_POLICY==='on')return coreHearing('forget',[heard]);
       const kept = { corrections: readHearing(store.get('hearing')).corrections.filter(c => c.heard !== heard) };
       store.set('hearing', kept);
       return kept.corrections;
@@ -14196,34 +15226,7 @@ function webDeps(): WebDeps {
       console.log(`[voice] kept a take of his voice: ${name} (${wav.length} bytes)`);
       return name;
     },
-    async hear(audio, mime) {
-      const listen = readListenConfig(store.get('listen'));
-      const vocabulary = wordsToListenFor();
-      const said = await transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint), vocabulary);
-      // Hear him too, off the reply path: the same audio, for how he sounded.
-      // The reading lands on the next turn, the way an aside does — she reacts
-      // to his voice, not just his words.
-      const humeKey = getHumeKey();
-      if (readHumeConfig(store.get('hume')).expressionsEnabled && humeKey) {
-        void hearVoice(audio, mime, humeKey, net.fetch as never)
-          .then(prosody => {
-            if (!prosody) return;
-            const reading = readingFrom(prosody);
-            if (reading.rough) {
-              store.set('hume.reading', { ...reading, at: new Date().toISOString() });
-              console.log(`[hume] heard him — ${reading.why}`);
-            }
-          })
-          .catch(error => console.warn('[hume] could not read his voice:', error instanceof Error ? error.message : error));
-      }
-      if (looksLikeNothing(said, vocabulary)) return '';
-      // Through the same corrections she has been taught at the desk. A name she
-      // keeps mishearing is misheard the same way down a phone.
-      const heard = readHearing(store.get('hearing'));
-      const fixed = correct(heard, said);
-      if (fixed.applied.length) store.set('hearing', noteUsed(heard, fixed.applied));
-      return fixed.text;
-    },
+    async hear(audio, mime) { return (await prepareHearing(audio,mime))(); },
     memories: () => getMemories().map(memory => memory.text),
     // Assembled from the four places her state actually lives — the drifting
     // vitals, the conversation's patience, the evening grudge, and the list —
@@ -14233,6 +15236,7 @@ function webDeps(): WebDeps {
     her: () => herFrom({ interests: getInterests(), nights: getNights(), diary: recentEntries(app.getPath('home'), 365) }),
     standing: currentStanding,
     memoryRecords: () => getMemories(),
+    memoryDeletions: () => memoryStore.getDeletions(),
     // Rides along on the records rather than taking a route of its own: every
     // body already pulls this, so the reset reaches all of them with no version
     // to negotiate — an older build simply does not read the field.
@@ -14260,6 +15264,7 @@ function webDeps(): WebDeps {
       },
     },
     mergeActivity(theirs) {
+      if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return deviceMutation('mergeActivity',[theirs,getSlate()],deviceStateAdapter());
       const before = store.getActivityLog();
       // The same filter memories get, for the log: the desk pushes its whole
       // thing and the merge only ever adds, so without this the reset is undone
@@ -14280,10 +15285,11 @@ function webDeps(): WebDeps {
       const report = mergeIn(withoutPreSlate(theirs, getSlate()));
       const what = describeMerge(report);
       if (what) console.log('[memory] from the desk: ' + what);
-      return { added: report.added, updated: report.updated };
+      return { added: report.added, updated: report.updated, deleted: report.deleted };
     },
     journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
     writeJournal(entry) {
+      if(process.env.HARU_CORE_USER_RECORDS==='on'){coreUserRecord('journal.write',{...entry,prompted:false});return;}
       setJournal(upsertEntry(getJournal(), {
         date: localDateKey(zonedNow(CHAT_TIMEZONE)),
         text: entry.text,
@@ -14295,6 +15301,12 @@ function webDeps(): WebDeps {
     },
     knowledge: {
       async search(query, category) {
+        if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+          const embedder=getKnowledgeEmbedder(),options=corePolicySync<any>('final-retrieval.webOptions',[query,category??null,getKnowledgeConfig(),new Date().toISOString()]);
+          const result=await retrieveContext({...options,now:new Date(options.now),knowledge:knowledge.current(),embed:text=>embedder?embedder.embed(text):Promise.reject(Error('no model is set up'))});
+          return corePolicySync('final-retrieval.webResult',[result.knowledge]);
+        }
+
         const embedder = getKnowledgeEmbedder();
         const config = getKnowledgeConfig();
         const cat = coerceKnowledgeCategory(category);
@@ -14325,6 +15337,7 @@ function webDeps(): WebDeps {
       stats: () => knowledgeStats(knowledge.current()),
       async ingest(file, category) {
         const result = await enqueueKnowledge(() => ingestKnowledgeFile(file, coerceKnowledgeCategory(category)));
+        if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-flow.webIngest',[result]);
         return {
           queued: false,
           source: result.outcome.document.source,
@@ -14396,21 +15409,27 @@ function webDeps(): WebDeps {
           onAudio: handlers.onAudio,
           onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); handlers.onClose(reason); },
         }, {
-          hear: wav => deps.hear(wav, 'audio/wav'),
-          answer: (text, { interrupted, onSentence, onToolCall }) => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall }, onSentence),
+          hear: async (wav,signal) => (await prepareHearing(wav,'audio/wav',signal))(),
+          inputMode:call.inputMode,
+          prepareHear:(wav:Uint8Array,signal?:AbortSignal)=>prepareHearing(wav,'audio/wav',signal),
+          ...(call.prepareAfterMs ? {prepareAfterMs:call.prepareAfterMs} : {}),
+          unfinishedQuietMs:call.unfinishedQuietMs,
+          answer: (text, { interrupted, onSentence, onToolCall, callTrace, signal }) => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, callTrace, signal }, onSentence),
           // Her mood as the standing tab reads it — no model call — for a reply
           // whose first sentence names no register of its own. Only the moods
           // that change how she sounds pass through; the warm ones would have
           // a sarcastic line said fondly, and her plain register is dry.
           moodNow: () => {
+            if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'){const groggy=herGroggyNow();return speechBoundary('restingMood',[groggy,groggy?null:deps.standing().emotion]);}
             if (herGroggyNow()) return 'sleepy';
             const resting = deps.standing().emotion;
             return resting === 'annoyed' || resting === 'sleepy' || resting === 'worried' || resting === 'bored' ? resting : 'neutral';
           },
-          speak: async (text, emotion, seed) => {
+          speak: async (text, emotion, seed, signal) => {
             // Streamed where the engine streams (Breeze: 24 kHz PCM under a
             // WAV header), whole where it does not, at whatever rate it says.
-            const streamed = await deps.speakStream?.(text, emotion, { seed });
+            const streamed = await deps.speakStream?.(text, emotion, { seed, signal });
+            signal?.throwIfAborted();
             if (streamed?.mime === 'audio/wav') return { stream: withoutWavHeader(streamed.body), sampleRate: 24000 };
             if (streamed) void streamed.body.cancel().catch(() => {});
             const clip = await deps.speak(text, emotion);
@@ -14425,7 +15444,7 @@ function webDeps(): WebDeps {
           vad: { endAfterMs: call.endAfterMs },
           log: line => console.log(line),
         });
-        return { sendAudio: frame => local.feed(frame), close: reason => local.close(reason), herSpeaking: on => local.herSpeaking(on) };
+        return { sendAudio: frame => local.feed(frame), close: reason => local.close(reason), herSpeaking: on => local.herSpeaking(on), manualInput: enabled=>local.manualInput(enabled), inputHeld: active=>local.inputHeld(active) };
       }
       const evi = readEviConfig(store.get('evi'));
       if (!evi.enabled || !evi.configId) throw new Error('Speech to speech is switched off.');
@@ -14458,19 +15477,9 @@ function webDeps(): WebDeps {
       if (!state) return null;
       // Through the same corrections as the phone's ear: a name she keeps
       // mishearing is misheard the same way on a call.
-      const heard = readHearing(store.get('hearing'));
-      const fixed = correct(heard, text);
-      if (fixed.applied.length) store.set('hearing', noteUsed(heard, fixed.applied));
-      // How he sounded, from the same clip he was heard in — on this turn, not
-      // the next: the reading is written before the brain runs, and
-      // takeVoiceRoom reads it into the room she is about to answer in.
-      if (prosody) {
-        const reading = readingFrom(prosody);
-        if (reading.rough) {
-          store.set('hume.reading', { ...reading, at: new Date().toISOString() });
-          console.log(`[evi] heard him — ${reading.why}`);
-        }
-      }
+      const fixed=process.env.HARU_CORE_HEARING_POLICY==='on'?coreHearing('use',[text]):(()=>{const heard=readHearing(store.get('hearing'));const fixed=correct(heard,text);if(fixed.applied.length)store.set('hearing',noteUsed(heard,fixed.applied));return fixed;})();
+      // EVI expression evidence follows the same utterance matching as local audio.
+      if (prosody) voiceSense.heard(fixed.text, fromHume(prosody));
       const interrupted = state.interrupted;
       state.interrupted = false;
       console.log(`[evi] ${sessionId} heard "${fixed.text.slice(0, 60)}"${interrupted ? ' — over her' : ''}`);
@@ -14567,6 +15576,8 @@ const COMEBACK_ODDS = 0.5;
  * the same one.
  */
 function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){noteUserSpoke();const p=corePolicySync<any>('conversation-program.thumb',[{...conversationPolicyFacts(),fuse:fuseOf(getTraits()),lastSmug:lastPraiseWasSmug},reaction,[Math.random(),Math.random()]]);conversationApply(p);sendToWindows('mood:changed',p.result.mood);for(const event of p.result.events){if(event.kind==='vitals')nudgeVitals(event.event);else if(event.kind==='feel')feelNow(event.event);else if(event.kind==='tally')tallyMonth(event.event);else throw Error('core_thumb_event_protocol');}lastPraiseWasSmug=p.result.smug;broadcastBeat(p.result.reading,p.result.gesture);return {mood:p.result.mood,comeback:corePolicySync<boolean>('conversation-program.comeback',[Math.random(),sway('comeback',COMEBACK_ODDS,swayNow())])};}
+
   // A thumb is them addressing her, so it starts the quiet period the same way
   // a message does. This is the one the screenshot caught: thumbs up, and a
   // remark about something else arrives on top of her own reply.
@@ -14662,7 +15673,7 @@ async function startWebDoor() {
     if (evi.enabled) console.log(`[evi] ready — config ${evi.configId || '(none)'}, hook at ${evi.publicUrl || '(unset)'}, cap ${evi.dailyMinutesCap} min/day${getHumeKey() && getEviSecret() ? '' : ' — but no Hume key or hook secret'}`);
     // Started once and left running: each tick re-checks the door and the
     // subscriptions itself, so closing the door silences it with no bookkeeping.
-    if (!pushPesterTimer) scheduleNextPush(true);
+    startPhoneOpportunities();
     startProactive();
     startChasing();
   } catch (error) {
@@ -14762,154 +15773,15 @@ function watchForUpdates() {
   setInterval(check, CHECK_EVERY_MS);
 }
 
-app.whenReady().then(() => {
-  // Node gives up on an address after 250 ms while it tries the next family.
-  // Hume, like Apple, is further than that from here, so every connection
-  // made through Node's own stack — the call socket, not Chromium's fetch —
-  // would time out before it began. apns.ts sets this per connection; a
-  // WebSocket has no such option, so the default is raised once here.
-  setDefaultAutoSelectFamilyAttemptTimeout(5_000);
-  // The money behind her hosted voice, on the hour; the day it ran out, nobody knew.
-  setTimeout(() => void checkVeniceBalance('startup'), 2 * 60_000);
-  setInterval(() => void checkVeniceBalance('the hour'), 60 * 60_000);
-  // Whatever was said to her elsewhere today. Once at startup, then quietly on
-  // the hour — often enough that the evening review has it, rare enough that a
-  // sleeping server is not being knocked on constantly.
-  void pullCheckIns().then(syncMemories);
-  setInterval(() => void pullCheckIns().then(syncMemories), 15 * 60_000);
-
-  if (!isPrimaryInstance) return;
-  // After the single-instance gate: two copies racing to download the same
-  // installer over each other is the one way this could do harm.
-  watchForUpdates();
-
-  // Loaded here rather than at the top because app.getPath needs the app ready
-  // — but the file itself is a quiet local read, and a store that cannot be
-  // read is an empty one, never a crash.
-  knowledge.load();
-  void refreshMemoryVectors();
-  // Whatever was written before sorting existed, or while the model was away,
-  // sorted once the start-up rush is over.
-  memoryStore.scheduleSort(90_000);
-  // The consolidation sweep, decay, archive pruning and haunt hygiene, daily at
-  // a time of day (scheduler.ts). They used to run a minute after boot and then
-  // every twenty-four hours from it — and with restarts every few hours the
-  // interval never fired, so the sweep ran as often as the app was restarted.
-  // Missed while down, the day's sweep runs at the next start. The same
-  // dispatcher brings her own bookings back to her.
-  scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
-  // Her Game Boy: one move per tick while a sitting is on (pokemon.ts).
-  setInterval(() => { void pokemonTick(); }, readPokemonConfig(store.get('games')).tickSeconds * 1000);
-  void recoverPokemonSitting();
-  // Level 4: her own hands, looked at every few minutes (herhands.ts).
-  setInterval(() => { void herHandsTick(); }, 5 * 60_000);
-  setTimeout(() => scheduler.start(), 30_000);
-  // Her thoughts between messages (thoughts.ts): triggers looked at every five
-  // minutes, the brain asked only when one has fired.
-  setInterval(() => { void thoughtTick(); }, THOUGHT_TICK_MS);
-  const knowledgeSummary = knowledgeStats(knowledge.current());
-  console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
-  // A saved vault keeps itself current without being asked: a first check a
-  // minute after boot, then hourly. Runs on the knowledge queue, so it never
-  // waits on or blocks a conversation.
-  setTimeout(() => { void syncVaultAndRetire(); }, 60_000);
-  setInterval(() => { void syncVaultAndRetire(); }, 60 * 60_000);
-  // And her own folder in it, the other way round.
-  loadRecallVectors();
-  setTimeout(() => { void refreshRecallVectors(); }, 90_000);
-  setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
-  // Who is who: the finished days not yet read, a day a minute until caught up.
-  setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
-  // Slow on purpose: a pass is a call to the same card her replies come off.
-  setInterval(() => { void readOverheardTick(); }, 60_000);
-  setInterval(() => { void formingTick(); }, FORMING_TICK_MS);
-  // His page of what the graph believes: written at start, corrections read back hourly with the vault.
-  setTimeout(() => syncGraphPage('startup'), 100_000);
-  setTimeout(() => publishToVault('startup'), 30_000);
-  setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
-  // A first pass shortly after boot so a backlog the desk sent overnight is
-  // already being worked through by the time anyone asks, then every five
-  // minutes. Both are no-ops until vision is switched on and shots exist.
-  setTimeout(() => { void lookAtSyncedShots(); }, 90_000);
-  setInterval(() => { void lookAtSyncedShots(); }, SHOT_LOOK_TICK_MS);
-  // The system sampler. Lightweight and self-contained, so a slow sample can
-  // never hold up a conversation; events it fires go through interject, the
-  // same channel her other unprompted lines use.
-  const systemEvents = readSystemEvents();
-  console.log(`[system] sampler armed (every ${systemEvents.sampleSeconds}s, level ${readSystemConfig().level})`);
-  setTimeout(() => { void sampleSystem(); }, 10_000);
-  setInterval(() => { void sampleSystem(); }, systemEvents.sampleSeconds * 1000);
-  // Her Minecraft life, on a clock. Every tick is cheap unless a session is on;
-  // the cadence is read at boot, so a change to it wants a restart.
-  const play = getPlayConfig();
-  console.log(`[minecraft] play tick armed (every ${play.tickSeconds}s, ${play.enabled ? 'on' : 'off'})`);
-  setInterval(() => { void minecraftTick(); }, play.tickSeconds * 1000);
-  protocol.handle('haru-model', async request => {
-    const url = new URL(request.url);
-    const segments = url.pathname.split('/').filter(Boolean);
-    const [id, ...rest] = segments;
-    const root = id ? live2dRoots.get(id) : undefined;
-    if (!root) {
-      console.error(`[haru-model] unknown id=${id} for ${request.url} (known ids: ${[...live2dRoots.keys()].join(', ') || 'none'})`);
-      return new Response('Model file not available', { status: 404 });
-    }
-    const relative = rest.map(decodeURIComponent).join('/');
-    const target = path.resolve(root, `./${relative}`);
-    if (!target.startsWith(root)) {
-      console.error(`[haru-model] resolved path escapes root: root=${root} target=${target} (requested as ${request.url})`);
-      return new Response('Model file not available', { status: 404 });
-    }
-    try {
-      // The manifest is rewritten in flight so expressions sitting unreferenced
-      // on disk still reach the runtime. Everything else is served untouched.
-      if (target.toLowerCase().endsWith('.model3.json')) {
-        const { model, added } = withDiscoveredExpressions(JSON.parse(readFileSync(target, 'utf8')), path.dirname(target));
-        if (added) console.log(`[live2d] model declared no expressions; found ${added} on disk`);
-        return new Response(JSON.stringify(model), { headers: { 'Content-Type': 'application/json' } });
-      }
-      return await net.fetch(pathToFileURL(target).toString());
-    } catch (error) {
-      console.error(`[haru-model] failed to read ${target} (requested as ${request.url}):`, error);
-      return new Response('Model file not found on disk', { status: 404 });
-    }
-  });
-  /**
-   * An attached picture, on its way to the window.
-   *
-   * The same shape as haru-model above and the same escape check, for the same
-   * reason: this resolves a path out of a URL the renderer asked for. The root
-   * is read fresh on every request rather than captured, so pointing the folder
-   * somewhere else in setup does not leave a handler serving the old one.
-   *
-   * Only a basename is ever in the URL, and resolve + startsWith is what makes
-   * that true rather than merely intended.
-   */
-  protocol.handle('haru-photo', async request => {
-    const root = path.resolve(photoFolder());
-    // The whole path, not everything after the first segment. haru-model drops
-    // its first segment because that one is a model id — this scheme has no id,
-    // only a filename, so the same slice threw the name away and left every
-    // thumbnail resolving to the folder itself and failing the check below.
-    const name = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
-    const target = path.resolve(root, `./${name}`);
-    if (!name || !target.startsWith(root + path.sep)) {
-      console.error(`[haru-photo] refused ${request.url} — resolves outside the pictures folder`);
-      return new Response('Not available', { status: 404 });
-    }
-    try {
-      return await net.fetch(pathToFileURL(target).toString());
-    } catch (error) {
-      // A thumbnail for a file that has been deleted or moved. Worth a line, not
-      // worth an alarm: the conversation still holds what was said about it.
-      console.warn(`[haru-photo] could not read ${path.basename(target)}:`, error instanceof Error ? error.message : error);
-      return new Response('Not on disk', { status: 404 });
-    }
-  });
-  // Registered once, at startup. It was inside the protocol handler above, so it
-  // never ran until a model file was requested and then threw on the second
-  // request — ipcMain.handle refuses a duplicate channel.
-  nativeTheme.themeSource = 'dark';
+let applicationChannelsRegistered=false;
+function registerApplicationChannels() {
+  if(applicationChannelsRegistered)return;
+  applicationChannelsRegistered=true;
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
+  ipcMain.handle('world:get', () => workWorld.get());
+  ipcMain.handle('world:detail', (_e,id:string,before?:number) => workWorld.detail(id,before));
+  ipcMain.handle('world:assets', () => workWorldAssets(app.getAppPath(),path.join(app.getAppPath(),'build','emotions')));
+  ipcMain.handle('world:command', () => { throw Error('The fictional simulation is archived.'); });
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
   // Read back from Windows rather than from the store, so the panel shows what
   // is actually registered — an entry cleared by a cleanup tool or a policy
@@ -14936,7 +15808,13 @@ app.whenReady().then(() => {
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.getArchive());
   ipcMain.handle('chat:getAsides', () => getAsides());
+  ipcMain.handle('chat:nudgeFeedback', async (_e, id: unknown, choice: unknown) => {
+    const aside = await saveNudgePreference(id, choice);
+    if (!aside) throw new Error('That nudge or feedback choice is not available.');
+    return aside;
+  });
   ipcMain.handle('chat:clearAsides', () => {
+    if(process.env.HARU_CORE_ASIDES==='on'){const result=coreAside('clear',{});sendToWindows('chat:asidesCleared');return result;}
     store.set('chat.asides', []);
     sendToWindows('chat:asidesCleared');
     return [];
@@ -14962,10 +15840,10 @@ app.whenReady().then(() => {
   ipcMain.handle('profile:get', () => getProfile());
   ipcMain.handle('profile:set', (_e, profile: Profile) => { store.set('profile', profile); return getProfile(); });
   ipcMain.handle('memory:list', () => getMemories());
-  ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => { addMemory(text, kind, undefined, { source: 'explicit', emotion: localEmotion(text), emotionIntensity: readTone(text).heat }); return getMemories(); });
+  ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('add',{text,kind,extra:{source:'explicit',emotion:localEmotion(text),emotionIntensity:readTone(text).heat}}); addMemory(text, kind, undefined, { source: 'explicit', emotion: localEmotion(text), emotionIntensity: readTone(text).heat }); return getMemories(); });
   ipcMain.handle('memory:sessions', () => getSessions());
-  ipcMain.handle('memory:forgetSessions', () => { store.setSessions([]); return []; });
-  ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
+  ipcMain.handle('memory:forgetSessions', () => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('forgetSessions'); store.setSessions([]); return []; });
+  ipcMain.handle('memory:remove', (_e, id: string) => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('remove',{id}); setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());
   ipcMain.handle('memory:lastRetrieval', () => memoryStore.lastRetrieval());
@@ -14973,7 +15851,7 @@ app.whenReady().then(() => {
   // refuse read-only blocks, but these can edit anything — including the
   // persona — and can send a block back to its derived state.
   ipcMain.handle('blocks:list', () => store.getBlocks());
-  ipcMain.handle('blocks:update', (_e, label: string, value: string, opts: { limit?: number; description?: string; read_only?: boolean } = {}) => {
+  ipcMain.handle('blocks:update', (_e, label: string, value: string, opts: { limit?: number; description?: string; read_only?: boolean } = {}) => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('blockUpdate',{label,value,opts});
     const blocks = store.getBlocks();
     const block = findBlock(blocks, label);
     if (!block) return null;
@@ -14988,7 +15866,7 @@ app.whenReady().then(() => {
     setBlocks(blocks.map(candidate => candidate.label === label ? updated : candidate));
     return updated;
   });
-  ipcMain.handle('blocks:reset', (_e, label: string) => {
+  ipcMain.handle('blocks:reset', (_e, label: string) => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('blockReset',{label});
     const blocks = store.getBlocks();
     const block = findBlock(blocks, label);
     if (!block) return null;
@@ -15002,7 +15880,7 @@ app.whenReady().then(() => {
   // on a body that is housekeeping on a limb, not a reset of her.
   ipcMain.handle('haru:brain', () => herBrain());
   ipcMain.handle('haru:reset', () => resetHer({ body: Boolean(herBrain()) }));
-  ipcMain.handle('memory:clear', () => {
+  ipcMain.handle('memory:clear', () => {if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return coreMemoryAdmin('clear');
     setMemories([]);
     // The graph is what she knows too. Which days were read is kept, or the
     // next tick would rebuild all of it from the archive behind their back.
@@ -15014,6 +15892,7 @@ app.whenReady().then(() => {
   // for the microphone.
   ipcMain.handle('chat:expectAnswer', () => { expectAnswerWhenDone(); });
   ipcMain.handle('listen:correct', (_e, heardText: string, meantText: string) => {
+      if(process.env.HARU_CORE_HEARING_POLICY==='on')return coreHearing('teach',[heardText,meantText]).count;
     const before = readHearing(store.get('hearing'));
     const after = remember(before, heardText, meantText, new Date().toISOString());
     store.set('hearing', after);
@@ -15025,6 +15904,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('listen:corrections', () => readHearing(store.get('hearing')).corrections);
   ipcMain.handle('listen:forgetCorrection', (_e, heardText: string) => {
+      if(process.env.HARU_CORE_HEARING_POLICY==='on')return coreHearing('forget',[heardText]);
     const now = readHearing(store.get('hearing'));
     const kept = { corrections: now.corrections.filter(c => c.heard !== heardText) };
     store.set('hearing', kept);
@@ -15043,7 +15923,10 @@ app.whenReady().then(() => {
   ipcMain.handle('listen:transcribe', async (_e, audio: Uint8Array, mime: string) => {
     const config = readListenConfig(store.get('listen'));
     const vocabulary = wordsToListenFor();
-    const text = await transcribe(audio, mime, config, net.fetch, remoteAuth(config.endpoint), vocabulary);
+    const [text, voiceReading] = await Promise.all([
+      transcribe(audio, mime, config, net.fetch, remoteAuth(config.endpoint), vocabulary),
+      voiceSense.analyze(audio, mime),
+    ]);
     if (looksLikeNothing(text, vocabulary)) {
       console.log(`[listen] ${audio.length} bytes -> nothing worth sending`);
       return '';
@@ -15051,13 +15934,12 @@ app.whenReady().then(() => {
     // Rewritten with whatever she has been taught to mishear less. Applied here
     // rather than as a prompt to the model — see hearing.ts for why priming is
     // the wrong tool.
-    const heard = readHearing(store.get('hearing'));
-    const fixed = correct(heard, text);
+    const fixed=process.env.HARU_CORE_HEARING_POLICY==='on'?coreHearing('use',[text]):(()=>{const heard=readHearing(store.get('hearing'));const fixed=correct(heard,text);if(fixed.applied.length)store.set('hearing',noteUsed(heard,fixed.applied));return fixed;})();
     if (fixed.applied.length) {
-      store.set('hearing', noteUsed(heard, fixed.applied));
       console.log(`[listen] corrected: ${fixed.applied.join(', ')}`);
     }
     console.log(`[listen] ${audio.length} bytes -> ${fixed.text.length} chars`);
+    voiceSense.heard(fixed.text, voiceReading);
     return fixed.text;
   });
   // hasKey rather than the key: whether one is saved is what the panel needs to
@@ -15178,23 +16060,8 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('ui:page', (_e, page: NoticedPage) => { void noticePage(page); });
-
   // The web door. The password only ever travels inwards: it is hashed here and
   // the renderer is told nothing but whether one exists.
-  // A hand trigger for one planning step, until Phase 7 puts it on a clock.
-  ipcMain.handle('minecraft:plan', () => planMinecraftStep());
-  ipcMain.handle('minecraft:status', async () => ({
-    enabled: getMinecraftConfig().enabled,
-    linked: minecraft !== null,
-    workerUp: minecraft?.connected ?? false,
-    trouble: minecraftTrouble,
-    seen: minecraft?.lastSeen ?? null,
-    play: getPlayConfig(),
-    session: minecraftSession ? { since: new Date(minecraftSession.startedAt).toISOString(), summary: summarise(minecraftSession, Date.now()) } : null,
-    notPlayingBecause: lastWhyNotPlaying || null,
-  }));
-  // Ending a session by hand, and starting one regardless of the dice.
-  ipcMain.handle('minecraft:stop-playing', () => { endMinecraftSession('asked to stop'); return true; });
   ipcMain.handle('web:status', () => {
     const access = getWebAccess();
     return {
@@ -15296,7 +16163,6 @@ app.whenReady().then(() => {
   });
   /** Taken off the composer before it was ever sent. */
   ipcMain.handle('attachments:discard', (_e, attachment: Attachment) => { discardStaged(attachment); });
-
   ipcMain.handle('gaming:get', () => readGamingConfig(store.get('gaming')));
   ipcMain.handle('gaming:set', (_e, config: GamingConfig) => {
     const saved = readGamingConfig(config);
@@ -15308,6 +16174,7 @@ app.whenReady().then(() => {
   ipcMain.handle('journal:list', () => getJournal());
   ipcMain.handle('journal:getConfig', () => readJournalConfig(store.get('journal.config')));
   ipcMain.handle('journal:setConfig', (_e, config: JournalConfig) => {
+    if(process.env.HARU_CORE_USER_RECORDS==='on')return coreUserRecord('journal.configure',config);
     const saved = readJournalConfig(config);
     // Under journal.config, beside journal.entries rather than over them.
     store.set('journal.config', saved);
@@ -15315,6 +16182,7 @@ app.whenReady().then(() => {
     return saved;
   });
   ipcMain.handle('journal:save', (_e, entry: { date?: string; text: string; mood?: number; anxiety?: number; energy?: number; sleep?: number }) => {
+    if(process.env.HARU_CORE_USER_RECORDS==='on')return coreUserRecord('journal.save',entry);
     const date = typeof entry.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : localDateKey(zonedNow(CHAT_TIMEZONE));
     const entries = upsertEntry(getJournal(), {
       date,
@@ -15332,7 +16200,7 @@ app.whenReady().then(() => {
     console.log(`[journal] saved ${date} by hand: ${String(entry.text ?? '').length} chars`);
     return entries;
   });
-  ipcMain.handle('journal:remove', (_e, id: string) => { setJournal(getJournal().filter(entry => entry.id !== id)); return getJournal(); });
+  ipcMain.handle('journal:remove', (_e, id: string) => { if(process.env.HARU_CORE_USER_RECORDS==='on')return coreUserRecord('journal.remove',{id}); setJournal(getJournal().filter(entry => entry.id !== id)); return getJournal(); });
   ipcMain.handle('journal:trend', () => recentTrend(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
   ipcMain.handle('journal:stats', (_e, range: RangeName) => rangeStats(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE)), range));
   ipcMain.handle('journal:note', () => haruNote(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
@@ -15366,7 +16234,7 @@ app.whenReady().then(() => {
     const updated = toggleKept(id);
     // Only on the way into done. Un-ticking is a correction, and being crowed at
     // for fixing a mistake is a different feeling entirely.
-    if (updated?.done) void remarkOnTickOff(updated);
+    if (process.env.HARU_CORE_AGENDA_LIFECYCLE==='on' ? corePolicySync<boolean>('agenda-life.manualRemark',[updated]) : updated?.done) void remarkOnTickOff(updated!);
   });
   ipcMain.handle('kept:remove', (_e, id: string) => { removeKept(id); });
   ipcMain.handle('google:status', () => googleStatus(store));
@@ -15377,7 +16245,17 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => {
     const door = herAsleepNow() ? knockWhileAsleep() : null;
     if (door) return { content: door, ignored: false, irritation: 0, ego: 0 };
-    return ollamaChat(messages, config);
+    // The lines said over this turn's tools belong to this turn, so they are
+    // held by the request and go with it.
+    const narrated: string[] = [];
+    return ollamaChat(messages, config, { onToolCall: name => narrateTool(name, narrated) }).then(reply => ({
+      ...reply,
+      // The label is how she was told to say the line, not part of it. The
+      // other five doors take it out at the source and this one did not; the
+      // mood is read inside the turn, before the labels are gone, so the face
+      // and the voice still get it.
+      content: stripDelivery(reply.content ?? ''),
+    }));
   });
   // Streaming, for a client that draws the line as it is written rather than
   // waiting for the whole of it. Same generation as ai:send; each stretch is
@@ -15386,7 +16264,7 @@ app.whenReady().then(() => {
   // said the line she ended on, which is the face a terminal should leave her
   // wearing.
   ipcMain.handle('ai:stream', (_e, turn: string, messages: { role: string; content: string }[], config: ProviderConfig) => {
-    const tell = (channel: string, payload: unknown) => { for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload); };
+    const tell = (channel: string, payload: unknown) => { sendToWindows(channel, payload); };
     const door = herAsleepNow() ? knockWhileAsleep() : null;
     if (door) return { content: door, ignored: false, irritation: 0, ego: 0, mood: null };
     let clean = cleaningChunks(text => tell('ai:chunk', { turn, text }));
@@ -15571,12 +16449,10 @@ app.whenReady().then(() => {
     console.log('[summon] opened');
     return line;
   });
-
   ipcMain.handle('companion:close', () => {
     summonOpen = false;
     console.log('[summon] closed');
   });
-
   /**
    * A message typed at her window, answered as if it had been typed at her chat.
    *
@@ -15611,7 +16487,6 @@ app.whenReady().then(() => {
     console.log(`[summon] answered ${said.length} chars with ${reply.length}${choices.length ? ` and ${choices.length} choices` : ''}`);
     return { reply, ignored: Boolean(answer.ignored), choices };
   });
-
   ipcMain.handle('companion:showMenu', () => {
     const pinned = store.get('companion.pinned', true) as boolean;
     const expressions = readExpressionNames();
@@ -15643,26 +16518,60 @@ app.whenReady().then(() => {
     template.push({ type: 'separator' }, { label: 'Hide character', click: () => { store.set('companion.hidden', true); companionWindow?.hide(); } }, { label: 'Quit', click: () => app.quit() });
     Menu.buildFromTemplate(template).popup({ window: companionWindow ?? undefined });
   });
-  // Started at login she is only the character on the desktop, and the chat
-  // window waits until it is asked for. The companion, though, shows itself
-  // only once a model has been imported — so with no model, skipping this would
-  // leave the app running with nothing on screen and no way back into it.
-  if (!startedHidden() || !store.get('live2d.model')) createWindow();
-  createCompanionWindow();
-  reportCapabilities();
-  startWindowsHelper();
-  watchScreenshots();
-  startWatchingScreen();
-  // Opened at boot when it was left on, for the same reason the screen watcher
-  // is: doing it inside the settings handler means it only ever starts for
-  // somebody who opens settings, which is nobody on the second day.
-  void startWebDoor();
-  // Discord was taken out on 2026-09-16. Its settings and encrypted bot token
-  // go with it, so nothing of it is left in the config to export or sync.
-  for (const key of ['discord', 'discordToken']) {
-    if (store.get(key) !== undefined) { store.delete(key as never); console.log(`[startup] removed the old ${key} setting`); }
-  }
-  startMinecraft();
+}
+
+let corePeriodic: ReturnType<typeof import('./core-periodic').createCorePeriodic> | null = null;
+function startNativePeriodicWork() {
+    if (coreBackgroundStarted) return;
+    if (process.env.HARU_CORE_SCHEDULER !== 'on') throw Error('core_periodic_requires_scheduler');
+    const systemEvents = readSystemEvents();
+    corePeriodic = require('./core-periodic').createCorePeriodic({
+        config: { sampleSeconds: systemEvents.sampleSeconds },
+        handlers: {
+            'life': lifeTick,
+            'steam-index': () => { steamGames = buildGameIndex(); },
+            'voice-revive': reviveVoiceServer,
+            'chat-reset': performChatResetIfDue,
+            'journal': askForJournal,
+            'google-sync': backgroundSync,
+            'balance': () => checkVeniceBalance('native periodic check'),
+            'check-ins': () => pullCheckIns().then(syncMemories),
+            'memory-vectors': refreshMemoryVectors,
+            'memory-sort': () => memoryStore.sortPending(),
+            'world': async () => { await workWorld.observe({speaking:speakingNow,asleep:herAsleepNow()}); },
+            'hands': herHandsTick,
+            'thought': thoughtTick,
+            'vault-sync': syncVaultAndRetire,
+            'recall-vectors': refreshRecallVectors,
+            'graph': readGraphTick,
+            'overheard': readOverheardTick,
+            'forming': formingTick,
+            'graph-page': () => syncGraphPage('startup'),
+            'vault-publish': () => publishToVault('native periodic check'),
+            'synced-shots': lookAtSyncedShots,
+            'system-sample': sampleSystem,
+            'task-catalog': refreshTaskCatalog,
+            'phone-opportunities': checkPhoneOpportunities,
+            'proactive': proactiveTick,
+            'chase': chaseTick,
+        },
+    });
+    coreBackgroundStarted = true;
+    coreLifeStarted = true;
+    setDefaultAutoSelectFamilyAttemptTimeout(5_000);
+    mergeArchiveFragments();
+    // The fictional save is archived; only Core-owned work facts are observed.
+    loadRecallVectors();
+    startLifeLoop();
+    startPhoneOpportunities();
+    scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
+    scheduler.start();
+    corePeriodic!.start();
+}
+let coreLifeStarted=false;
+function startCoreLifeWork() {
+  if(coreLifeStarted)return;
+  coreLifeStarted=true;
   // Her voice is a separate program, and opening Haru is the moment to notice it
   // is not running.
   void reviveVoiceServer();
@@ -15684,6 +16593,175 @@ app.whenReady().then(() => {
   setInterval(() => { void askForJournal(); }, CHAT_RESET_POLL_MS);
   scheduleBackgroundSync();
   startLifeLoop();
+}
+
+let coreBackgroundStarted=false;
+function startCoreBackgroundWork() {
+  if(coreBackgroundStarted)return;
+  coreBackgroundStarted=true;
+  // Node gives up on an address after 250 ms while it tries the next family.
+  // Hume, like Apple, is further than that from here, so every connection
+  // made through Node's own stack — the call socket, not Chromium's fetch —
+  // would time out before it began. apns.ts sets this per connection; a
+  // WebSocket has no such option, so the default is raised once here.
+  setDefaultAutoSelectFamilyAttemptTimeout(5_000);
+  // The money behind her hosted voice, on the hour; the day it ran out, nobody knew.
+  setTimeout(() => void checkVeniceBalance('startup'), 2 * 60_000);
+  setInterval(() => void checkVeniceBalance('the hour'), 60 * 60_000);
+  // Whatever was said to her elsewhere today. Once at startup, then quietly on
+  // the hour — often enough that the evening review has it, rare enough that a
+  // sleeping server is not being knocked on constantly.
+  void pullCheckIns().then(syncMemories);
+  setInterval(() => void pullCheckIns().then(syncMemories), 15 * 60_000);
+
+
+  // Loaded here rather than at the top because app.getPath needs the app ready
+  // — but the file itself is a quiet local read, and a store that cannot be
+  // read is an empty one, never a crash.
+  if(process.env.HARU_CORE_BRAIN_WORKER!=='on')void knowledge.load();
+  void refreshMemoryVectors();
+  // Whatever was written before sorting existed, or while the model was away,
+  // sorted once the start-up rush is over.
+  memoryStore.scheduleSort(90_000);
+  // The consolidation sweep, decay, archive pruning and haunt hygiene, daily at
+  // a time of day (scheduler.ts). They used to run a minute after boot and then
+  // every twenty-four hours from it — and with restarts every few hours the
+  // interval never fired, so the sweep ran as often as the app was restarted.
+  // Missed while down, the day's sweep runs at the next start. The same
+  // dispatcher brings her own bookings back to her.
+  scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
+  // Core-owned work observation replaces the retired simulation timer.
+  // Level 4: her own hands, looked at every few minutes (herhands.ts).
+  setInterval(() => { void herHandsTick(); }, 5 * 60_000);
+  setTimeout(() => scheduler.start(), 30_000);
+  // Her thoughts between messages (thoughts.ts): triggers looked at every five
+  // minutes, the brain asked only when one has fired.
+  setInterval(() => { void thoughtTick(); }, THOUGHT_TICK_MS);
+  const knowledgeSummary = knowledgeStats(knowledge.current());
+  console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
+  // A saved vault keeps itself current without being asked: a first check a
+  // minute after boot, then hourly. Runs on the knowledge queue, so it never
+  // waits on or blocks a conversation.
+  setTimeout(() => { void syncVaultAndRetire(); }, 60_000);
+  setInterval(() => { void syncVaultAndRetire(); }, 60 * 60_000);
+  // And her own folder in it, the other way round.
+  loadRecallVectors();
+  setTimeout(() => { void refreshRecallVectors(); }, 90_000);
+  setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
+  // Who is who: the finished days not yet read, a day a minute until caught up.
+  setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
+  // Slow on purpose: a pass is a call to the same card her replies come off.
+  setInterval(() => { void readOverheardTick(); }, 60_000);
+  setInterval(() => { void formingTick(); }, FORMING_TICK_MS);
+  // His page of what the graph believes: written at start, corrections read back hourly with the vault.
+  setTimeout(() => syncGraphPage('startup'), 100_000);
+  setTimeout(() => publishToVault('startup'), 30_000);
+  setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
+  // A first pass shortly after boot so a backlog the desk sent overnight is
+  // already being worked through by the time anyone asks, then every five
+  // minutes. Both are no-ops until vision is switched on and shots exist.
+  setTimeout(() => { void lookAtSyncedShots(); }, 90_000);
+  setInterval(() => { void lookAtSyncedShots(); }, SHOT_LOOK_TICK_MS);
+  // The system sampler. Lightweight and self-contained, so a slow sample can
+  // never hold up a conversation; events it fires go through interject, the
+  // same channel her other unprompted lines use.
+  const systemEvents = readSystemEvents();
+  console.log(`[system] sampler armed (every ${systemEvents.sampleSeconds}s, level ${readSystemConfig().level})`);
+  setTimeout(() => { void sampleSystem(); }, 10_000);
+  setInterval(() => { void sampleSystem(); }, systemEvents.sampleSeconds * 1000);
+}
+
+app.whenReady().then(() => {
+  if (!isPrimaryInstance) return;
+  watchForUpdates();
+  startCoreBackgroundWork();
+  protocol.handle('haru-model', async request => {
+    const url = new URL(request.url);
+    const segments = url.pathname.split('/').filter(Boolean);
+    const [id, ...rest] = segments;
+    const root = id ? live2dRoots.get(id) : undefined;
+    if (!root) {
+      console.error(`[haru-model] unknown id=${id} for ${request.url} (known ids: ${[...live2dRoots.keys()].join(', ') || 'none'})`);
+      return new Response('Model file not available', { status: 404 });
+    }
+    const relative = rest.map(decodeURIComponent).join('/');
+    const target = path.resolve(root, `./${relative}`);
+    if (!target.startsWith(root)) {
+      console.error(`[haru-model] resolved path escapes root: root=${root} target=${target} (requested as ${request.url})`);
+      return new Response('Model file not available', { status: 404 });
+    }
+    try {
+      // The manifest is rewritten in flight so expressions sitting unreferenced
+      // on disk still reach the runtime. Everything else is served untouched.
+      if (target.toLowerCase().endsWith('.model3.json')) {
+        const { model, added } = withDiscoveredExpressions(JSON.parse(readFileSync(target, 'utf8')), path.dirname(target));
+        if (added) console.log(`[live2d] model declared no expressions; found ${added} on disk`);
+        return new Response(JSON.stringify(model), { headers: { 'Content-Type': 'application/json' } });
+      }
+      return await net.fetch(pathToFileURL(target).toString());
+    } catch (error) {
+      console.error(`[haru-model] failed to read ${target} (requested as ${request.url}):`, error);
+      return new Response('Model file not found on disk', { status: 404 });
+    }
+  });
+  /**
+   * An attached picture, on its way to the window.
+   *
+   * The same shape as haru-model above and the same escape check, for the same
+   * reason: this resolves a path out of a URL the renderer asked for. The root
+   * is read fresh on every request rather than captured, so pointing the folder
+   * somewhere else in setup does not leave a handler serving the old one.
+   *
+   * Only a basename is ever in the URL, and resolve + startsWith is what makes
+   * that true rather than merely intended.
+   */
+  protocol.handle('haru-photo', async request => {
+    const root = path.resolve(photoFolder());
+    // The whole path, not everything after the first segment. haru-model drops
+    // its first segment because that one is a model id — this scheme has no id,
+    // only a filename, so the same slice threw the name away and left every
+    // thumbnail resolving to the folder itself and failing the check below.
+    const name = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
+    const target = path.resolve(root, `./${name}`);
+    if (!name || !target.startsWith(root + path.sep)) {
+      console.error(`[haru-photo] refused ${request.url} — resolves outside the pictures folder`);
+      return new Response('Not available', { status: 404 });
+    }
+    try {
+      return await net.fetch(pathToFileURL(target).toString());
+    } catch (error) {
+      // A thumbnail for a file that has been deleted or moved. Worth a line, not
+      // worth an alarm: the conversation still holds what was said about it.
+      console.warn(`[haru-photo] could not read ${path.basename(target)}:`, error instanceof Error ? error.message : error);
+      return new Response('Not on disk', { status: 404 });
+    }
+  });
+  // Registered once, at startup. It was inside the protocol handler above, so it
+  // never ran until a model file was requested and then threw on the second
+  // request — ipcMain.handle refuses a duplicate channel.
+  nativeTheme.themeSource = 'dark';
+  registerApplicationChannels();
+
+  // Started at login she is only the character on the desktop, and the chat
+  // window waits until it is asked for. The companion, though, shows itself
+  // only once a model has been imported — so with no model, skipping this would
+  // leave the app running with nothing on screen and no way back into it.
+  if (!startedHidden() || !store.get('live2d.model')) createWindow();
+  createCompanionWindow();
+  reportCapabilities();
+  startWindowsHelper();
+  watchScreenshots();
+  startWatchingScreen();
+  // Opened at boot when it was left on, for the same reason the screen watcher
+  // is: doing it inside the settings handler means it only ever starts for
+  // somebody who opens settings, which is nobody on the second day.
+  void startWebDoor();
+  // Discord was taken out on 2026-09-16. Its settings and encrypted bot token
+  // go with it, so nothing of it is left in the config to export or sync.
+  for (const key of ['discord', 'discordToken']) {
+    if (store.get(key) !== undefined) { store.delete(key as never); console.log(`[startup] removed the old ${key} setting`); }
+  }
+  startCoreLifeWork();
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 // Put the machine's volume back before going anywhere. Leaving a user's audio
@@ -15734,7 +16812,6 @@ app.on('before-quit', () => {
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
-  try { stopMinecraft(); } catch (error) { noteCrash('closing the Minecraft link', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 
@@ -15744,7 +16821,27 @@ app.on('before-quit', () => {
  * take three seconds, so anything still going at that point is stuck.
  */
 app.on('will-quit', () => {
+  try { store.close(); } catch (error) { noteCrash('closing Core memory', error); }
   setTimeout(() => { console.warn('[quit] shutdown stalled — exiting anyway'); app.exit(0); }, 3000).unref();
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+/** Explicit compatibility entry: Python owns lifecycle; no Electron startup. */
+export function createCoreBrainAdapter() {
+  if (process.env.HARU_CORE_BRAIN_WORKER !== 'on' || process.env.HARU_CORE_STORAGE !== 'on') throw Error('core_brain_worker_required');
+  registerApplicationChannels();
+  const deps = webDeps();
+  return {deps, store, taskBridge, memoryStore, scheduler, readGraphTick, readDayIntoGraph, consolePort,
+    async prepare() { setDefaultAutoSelectFamilyAttemptTimeout(5_000);await knowledge.load(); loadRecallVectors(); },
+    attach(server:Awaited<ReturnType<typeof startWebServer>>) {webServer=server;webTrouble='';},
+    startBackground() {
+      if (process.env.HARU_CORE_PERIODIC === 'on') { startNativePeriodicWork(); return; }
+      if(coreBackgroundStarted)return;
+      void refreshTaskCatalog();setInterval(()=>void refreshTaskCatalog(),3_600_000);
+      startCoreBackgroundWork();startCoreLifeWork();
+      startPhoneOpportunities();startProactive();startChasing();
+    },
+    async close() { corePeriodic?.stop(); scheduler.stop();if(tickTimer)clearTimeout(tickTimer);persistVitals(true);webServer=null;taskBridge.close();store.close(); },
+  };
+}

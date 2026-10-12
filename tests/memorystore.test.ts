@@ -37,6 +37,7 @@ function harness(options: Partial<{
   blocks: MemoryBlock[];
   embedder: Embedder | null;
   sort: MemoryStoreDeps['sort'];
+  queryTimeoutMs: number;
 }> = {}) {
   let saved = options.memories ? [...options.memories] : [];
   const forgotten: ForgettingEntry[] = [];
@@ -62,8 +63,8 @@ function harness(options: Partial<{
       if (!embedder) return null;
       return {
         model: embedder.model,
-        embed: async (text) => { embedded.push(text); return embedder.embed(text); },
-        embedBatch: async (texts) => { embedded.push(...texts); return embedder.embedBatch(texts); },
+        embed: async (text, options) => { embedded.push(text); return embedder.embed(text, options); },
+        embedBatch: async (texts, options) => { embedded.push(...texts); return embedder.embedBatch(texts, options); },
       };
     },
     character: () => ({ identity: 'Haru', style: 'dry' }),
@@ -71,6 +72,7 @@ function harness(options: Partial<{
     following: () => [],
     agenda: () => [],
     herOwnLife: () => '',
+    queryTimeoutMs: options.queryTimeoutMs,
     ...(options.sort ? { sort: options.sort } : {}),
   };
   const store = createMemoryStore(deps);
@@ -138,6 +140,59 @@ test('a query is embedded once however often it is asked', async () => {
   const second = await h.store.embedQuery('how is the guitar going');
   assert.deepEqual(first, second);
   assert.equal(h.embedded.length, 1, 'the second ask should have been free');
+});
+
+test('concurrent identical queries share one bounded request, and model changes miss the cache', async () => {
+  let finish!: (vector: number[]) => void;
+  const model = { ...stubEmbedder(), embed: async () => new Promise<number[]>(resolve => { finish = resolve; }) };
+  const h = harness({ embedder: model });
+  const first = h.store.embedQuery('same query');
+  const second = h.store.embedQuery('same query');
+  await Promise.resolve();
+  assert.equal(h.embedded.length, 1);
+  finish([1]);
+  assert.deepEqual(await Promise.all([first, second]), [[1], [1]]);
+  model.model = 'new model';
+  model.embed = async () => [2];
+  assert.deepEqual(await h.store.embedQuery('same query'), [2]);
+  assert.equal(h.embedded.length, 2);
+});
+
+test('an embedding that never settles returns the keyword fallback on its deadline; late results stay uncached', async () => {
+  let signal: AbortSignal | undefined;
+  let finish!: (vector: number[]) => void;
+  const model: Embedder = { ...stubEmbedder(), embed: async (_text, options) => {
+    signal = options?.signal;
+    return new Promise(resolve => { finish = resolve; });
+  } };
+  const h = harness({ embedder: model, queryTimeoutMs: 20 });
+  const timings: unknown[] = [];
+  h.deps.embeddingTiming = event => timings.push(event);
+  const started = performance.now();
+  assert.equal(await h.store.embedQuery('private query'), null);
+  assert.ok(performance.now() - started < 1000);
+  assert.equal(signal?.aborted, true);
+  finish([999]);
+  await new Promise(resolve => setImmediate(resolve));
+  model.embed = async () => [3];
+  assert.deepEqual(await h.store.embedQuery('private query'), [3]);
+  assert.equal(h.embedded.length, 2);
+  assert.equal((timings[0] as any).outcome, 'timeout');
+  assert.ok(!JSON.stringify(timings).includes('private query'));
+});
+
+test('concurrent refreshes share work and a deletion during embedding cannot restore a vector', async () => {
+  let finish!: (vectors: number[][]) => void;
+  const h = harness({ memories: [record({ id: 'a', text: 'Has two cats' })], embedder: {
+    ...stubEmbedder(), embedBatch: async () => new Promise(resolve => { finish = resolve; }),
+  } });
+  const first = h.store.refreshVectors();
+  const second = h.store.refreshVectors();
+  assert.equal(h.embedded.length, 1);
+  h.deps.store.setMemories([]);
+  finish([[1]]);
+  await Promise.all([first, second]);
+  assert.equal(h.store.vectors().size, 0);
 });
 
 test('there is nothing to embed without an embedder, and that is not an error', async () => {

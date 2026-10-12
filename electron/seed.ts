@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Her recent replies, as the model should believe she said them.
 //
 // A small model copies what it can see over what it is told. Measured against
@@ -24,6 +25,8 @@ const FIRST_SENTENCE = /^([\s\S]{0,80}?[.!?…])(\s+|$)/u;
 export const SEEDED_REPLIES = 6;
 
 export function seedEmoji<T extends Turn>(conversation: T[], count = SEEDED_REPLIES): T[] {
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.seedEmoji',[conversation,count]);
+
   const out = conversation.map(turn => ({ ...turn }));
   let touched = 0;
   for (let at = out.length - 1; at >= 0 && touched < count; at--) {

@@ -19,7 +19,9 @@ export type Reaction = 'up' | 'down';
  * restart. See electron/attachments.ts.
  */
 export type AttachmentKind = 'image' | 'audio' | 'video' | 'text' | 'document';
-export interface Attachment { id: string; kind: AttachmentKind; name: string; saved: string; url: string; bytes: number; }
+export interface Attachment { id: string; kind: AttachmentKind; name: string; saved: string; url: string; bytes: number;
+  /** Hers, and not for a glance: drawn in the thread behind a tap. */
+  private?: boolean; }
 
 export interface Message { id: string; role: Role; content: string; time: string; at?: string;
   /** What was attached to this message. Sent with it, and shown above the bubble. */
@@ -42,7 +44,8 @@ export interface Message { id: string; role: Role; content: string; time: string
  * separate type is what stops the two being appended to the same list again.
  */
 export type AsideSource = 'screen' | 'screenshot' | 'activity' | 'fullscreen' | 'reminder' | 'idle' | 'journal' | 'page' | 'poke' | 'kept' | 'other';
-export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; }
+export type NudgePreference = 'more' | 'less' | 'discussed';
+export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; nudgeTopic?: string; nudgeFeedback?: NudgePreference; }
 /**
  * What the app knows about its own next version.
  *

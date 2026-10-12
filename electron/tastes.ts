@@ -1,3 +1,5 @@
+import {corePolicySync} from './core-policy-sync';
+import {coreRandomPolicy} from './core-policy-observations';
 // Things of her own.
 //
 // The night pass gave her something to do while they slept; the guide pass
@@ -54,6 +56,7 @@ export const ADOPT_ODDS = 0.35;
 export const REST_NIGHTS = 1;
 
 export function interestsSummary(interests: Interest[]): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof interestsSummary>>('tastes.interestsSummary',[interests]);
   return interests.map(interest => `${interest.name} (${interest.kind})`).join(', ');
 }
 
@@ -66,6 +69,7 @@ export function interestsSummary(interests: Interest[]): string {
  * paragraph finds nothing.
  */
 export function adoptInstruction(theirs: string[], hers: Interest[], pool: { games: string[]; interests: string[] }): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof adoptInstruction>>('tastes.adoptInstruction',[theirs,hers,pool]);
   const own = hers.length ? `You already have: ${interestsSummary(hers)}. Something different in kind or in flavour from those.` : '';
   const games = pool.games.length ? `Games they have been playing: ${pool.games.slice(0, 6).join(', ')}.` : '';
   const known = pool.interests.length ? `Things they are into, from what you know of them:\n${pool.interests.slice(0, 8).map(text => `- ${text.slice(0, 90)}`).join('\n')}` : '';
@@ -82,6 +86,7 @@ export function adoptInstruction(theirs: string[], hers: Interest[], pool: { gam
 }
 
 export function parseAdoption(raw: string): { kind: InterestKind; name: string; because: string } | null {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof parseAdoption>>('tastes.parseAdoption',[raw]);
   const text = (raw ?? '').replace(/\r/g, '');
   // Spaces only after the colon, never a newline: `\s*` there let an empty
   // NAME line read the BECAUSE line as the name.
@@ -97,6 +102,7 @@ export function parseAdoption(raw: string): { kind: InterestKind; name: string; 
 
 /** Their own things, so hers is never one of them. */
 export function isOneOfTheirs(name: string, theirs: string[]): boolean {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof isOneOfTheirs>>('tastes.isOneOfTheirs',[name,theirs]);
   const plain = (text: string) => text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
   const mine = plain(name);
   if (!mine) return true;
@@ -105,6 +111,7 @@ export function isOneOfTheirs(name: string, theirs: string[]): boolean {
 
 /** What to search for on a given night with it: a different angle each time. */
 export function nightQuery(interest: Interest): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof nightQuery>>('tastes.nightQuery',[interest]);
   const angles: Record<InterestKind, string[]> = {
     game: ['review', 'best characters', 'story explained', 'why it is good', 'criticism', 'lore'],
     anime: ['review', 'best character', 'ending explained', 'why people love it', 'criticism', 'best arc'],
@@ -121,6 +128,7 @@ export function nightQuery(interest: Interest): string {
  * are made of — "the one I rate is X" is a position, "it is good" is not.
  */
 export function deepenInstruction(interest: Interest, query: string, found: string): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof deepenInstruction>>('tastes.deepenInstruction',[interest,query,found]);
   const before = interest.stance ? `What you thought of it before tonight: "${interest.stance}"` : 'You have no settled view of it yet.';
   return [
     `${interest.name} is one of your own things — you took it up ${interest.nights === 0 ? 'tonight' : `${interest.nights} night${interest.nights === 1 ? '' : 's'} ago`} because: "${interest.because}". Tonight you read more about it ("${query}"). This is what you found, and it is everything you know:`,
@@ -135,6 +143,7 @@ export function deepenInstruction(interest: Interest, query: string, found: stri
 }
 
 export function parseDeepening(raw: string): { stance: string; favourite?: string; wants?: string; stands?: string } | null {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof parseDeepening>>('tastes.parseDeepening',[raw]);
   const text = (raw ?? '').replace(/\r/g, '').trim();
   if (!text) return null;
   // On its own line as asked, or run on after the view on the same line, which
@@ -159,6 +168,7 @@ export function parseDeepening(raw: string): { stance: string; favourite?: strin
 
 /** Which of hers to spend tonight on: the one left longest, and not last night's. */
 export function pickTonight(interests: Interest[], nowMs: number, random: () => number = Math.random): Interest | null {
+  if(process.env.HARU_CORE_PROJECTS==='on')return coreRandomPolicy<ReturnType<typeof pickTonight>>('tastes.pickTonight',[interests,nowMs],random);
   const rested = interests.filter(interest => nowMs - Date.parse(interest.lastAt) >= REST_NIGHTS * 20 * 3_600_000);
   const pool = rested.length ? rested : interests;
   if (!pool.length) return null;
@@ -168,11 +178,13 @@ export function pickTonight(interests: Interest[], nowMs: number, random: () => 
 }
 
 export function adopt(interests: Interest[], picked: { kind: InterestKind; name: string; because: string }, day: string, nowIso: string): Interest[] {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof adopt>>('tastes.adopt',[interests,picked,day,nowIso,Math.random().toString(36).slice(2,10)]);
   const interest: Interest = { id: Math.random().toString(36).slice(2, 10), kind: picked.kind, name: picked.name, because: picked.because, since: day, nights: 0, lastAt: nowIso, stance: '' };
   return [...interests, interest].slice(-MAX_INTERESTS);
 }
 
 export function deepen(interests: Interest[], id: string, next: { stance: string; favourite?: string; wants?: string; stands?: string }, nowIso: string): Interest[] {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof deepen>>('tastes.deepen',[interests,id,next,nowIso]);
   return interests.map(interest => interest.id === id
     ? { ...interest, nights: interest.nights + 1, lastAt: nowIso, stance: next.stance, favourite: next.favourite ?? interest.favourite, wants: next.wants ?? interest.wants, stands: next.stands ?? interest.stands }
     : interest);
@@ -194,6 +206,7 @@ function withoutAsides(text: string): string {
 const NOT_A_VERB = /^(?:[A-Z]|(?:a|an|the|for|season|more|less|someone|people|them|his|her|their|my|some|any|no)\b)/;
 
 export function tastesInstruction(interests: Interest[]): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof tastesInstruction>>('tastes.tastesInstruction',[interests]);
   const settled = interests.filter(interest => interest.stance);
   if (!settled.length) return '';
   const lines = settled.map(interest => {
@@ -237,12 +250,14 @@ export function tastesInstruction(interests: Interest[]): string {
  * later is a view, one that opens by addressing someone is a message.
  */
 export function addressesSomeone(text: string): boolean {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof addressesSomeone>>('tastes.addressesSomeone',[text]);
   const opening = (text ?? '').trim().split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ');
   return /\b(?:you|your|you're|yourself|subordinate|listen up|don't get cocky|get moving)\b/i.test(opening) && !/\b(?:you'd think|you could say|you know the type)\b/i.test(opening);
 }
 
 /** The addressed opening cut off, leaving the view. */
 export function unaddressed(text: string): string {
+  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof unaddressed>>('tastes.unaddressed',[text]);
   const sentences = (text ?? '').trim().split(/(?<=[.!?…])\s+/);
   let index = 0;
   while (index < sentences.length && index < 3 && /\b(?:you|your|you're|yourself|subordinate|listen up)\b/i.test(sentences[index])) index++;

@@ -9,14 +9,22 @@ START='<!-- LIVE-SNAPSHOT-START -->'
 END='<!-- LIVE-SNAPSHOT-END -->'
 
 snapshot="$(python3 - <<'PY'
-import json, os, socket, subprocess, datetime
+import json, os, socket, subprocess, datetime, sqlite3
 
 home = os.path.expanduser('~')
 cfg = {}
 try:
-    cfg = json.load(open(os.path.join(home, '.config/haru-desktop/config.json')))
+    database = os.path.join(home, 'haru-core/data/haru-core.db')
+    current = None
+    if os.path.exists(database):
+        with sqlite3.connect('file:' + database + '?mode=ro', uri=True) as db:
+            if db.execute("select 1 from sqlite_master where name='authority_head'").fetchone() and db.execute('select 1 from authority_head').fetchone():
+                row = db.execute("select body from authority_documents where name='config'").fetchone()
+                if not row: raise RuntimeError('Core config document is missing')
+                current = json.loads(row[0])
+    cfg = current if current is not None else json.load(open(os.path.join(home, '.config/haru-desktop/config.json')))
 except Exception as e:
-    print(f'<!-- could not read config.json: {e} -->')
+    print(f'<!-- could not read current configuration: {e} -->')
 
 def port_up(port, host='127.0.0.1'):
     try:
@@ -47,8 +55,16 @@ for role, c in (('Main conversation', conv), ('Nudges', nudge)):
     lines.append('| %s | `%s` | `%s` | `%s` | %s |' % (role, c.get('provider', '—'), c.get('model', '—'), c.get('endpoint', '—'), c.get('temperature', '—')))
 if emot:
     lines.append('| Emotion classifier | `%s` | `%s` | `%s` | %s |' % (emot.get('provider', '—'), emot.get('model', '—'), emot.get('endpoint', '—'), emot.get('temperature', '—')))
-if esc:
-    lines.append('| Escalation (≥%s words) | `%s` | `%s` | `%s` | %s |' % (esc_words, esc.get('provider', '—'), esc.get('model', '—'), esc.get('endpoint', '—'), esc.get('temperature', '—')))
+for entry in ai.get('modelRegistry', {}).get('entries', []):
+    if entry.get('role') == 'conversation': continue
+    c = entry.get('config', {})
+    lines.append('| %s | `%s` | `%s` | `%s` | %s |' % (entry.get('role', '—'), c.get('provider', '—'), c.get('model', '—'), c.get('endpoint', '—'), c.get('temperature', '—')))
+if not ai.get('modelRegistry') and esc:
+    lines.append('| Escalation | `%s` | `%s` | `%s` | %s |' % (esc.get('provider', '—'), esc.get('model', '—'), esc.get('endpoint', '—'), esc.get('temperature', '—')))
+policy = ai.get('taskPolicy', {})
+lines.append('')
+lines.append('- Automatic escalation: **%s**; allowance **$%.2f/task**, **$%.2f/day**; at most **%s quality handoff**.' % ('enabled' if cfg.get('escalate', {}).get('enabled') else 'disabled', policy.get('taskBudgetMicros', 0) / 1e6, policy.get('dailyBudgetMicros', 0) / 1e6, policy.get('maxEscalations', 0)))
+lines.append('- Listed routes are configured assignments; dispatch also requires credentials, fresh pricing and sufficient allowance.')
 lines.append('')
 lines.append('- Context: `ctx=%s`, `historyChars=%s`, `summaryDays=%s`' % (ai.get('numCtx', '—'), ai.get('historyChars', '—'), ai.get('summaryDays', '—')))
 lines.append('')

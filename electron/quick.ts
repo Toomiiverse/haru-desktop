@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 import { IRRITATION } from './mood';
 // Deterministic answers for the messages a phone most often sends.
 //
@@ -43,6 +44,7 @@ export type QuickHit = { reply: string; tier: 1 | 2 | 3 };
  * and only the mechanical lookups (the time, the date, the list) stay instant.
  */
 export function quickAnswer(text: string, data: QuickData, { social = true } = {}): QuickHit | null {
+  if(process.env.HARU_CORE_QUICK_HANDS==='on')return corePolicySync('quick.answer',[text,data,social]);
   // While she is stonewalling, even the scripted lines hold their tongue — an
   // answer is an answer, and the ignore is the point of the mood at that level.
   if (data.ignoring) return null;
@@ -203,10 +205,37 @@ function agendaLine(label: string, lines: AgendaLine[], data: QuickData): string
  * she is not asked. Only the machine level: it is the one with a history.
  * The sentence has to end there — a level with "tomorrow maybe?" after it is talk.
  */
-export function settingCommand(text: string): { name: 'machine_level'; value: number } | null {
+export type SettingCommand =
+  | { name: 'machine_level'; value: number }
+  | { name: 'brain_model'; value: 'explicit' | 'normal' }
+  | { name: 'escalation'; value: boolean };
+
+export function settingCommand(text: string): SettingCommand | null {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.settingCommand',[text]);}
   const said = text.trim();
   const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
     ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
     ?? /^(?:haru[,!]?\s*)?(?:machine|access)\s+level\s+([1-4])\s*[.!]?$/i.exec(said);
-  return level ? { name: 'machine_level', value: Number(level[1]) } : null;
+  if (level) return { name: 'machine_level', value: Number(level[1]) };
+  // Explicit mode, said outright, and read here for the same reason as the
+  // level: it is said at the hour she would otherwise be asleep, and she cannot
+  // be asked while she is not answering.
+  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:(?:turn|switch|put)\s+on\s+)?(?:explicit|uncensored)(?:\s+mode)?\s*(?:on)?\s*(?:please)?[.!]*$/i.test(said)) {
+    return { name: 'brain_model', value: 'explicit' };
+  }
+  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+off\s+(?:explicit|uncensored)(?:\s+mode)?\s*(?:please)?[.!]*$/i.test(said)
+      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:explicit|uncensored)\s+mode\s+off\s*(?:please)?[.!]*$/i.test(said)) {
+    return { name: 'brain_model', value: 'normal' };
+  }
+  // What may leave the machine, said outright. It decides whether a turn can
+  // go to a hosted model at all, so it is a switch he sets, not a mood.
+  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+on\s+(?:the\s+)?escalation\s*(?:please)?[.!]*$/i.test(said)
+      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:allow|enable)\s+escalation\s*(?:please)?[.!]*$/i.test(said)) {
+    return { name: 'escalation', value: true };
+  }
+  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+off\s+(?:the\s+)?escalation\s*(?:please)?[.!]*$/i.test(said)
+      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:disable|stop)\s+escalation\s*(?:please)?[.!]*$/i.test(said)) {
+    return { name: 'escalation', value: false };
+  }
+  return null;
 }

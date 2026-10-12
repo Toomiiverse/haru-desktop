@@ -3,7 +3,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPrivateKey, generateKeyPairSync, verify } from 'node:crypto';
-import { apnsJwt, apnsPayload, isDeviceToken, readApnsConfig, readApnsDevices, tokenIsGone } from '../electron/apns';
+import { apnsHeaders, apnsJwt, apnsPayload, isDeviceToken, readApnsConfig, readApnsDevices, tokenIsGone } from '../electron/apns';
+
+test('spontaneous APNs expire offline while reminders retain their delivery policy', () => {
+  const config = { keyPath: '/unused', keyId: 'test', teamId: 'test', bundleId: 'test' };
+  const spontaneous = apnsHeaders('synthetic-token', config, 'synthetic-jwt', 'haru-random', 0);
+  assert.equal(spontaneous['apns-expiration'], '0');
+  assert.equal(spontaneous['apns-collapse-id'], 'haru-random');
+  assert.equal(apnsHeaders('synthetic-token', config, 'synthetic-jwt', 'event')['apns-expiration'], undefined);
+});
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;

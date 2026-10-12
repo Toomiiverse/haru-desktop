@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 import type { KnowledgeChunk } from './knowledge';
 import type { ScoredChunk } from './retrieval';
 
@@ -32,6 +33,7 @@ function formatItem(item: ScoredChunk): string {
 }
 
 export function buildKnowledgeContext(items: ScoredChunk[], options: ContextOptions): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.context',[items,options]);
   const sorted = [...items].sort((a, b) => b.score - a.score);
   const sections: { heading?: string; lines: string[]; score: number }[] = [];
   for (const item of sorted) {
@@ -62,5 +64,6 @@ export function buildKnowledgeContext(items: ScoredChunk[], options: ContextOpti
 }
 
 export function emptyKnowledgeContext(): string {
-  return 'Nothing in the stored knowledge matched this. If the question is about the user\'s own files, projects or setup, say you do not have enough information rather than inventing an answer, and do not describe documents you have not read.';
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.empty',[]);
+  return 'No additional stored knowledge matched this query. Facts supplied in the current user message and recent conversation still count as evidence; an empty lookup does not contradict them. Use those facts for requested creative suggestions, clearly treating new details as suggestions. Only if essential facts are absent should you say you do not have enough information. Do not describe documents you have not read.';
 }

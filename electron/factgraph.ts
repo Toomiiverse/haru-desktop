@@ -25,6 +25,8 @@
 //
 // Pure: the model call and the file live in main.ts and store.ts.
 
+import {corePolicySync} from './core-policy-sync';
+
 export const ENTITY_KINDS = ['person', 'pet', 'place', 'organisation', 'project', 'media', 'device', 'thing'] as const;
 export type EntityKind = typeof ENTITY_KINDS[number];
 
@@ -111,6 +113,7 @@ export function emptyGraph(): FactGraph {
 
 /** A file somebody edited by hand comes back usable rather than throwing — the bargain memories.json makes. */
 export function normalizeGraph(value: unknown): FactGraph {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.normalizeGraph', [value]);
   if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyGraph();
   const held = value as Partial<Record<keyof FactGraph, unknown>>;
   const text = (candidate: unknown) => (typeof candidate === 'string' ? candidate : '');
@@ -149,6 +152,7 @@ export function normalizeGraph(value: unknown): FactGraph {
 
 /** The user as e0, named as the profile names him. Renamed in place when the profile changes. */
 export function withUser(graph: FactGraph, userName: string, day: string): FactGraph {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.withUser', [graph, userName, day]);
   const name = userName.trim() || 'the user';
   const existing = graph.entities.find(entity => entity.id === USER_ENTITY);
   if (existing?.name === name) return graph;
@@ -305,6 +309,7 @@ function capitalisedMidSentence(text: string, word: string): boolean {
  * then a full name whose first name is a person known only by that.
  */
 export function findEntity(graph: FactGraph, name: string, userName = ''): GraphEntity | undefined {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.findEntity', [graph, name, userName]);
   const key = nameKey(name, userName);
   if (!key) return undefined;
   if (userName && key === nameKey(userName)) return graph.entities.find(entity => entity.id === USER_ENTITY);
@@ -329,6 +334,7 @@ export function findEntity(graph: FactGraph, name: string, userName = ''): Graph
  * own guesses taken as things he said.
  */
 export function extractionPrompt(userName: string): string {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.extractionPrompt', [userName]);
   const user = userName.trim() || 'the user';
   return `You keep a map of the people, pets, places, organisations, projects, media, devices and things in ${user}'s own life, and how they connect. You are given part of one day of ${user}'s chat with Haru, his AI companion.
 
@@ -367,6 +373,7 @@ type DayMessage = { role?: string; content?: unknown };
 
 /** A day as labelled lines, split into pieces a single call reads comfortably. His lines keep more than hers: facts come from him. */
 export function dayChunks(messages: DayMessage[], userName: string, maxChars = 12_000): string[] {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.dayChunks', [messages, userName, maxChars]);
   const user = userName.trim() || 'the user';
   const lines = messages
     .filter(message => message.role === 'user' || message.role === 'assistant')
@@ -394,6 +401,7 @@ export function dayChunks(messages: DayMessage[], userName: string, maxChars = 1
 
 /** What the model is shown as already known: every name, and the current facts about whoever this piece names, with ids it can end. */
 export function knownBlock(graph: FactGraph, chunk: string, userName: string, { maxEntities = 150, maxFacts = 60 } = {}): string {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.knownBlock', [graph, chunk, userName, {maxEntities, maxFacts}]);
   const entities = [...graph.entities]
     .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
     .slice(0, maxEntities)
@@ -413,6 +421,7 @@ export function knownBlock(graph: FactGraph, chunk: string, userName: string, { 
 
 /** The user turn of the extraction call: the day, what is known, and the piece to read. */
 export function extractionInput(day: string, known: string, chunk: string): string {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.extractionInput', [day, known, chunk]);
   return `The day is ${day}.\n\nKNOWN:\n${known}\n\nTRANSCRIPT:\n${chunk}`;
 }
 
@@ -423,6 +432,7 @@ export type Extraction = { entities: EntityDraft[]; facts: FactDraft[]; ended: E
 
 /** Whatever came back, as drafts: a fenced block, prose around the object, or a wrong shape all degrade to what can be read. */
 export function readExtraction(raw: string): Extraction | null {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.readExtraction', [raw]);
   const text = String(raw ?? '');
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -459,6 +469,7 @@ const OWN_KINDS = new Set(['person', 'pet', 'organisation', 'project']);
  * appointment for next Friday".
  */
 export function isPassing(text: string): boolean {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.isPassing', [text]);
   return /\b(today|tonight|tomorrow|yesterday|this (morning|afternoon|evening|weekend|week)|next (week|weekend|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|last night|right now|at the moment)\b/i.test(text)
     || /\b(plans? to|planning to|going to|about to|needs? to|has to|have to|trying to|wants? to)\b/i.test(text)
     || /\b(messaged|asked|picked up|picks up|pick up|went (out|to)|rescheduled|troubleshoot(s|ing|ed)?|dropped off|drops off|is creating|is setting up|free space|GB free)\b/i.test(text)
@@ -477,6 +488,7 @@ const ONE_ONLY = new Set(['birthday', 'born on', 'date of birth', 'birth date'])
  * outlives the ids (see Rejection).
  */
 export function rejectionOf(fact: GraphFact, at: string, subjectNames: string[] = [], objectNames: string[] = []): Rejection {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.rejectionOf', [fact, at, subjectNames, objectNames]);
   const subjects = properNames(subjectNames);
   const objects = fact.object ? properNames(objectNames) : [];
   return {
@@ -511,6 +523,7 @@ function sameSide(id: string | undefined, names: unknown, draftId: string | unde
 
 /** A sentence's content words without the names in it: what is said about them, not who. */
 export function wordsBesides(sentence: string, names: string[]): Set<string> {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return new Set(corePolicySync<string[]>('graph-mutation.wordsBesides', [sentence, names]));
   const named = contentWords(names.join(' '));
   return new Set([...contentWords(sentence)].filter(word => !named.has(word)));
 }
@@ -522,6 +535,7 @@ export function wordsBesides(sentence: string, names: string[]): Set<string> {
  * same by id, or by a name it went by then and goes by now — the id may be new.
  */
 export function isRejected(rejected: Rejection[] | undefined, draft: { subject: string; object?: string; valueKey?: string; relation: string; words: Set<string>; subjectNames?: string[]; objectNames?: string[] }): boolean {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.isRejected', [rejected ?? null, {...draft, words: [...draft.words]}]);
   return (rejected ?? []).some(no => sameSide(no.subject, no.subjectNames, draft.subject, draft.subjectNames)
     && (draft.object ? Boolean(no.object) && sameSide(no.object, no.objectNames, draft.object, draft.objectNames) : Boolean(draft.valueKey) && no.value === draft.valueKey)
     && (no.relation === draft.relation || overlap(new Set(no.words), draft.words) >= 0.5));
@@ -551,6 +565,7 @@ export type ApplyReport = { added: number; confirmed: number; ended: number; rej
  * twice. Returns a new graph; the old one is untouched.
  */
 export function applyExtraction(source: FactGraph, extraction: Extraction, { day, chunk, userName }: { day: string; chunk: string; userName: string }): { graph: FactGraph; report: ApplyReport } {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.applyExtraction', [source, extraction, {day, chunk, userName}]);
   const graph: FactGraph = withUser({
     entities: source.entities.map(entity => ({ ...entity, aliases: [...entity.aliases] })),
     facts: source.facts.map(fact => ({ ...fact })),
@@ -719,6 +734,7 @@ export function applyExtraction(source: FactGraph, extraction: Extraction, { day
 
 /** History that nothing has confirmed goes first, then single-day facts, oldest first. Names nothing points at go with them. */
 export function pruneGraph(graph: FactGraph, max = MAX_FACTS): FactGraph {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.pruneGraph', [graph, max]);
   let facts = graph.facts;
   if (facts.length > max) {
     const order = [...facts].sort((a, b) =>
@@ -813,6 +829,7 @@ export type LinkedFact = { fact: GraphFact; seed: string; depth: 0 | 1 };
  * he is on the other end of nearly everything and would bring all of it.
  */
 export function linkedFacts(graph: FactGraph, message: string, { context = '', userName = '', seeds = 3, perSeed = 6, perNeighbour = 2, neighbours = 4, max = 16 } = {}): LinkedFact[] {
+  if (process.env.HARU_CORE_GRAPH_RETRIEVAL === 'on') return corePolicySync<LinkedFact[]>('graph.linkedFacts', [graph, message, {context, userName, seeds, perSeed, perNeighbour, neighbours, max}]);
   let named = mentionedEntities(graph, message, userName);
   // "how's she doing" names nobody; the message before it may have.
   if (!named.length && context) named = mentionedEntities(graph, context, userName);
@@ -853,6 +870,7 @@ export function linkedFacts(graph: FactGraph, message: string, { context = '', u
  * a list she will otherwise recite.
  */
 export function linkedNote(graph: FactGraph, linked: LinkedFact[], maxChars = LINKED_NOTE_CHARS): string {
+  if (process.env.HARU_CORE_GRAPH_RETRIEVAL === 'on') return corePolicySync<string>('graph.linkedNote', [graph, linked, maxChars]);
   if (!linked.length) return '';
   const name = (id?: string) => graph.entities.find(entity => entity.id === id)?.name ?? '';
   // When it came up, and whether more than once: one mention a month ago is a

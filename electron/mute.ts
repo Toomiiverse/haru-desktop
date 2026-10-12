@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Being asked to be quiet.
 //
 // Her voice on the phone is hers. He can ask her to go quiet; whether she does
@@ -49,6 +50,8 @@ function saidMinutes(text: string): number | null {
  * story. Unmute is checked first, since "unmute" contains "mute".
  */
 export function readMuteAsk(text: string): MuteAsk | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readMuteAsk',[text]);
+
   const said = (text ?? '').trim();
   if (!said || said.split(/\s+/).length > 30) return null;
   if (UNMUTE.test(said)) return { kind: 'unmute', reason: null, polite: POLITE.test(said) };
@@ -80,6 +83,8 @@ export type MuteDecision = { agreed: boolean; why: string; minutes: number; scor
  * little weather on top, so the same day does not always give the same answer.
  */
 export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()): MuteDecision {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.weighMute',[ask,feeling,roll]);
+
   const temper = Math.min(1, feeling.irritation / IRRITATION_MAX);
   const held = Math.min(1, feeling.grudge / GRUDGE_MAX);
   const mood = (feeling.vitals.happiness - 0.5) * 2 + (feeling.vitals.affection - 0.5) * 1.5 - feeling.vitals.stress * 0.5;
@@ -115,6 +120,8 @@ export type MuteState = { since: number; until: number; reason: string };
 
 /** Whether her voice is off on the phone right now. */
 export function isMuted(state: MuteState | null | undefined, now: number): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.isMuted',[state??null,now]);
+
   return Boolean(state && now < state.until);
 }
 
@@ -124,6 +131,8 @@ export function isMuted(state: MuteState | null | undefined, now: number): boole
  * the favour.
  */
 export function breaksMute(state: MuteState | null | undefined, now: number, irritation: number): 'time' | 'temper' | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.breaksMute',[state??null,now,irritation]);
+
   if (!state) return null;
   if (now >= state.until) return 'time';
   if (irritation >= IRRITATION.seething) return 'temper';
@@ -146,6 +155,8 @@ const SITUATION: Record<MuteReason['what'], string> = {
 
 /** What she is told about her own decision, just before his message. */
 export function muteNote(ask: MuteAsk, decision: MuteDecision): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.muteNote',[ask,decision]);
+
   const situation = ask.reason ? ` because ${SITUATION[ask.reason.what]}${ask.reason.said ? ` ("${ask.reason.said}")` : ''}` : ', with no reason given';
   if (decision.agreed) {
     return `[He asked you to stop talking out loud${situation}. You weighed it and decided to do it: ${decision.why}. Your voice is off on his phone from this message on — he will only read you — for about ${span(decision.minutes)}, or until you have had enough of being quiet, whichever you feel first. Tell him so in your own way, as grudging or as gracious as you feel. Do not promise him an exact time.]`;
@@ -154,12 +165,16 @@ export function muteNote(ask: MuteAsk, decision: MuteDecision): string {
 }
 
 export function unmuteNote(wasMuted: boolean): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.unmuteNote',[wasMuted]);
+
   return wasMuted
     ? '[He says you can talk out loud again. Your voice is back on from this message.]'
     : '[He says you can talk out loud — but you were never muted; your voice has been on the whole time.]';
 }
 
 export function brokeMuteNote(state: MuteState, now: number, how: 'time' | 'temper'): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.brokeMuteNote',[state,now,how]);
+
   const ago = span(Math.max(5, (now - state.since) / 60_000));
   return how === 'temper'
     ? `[You went quiet for him ${ago} ago (${state.reason}). He has annoyed you since, and you have stopped doing him the favour: your voice is back on and this reply is spoken out loud. Let him know the quiet is over.]`

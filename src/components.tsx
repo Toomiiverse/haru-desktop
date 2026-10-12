@@ -8,7 +8,7 @@ import { chimeListening, chimeStoppedListening, setChimeVolume } from './compani
 import { randomWait } from './retorts';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export type Page = 'chat' | 'asides' | 'character' | 'profile' | 'settings' | 'journal';
+export type Page = 'chat' | 'asides' | 'character' | 'profile' | 'settings' | 'journal' | 'world';
 
 // Chat is a tab like the rest rather than the thing the others cover up. That is
 // the whole difference between a panel that slides over your conversation and a
@@ -19,6 +19,7 @@ const TABS: { page: Page; label: string; icon?: typeof NotebookPen }[] = [
   // what she has said today, and somebody looking for a line they half heard her
   // say will look beside the conversation, not behind a gear.
   { page: 'asides', label: 'Asides', icon: Quote },
+  { page: 'world', label: 'World', icon: Sparkles },
   { page: 'journal', label: 'Journal', icon: NotebookPen },
   { page: 'profile', label: 'You' },
   { page: 'character', label: 'Character' },
@@ -530,32 +531,13 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
 }
 
 export function CharacterDrawer({ onClose }: { onClose(): void }) {
-  const [character, setCharacter] = useState<Character>({ identity: '', style: '' });
-  const [loaded, setLoaded] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { window.haru?.character.get().then(current => { setCharacter(current); setLoaded(true); }); }, []);
-
-  async function apply(action: () => Promise<Character>) {
-    setBusy(true);
-    try {
-      setCharacter(await action());
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const edit = (field: keyof Character) => (event: React.ChangeEvent<HTMLTextAreaElement>) => setCharacter(current => ({ ...current, [field]: event.target.value }));
+  const [character, setCharacter] = useState<Character | null>(null);
+  useEffect(() => { window.haru?.character.get().then(setCharacter); }, []);
   return <section className="page">
-    <div className="field"><h2>Who Haru is</h2><p>This opens Haru’s prompt, so it shapes how she answers everywhere — chat, reminders and all.</p><textarea value={character.identity} disabled={!loaded} onChange={edit('identity')}/></div>
-    <div className="field"><h2>Stay in character</h2><p>This instruction sits at the very end of the prompt, the last thing read before Haru replies.</p><textarea className="short" value={character.style} disabled={!loaded} onChange={edit('style')}/></div>
-    <div className="drawer-foot">
-      <button className="ghost" disabled={!loaded || busy} onClick={() => apply(() => window.haru!.character.reset())}>Reset to card</button>
-      {saved && <span className="saved"><Check size={13}/> Saved</span>}
-      <button className="solid" disabled={!loaded || busy} onClick={() => apply(() => window.haru!.character.set(character.identity, character.style))}>Save character</button>
-    </div></section>;
+    <p>Haru’s character belongs to her Core. It cannot be changed from the app.</p>
+    <div className="field"><h2>Who Haru is</h2><p>{character?.identity}</p></div>
+    <div className="field"><h2>How she speaks</h2><p>{character?.style}</p></div>
+  </section>;
 }
 
 /**
@@ -592,6 +574,16 @@ function setKeyFor(haru: NonNullable<typeof window.haru>, slot: ReturnType<typeo
     : slot === 'venice' ? haru.venice.setKey(key)
     : haru.ai.setSelfHostedKey(key);
 }
+
+/** A named brain worth switching to in one click. It only fills the same fields
+ *  that can be typed by hand ? nothing here is a mode the rest of the panel
+ *  cannot still override. */
+type BrainPreset = { name: string; note: string; provider: ProviderConfig['provider']; endpoint: string; model: string };
+
+const BRAIN_PRESETS: BrainPreset[] = [
+  { name: 'Qwen3.8 27B', note: 'local ? heretic abliterated', provider: 'ollama', endpoint: 'http://127.0.0.1:11436', model: 'hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-IQ4_XS-mtp.gguf' },
+  { name: 'Cydonia 24B', note: 'local ? RP tune', provider: 'ollama', endpoint: 'http://127.0.0.1:11436', model: 'hf.co/mradermacher/Cydonia-24B-v4.3-i1-GGUF:Q4_K_M' },
+];
 
 export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string, provider?: string): Promise<string[]>; onClose(): void }) {
   const [endpoint, setEndpoint] = useState(config.endpoint);
@@ -646,7 +638,17 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
     onSave({ ...config, provider: next, endpoint: suggested && known.includes(endpoint.trim()) ? suggested : endpoint, model });
   }
 
+  /** A named brain: one click, and it lands in the fields below as if typed. */
+  function applyPreset(preset: BrainPreset) {
+    setEndpoint(preset.endpoint);
+    setModel(preset.model);
+    onSave({ ...config, provider: preset.provider, endpoint: preset.endpoint, model: preset.model });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
   return <section className="page"><div className="field"><h2>Where she thinks</h2><p>Ollama runs on this machine and nothing leaves it. The others are companies you send the conversation to.</p>
+    <div className="form-grid brain-presets"><span className="status-note">Switch brain:</span>{BRAIN_PRESETS.map(preset => <button key={preset.name} type="button" className={config.provider === preset.provider && config.model === preset.model ? 'solid' : 'ghost'} title={`${preset.note} ? ${preset.model}`} onClick={() => applyPreset(preset)}>{preset.name}</button>)}</div>
     <div className="form-grid">
       <select value={config.provider} onChange={event => void chooseProvider(event.target.value as ProviderConfig['provider'])}>
         <option value="ollama">Ollama — on this machine</option>
@@ -824,90 +826,11 @@ function EmotionVoices({ config, onChange }: { config: VoiceConfig; onChange(cha
  */
 function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>): void } = {}) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
-  const [busy, setBusy] = useState<'saving' | 'testing' | null>(null);
-  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
-  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => { window.haru?.voice.get().then(setConfig); }, []);
-  // Re-registered on every edit so the closure the footer holds is never a stale
-  // copy of the settings.
-  useEffect(() => {
-    registerSave?.(async () => { if (config) setConfig(await window.haru!.voice.set(config)); });
-  }, [config, registerSave]);
-  // The list starts empty and is filled in once the platform has enumerated the
-  // installed voices, so it has to be subscribed to as well as read.
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    const read = () => setSystemVoices(window.speechSynthesis.getVoices());
-    read();
-    window.speechSynthesis.addEventListener('voiceschanged', read);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', read);
-  }, []);
-
-  if (!window.haru || !config) return null;
-  const engine = VOICE_ENGINES.find(entry => entry.value === config.engine) ?? VOICE_ENGINES[0];
-  const remote = config.engine === 'openai' || config.engine === 'gpt-sovits' || config.engine === 'breeze';
-  const update = (changes: Partial<VoiceConfig>) => setConfig({ ...config, ...changes });
-
-  async function run(kind: 'saving' | 'testing', action: () => Promise<unknown>, done?: string) {
-    setBusy(kind); setMessage(null);
-    try {
-      const result = await action();
-      setMessage({ text: done ?? String(result) });
-    } catch (error) {
-      // Electron wraps a rejected invoke in boilerplate longer than the reason
-      // itself, and the reason is the only part that says what to fix.
-      const detail = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(error);
-      setMessage({ text: detail, error: true });
-    } finally {
-      setBusy(null);
-    }
-  }
-
+  useEffect(() => { registerSave?.(async () => {}); }, [registerSave]);
   return <div className="field"><h2>Voice</h2>
-    <p>{engine.hint}</p>
-    <div className="row-actions">
-      <select value={config.engine} onChange={event => update({ engine: event.target.value as VoiceEngine })}>
-        {VOICE_ENGINES.map(entry => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
-      </select>
-      {remote && <input value={config.endpoint} onChange={event => update({ endpoint: event.target.value })} placeholder={config.engine === 'gpt-sovits' ? 'http://127.0.0.1:9880' : config.engine === 'breeze' ? 'http://127.0.0.1:7860' : 'http://127.0.0.1:8000/v1'}/>}
-    </div>
-    {/* A name the server already knows, so this one stays a plain text field. */}
-    {config.engine === 'openai' && <div className="row-actions"><input value={config.voice} onChange={event => update({ voice: event.target.value })} placeholder={engine.voiceLabel}/></div>}
-    {/* Left unset the platform picks its default, which on most Windows installs
-        is a male voice — rarely what anyone wants out of this particular app. */}
-    {config.engine === 'windows' && <div className="row-actions">
-      <select value={config.voice} onChange={event => update({ voice: event.target.value })}>
-        <option value="">System default</option>
-        {systemVoices.map(entry => <option key={entry.voiceURI} value={entry.voiceURI}>{entry.name}</option>)}
-      </select>
-    </div>}
-    {/* Clips are picked rather than typed: the paths run past 100 characters and a
-        typo shows up as a failed synthesis rather than as an obviously wrong path.
-        The transcript has to match its clip or the cloned voice drifts off target,
-        which is the single most common way a GPT-SoVITS setup sounds wrong. */}
-    {(config.engine === 'gpt-sovits' || config.engine === 'breeze') && <>
-      <div className="row-actions">
-        <button className="ghost" onClick={async () => { const picked = await window.haru!.voice.pickClip(); if (picked) update({ voice: picked }); }}>{config.voice ? clipName(config.voice) : 'Choose reference clip…'}</button>
-        <input value={config.referenceText} onChange={event => update({ referenceText: event.target.value })} placeholder="Exactly what that clip says"/>
-      </div>
-      {config.engine === 'gpt-sovits' && <EmotionVoices config={config} onChange={update}/>}
-      {config.engine === 'breeze' && <div className="row-actions">
-        <input value={config.voiceId ?? ''} onChange={event => update({ voiceId: event.target.value.trim() })} placeholder="Saved voice id (optional — skips the per-line reference encode)"/>
-      </div>}
-    </>}
-    {config.engine !== 'off' && <div className="row-actions">
-      {remote && <input value={config.language} onChange={event => update({ language: event.target.value })} placeholder="Language (en, ja, zh)"/>}
-      <label className="slider">Speed <input type="range" min="0.5" max="1.6" step="0.05" value={config.speed} onChange={event => update({ speed: Number(event.target.value) })}/></label>
-      <label className="slider">Volume <input type="range" min="0" max="1" step="0.05" value={config.volume} onChange={event => update({ volume: Number(event.target.value) })}/></label>
-    </div>}
-    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
-    <div className="row-actions">
-      {/* Saves before speaking. The Windows voices are played with whatever
-          settings are stored, so testing an unsaved pick would audition the
-          previous one and look like the change had not taken. */}
-      <button className="ghost" disabled={busy !== null || config.engine === 'off'} onClick={() => run('testing', async () => { setConfig(await window.haru!.voice.set(config)); return window.haru!.voice.test(config); })}>{busy === 'testing' ? 'Testing…' : 'Test voice'}</button>
-      <button className="ghost" disabled={busy !== null} onClick={() => run('saving', async () => setConfig(await window.haru!.voice.set(config)), 'Voice saved.')}>{busy === 'saving' ? 'Saving…' : 'Save voice'}</button>
-    </div>
+    <p>Her voice belongs to her Core. Her mood and the conversation shape its delivery.</p>
+    {config && <p>{VOICE_ENGINES.find(entry => entry.value === config.engine)?.label ?? config.engine}</p>}
   </div>;
 }
 
@@ -2100,6 +2023,8 @@ function asideClock(at: string) {
  */
 export function AsidesPage() {
   const [asides, setAsides] = useState<Aside[]>([]);
+  const [nudgeSaving, setNudgeSaving] = useState<string[]>([]);
+  const [nudgeError, setNudgeError] = useState('');
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     if (!window.haru) { setLoaded(true); return; }
@@ -2108,14 +2033,15 @@ export function AsidesPage() {
     // fills in while it is open rather than only on the way in.
     const stopAdding = window.haru.chat.onAside(aside => setAsides(current => [...current, aside]));
     const stopClearing = window.haru.chat.onAsidesCleared(() => setAsides([]));
-    return () => { stopAdding(); stopClearing(); };
+    const stopChanging = window.haru.chat.onAsidesChanged(setAsides);
+    return () => { stopAdding(); stopClearing(); stopChanging(); };
   }, []);
   const today = todayInZone();
   const days = [...new Set(asides.map(aside => aside.day || today))].sort().reverse();
   return <section className="page asides">
     <div className="field">
       <h2>Off her own back</h2>
-      <p>Everything Haru comes out with unprompted — what she makes of your screen, nudges about your list, whatever she says when you poke her. It lives here rather than in the chat so the conversation stays the conversation. She still knows what she has just said: the last quarter of an hour of it reaches her alongside your next message, so answering one of these still makes sense to her. Older than that and it is history she has moved on from. Kept for a week.</p>
+      <p>Everything Haru says without being prompted, kept apart from your conversation. Use the buttons under a nudge to steer her future subjects; choose the same button again to undo it. The log keeps a week.</p>
     </div>
     {loaded && !asides.length && <p className="nothing">Nothing yet. She has not said anything off her own back.</p>}
     {days.map(day => <div className="aside-day" key={day}>
@@ -2126,10 +2052,25 @@ export function AsidesPage() {
             <time>{asideClock(aside.at)}</time>
             <span className="aside-why">{ASIDE_REASONS[aside.source] ?? ASIDE_REASONS.other}</span>
           </div>
-          <p>{withEmphasis(aside.text)}</p>
+          <div>
+            <p>{withEmphasis(aside.text)}</p>
+            {(aside.nudgeTopic || ['idle', 'thought', 'hanging'].includes(aside.source)) && <div className="nudge-feedback" role="group" aria-label="Feedback on this nudge">
+              {([['more', 'More like this'], ['less', 'Less like this'], ['discussed', 'Already discussed']] as const).map(([choice, label]) => <button
+                type="button" className="ghost" key={choice} aria-pressed={aside.nudgeFeedback === choice}
+                disabled={nudgeSaving.includes(aside.id)} onClick={async () => {
+                  setNudgeSaving(current => [...current, aside.id]); setNudgeError('');
+                  try {
+                    const updated = await window.haru!.chat.nudgeFeedback(aside.id, aside.nudgeFeedback === choice ? null : choice);
+                    setAsides(current => current.map(a => a.id === updated.id ? updated : a));
+                  } catch { setNudgeError('Could not save that feedback. Try again.'); }
+                  finally { setNudgeSaving(current => current.filter(id => id !== aside.id)); }
+                }}>{label}</button>)}
+            </div>}
+          </div>
         </li>)}
       </ol>
     </div>)}
+    {nudgeError && <p role="alert">{nudgeError}</p>}
     {asides.length > 0 && <div className="drawer-foot">
       <button className="ghost" onClick={async () => setAsides(await window.haru!.chat.clearAsides())}>Clear the log</button>
     </div>}
@@ -2175,10 +2116,38 @@ function StagedFile({ file, onRemove }: { file: Attachment; onRemove(): void }) 
  * was shortened with a pattern that only matches forward slashes, so on Windows
  * it never matched at all.
  */
+/**
+ * A picture she drew, behind a tap.
+ *
+ * Blurred until he chooses to look, and then the two choices he asked for:
+ * keep it on her server, or save it to his phone. Unkept ones are swept after a
+ * week, so keeping is a decision rather than a default.
+ */
+function PrivatePicture({ file }: { file: Attachment }) {
+  const [shown, setShown] = useState(false);
+  const [kept, setKept] = useState(false);
+  const [saved, setSaved] = useState(false);
+  function keep() {
+    setKept(true);
+    void fetch(`/api/picture/${file.id}/keep`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keep: true }), credentials: 'same-origin' }).catch(() => setKept(false));
+  }
+  if (!shown) return <button className="attached-picture blurred" onClick={() => setShown(true)} title="Tap to look">
+    <img src={file.url} alt="" aria-hidden="true"/>
+    <span>tap to look</span>
+  </button>;
+  return <figure className="attached-picture">
+    <img src={file.url} alt={file.name} title={file.name}/>
+    <figcaption className="picture-actions">
+      <a className="ghost" href={file.url} download={`haru-${file.id}.png`} onClick={() => setSaved(true)}>{saved ? 'Saved to this device' : 'Save to my phone'}</a>
+      <button className="ghost" disabled={kept} onClick={keep}>{kept ? 'Kept on her server' : 'Keep on her server'}</button>
+    </figcaption>
+  </figure>;
+}
+
 function Attached({ files }: { files: Attachment[] }) {
   return <div className="attached">
     {files.map(file => file.kind === 'image'
-      ? <img key={file.id} className="attached-picture" src={file.url} alt={file.name} title={file.name}/>
+      ? (file.private ? <PrivatePicture key={file.id} file={file}/> : <img key={file.id} className="attached-picture" src={file.url} alt={file.name} title={file.name}/>)
       : <FileChip key={file.id} file={file}/>)}
   </div>;
 }

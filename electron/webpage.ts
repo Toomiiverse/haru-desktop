@@ -811,6 +811,10 @@ export function appPage(): string {
      of the reply and asking again. Folded by default — a row of buttons under
      every message was a dock, not a conversation. */
   .acts { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem; margin:-.3rem 0 .6rem .25rem; max-width:82%; }
+  .nudge-feedback { max-width:100%; }
+  .nudge-feedback button { font-size:.72rem; min-height:36px; padding:.3rem .55rem; }
+  .nudge-feedback button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+  .nudge-feedback .feedback-error { flex-basis:100%; font-size:.75rem; color:var(--ink-dim); }
   .acts .dock { display:contents; }
   .acts .dock[hidden] { display:none; }
   .acts .more { padding:.05rem .5rem; font-size:.8rem; opacity:.7; }
@@ -902,7 +906,7 @@ export function appPage(): string {
 <div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><span id=talk hidden></span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
 <div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
-<div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button><button id=tab-diary role=tab aria-selected=false aria-controls=diary>Diary</button></div>
+<nav aria-label="Conversation mode" style="display:flex;gap:12px;padding:8px 16px"><span aria-current="page">AI</span><button id="refresh-chat" type="button" aria-label="Refresh chat">Refresh chat</button><a href="/characters" style="color:inherit">Character</a></nav><div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button><button id=tab-diary role=tab aria-selected=false aria-controls=diary>Diary</button><a href="/world" style="align-self:center;padding:8px 14px;color:inherit;text-decoration:none;font-size:13px">World ↗</a></div>
 <section id=chat></section>
 <section id=status hidden aria-labelledby=tab-her></section>
 <section id=diary hidden aria-labelledby=tab-diary></section>
@@ -978,6 +982,7 @@ function bubbles(list){
     let html=(parts.length?parts:[m.content]).map(p=>'<div class="msg '+cls+'">'+md(esc(p))+'</div>').join('');
     // A line she said on her own is not a reply: nothing to rate or ask again.
     if(m.role==='assistant'&&m.id&&!m.aside) html+=acts(m,m===last);
+    if(m.role==='assistant'&&m.id&&m.aside&&(m.nudge||['idle','thought','hanging'].includes(m.aside))) html+=nudgeFeedbackButtons(m);
     return html;
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
   if(pendingSend){
@@ -989,6 +994,11 @@ function bubbles(list){
 // last one, because only the last one can be done again. The id is the stored
 // message's, handed out by the desk, so a rating names a reply rather than
 // quoting it. A note already given is shown; otherwise there is a pen.
+function nudgeFeedbackButtons(m){
+  return '<div class="acts nudge-feedback" role="group" aria-label="Feedback on this nudge" data-id="'+esc(m.id)+'">'
+    +[['more','More like this'],['less','Less like this'],['discussed','Already discussed']].map(([choice,label])=>
+      '<button type="button" data-act="nudge-'+choice+'" aria-pressed="'+(m.nudgeFeedback===choice)+'">'+label+'</button>').join('')+'</div>';
+}
 function acts(m,isLast){
   const on=r=>m.reaction===r?' class=on':'';
   // What is already on the reply stays in view beside the arrow — a thumb, an
@@ -1532,6 +1542,21 @@ async function askAgain(){
 $('chat').addEventListener('click',async ev=>{
   const b=ev.target.closest('button[data-act]'); if(!b) return;
   const row=b.closest('.acts'); const id=row.dataset.id; const act=b.dataset.act;
+  if(act.startsWith('nudge-')){
+    const choice=b.getAttribute('aria-pressed')==='true'?null:act.slice(6);
+    const buttons=[...row.querySelectorAll('button')];
+    for(const button of buttons) button.disabled=true;
+    row.querySelector('.feedback-error')?.remove();
+    try{
+      const result=await post('/api/chat/nudge-feedback',{id,choice});
+      for(const button of buttons) button.setAttribute('aria-pressed',String(button.dataset.act==='nudge-'+result.choice));
+    }catch(error){
+      if(error&&error.status===401){location.reload();return;}
+      const note=document.createElement('span'); note.className='feedback-error'; note.setAttribute('role','alert');
+      note.textContent='Could not save feedback. Try again.'; row.appendChild(note);
+    }finally{ for(const button of buttons) button.disabled=false; }
+    return;
+  }
   if(act==='more'){
     // One open at a time: the arrow is a drawer, not a setting.
     const dock=row.querySelector('.dock'); const opening=dock.hidden;
@@ -1684,6 +1709,11 @@ window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(true); });
 // Re-read the day unless she is mid-answer, when the stream on screen is newer
 // than anything the server would hand back.
 // opened: the page came back in front of them; anything else is the page checking on its own.
+$('refresh-chat').onclick=async()=>{
+  const button=$('refresh-chat');button.disabled=true;button.textContent='Refreshing…';
+  try{await recoverPending();await load(true);}
+  finally{button.disabled=false;button.textContent='Refresh chat';}
+};
 function refreshIfIdle(opened){ if($('cb').disabled){ void recoverPending(); return; } void load(!opened); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.

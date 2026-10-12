@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What she is called, read off the persona.
 //
 // There is no name field. The identity is prose that begins "You are …", and
@@ -14,6 +15,7 @@
 export const DEFAULT_NAME = 'Haru';
 
 export function herNameFrom(identity: string): string {
+ if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync('speech-context.herName',[identity]);
   const after = /\bYou are\s+(.+)/i.exec(identity ?? '')?.[1] ?? '';
   const words: string[] = [];
   for (const word of after.split(/\s+/)) {

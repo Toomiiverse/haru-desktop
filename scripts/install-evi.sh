@@ -10,6 +10,7 @@
 # is made here and never leaves config.json: the app hands it to Hume at the
 # start of every call, and Hume hands it back at the hook.
 set -euo pipefail
+python3 "$(dirname -- "$0")/legacy-config-guard.py"
 config_id=${1:?Hume EVI config id}
 url=${2:-https://haruserver.tail6da04d.ts.net:8443/api/evi/chat/completions}
 cfg_dir=~/.config/haru-desktop

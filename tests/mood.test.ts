@@ -125,6 +125,8 @@ test('isRedo: an unrelated message is not a redo', () => {
 test('isGoodnight: anchored at the start, so a question about tonight is not a farewell', () => {
   assert.equal(isGoodnight('goodnight'), true);
   assert.equal(isGoodnight('gn'), true);
+  assert.equal(isGoodnight('Sweet dreams'), true);
+  assert.equal(isGoodnight('Sleep well, Haru'), true);
   assert.equal(isGoodnight('going to bed'), true);
   assert.equal(isGoodnight('what are you doing tonight?'), false);
 });
@@ -160,10 +162,10 @@ test('isIgnoring triggers at IGNORE_THRESHOLD (the stonewall band)', () => {
   assert.equal(isIgnoring(78), true);
 });
 
-test('shoutState: shouting starts the withholding state; an apology forgives it', () => {
+test('shoutState reacts to the current message and never carries a refusal forward', () => {
   assert.equal(shoutState('STOP DOING THAT', false), 'shouted');
   assert.equal(shoutState('fine whatever', false), 'none');
-  assert.equal(shoutState('still waiting', true), 'awaiting');
+  assert.equal(shoutState('still waiting', true), 'none');
   assert.equal(shoutState('sorry about that', true), 'forgiven');
 });
 
@@ -198,11 +200,15 @@ test('goodnightInstruction differs between saying goodnight and coming back afte
   assert.notEqual(goodnightInstruction('said'), goodnightInstruction('after'));
 });
 
-test('shoutInstruction withholds the answer while shouted/awaiting, and answers again once forgiven', () => {
+test('every shout state permits a substantive answer without another apology', () => {
   assert.equal(shoutInstruction('none'), '');
   assert.notEqual(shoutInstruction('shouted'), '');
   assert.notEqual(shoutInstruction('awaiting'), '');
   assert.notEqual(shoutInstruction('forgiven'), '');
+  for (const state of ['shouted', 'awaiting', 'unmoved', 'forgiven'] as const) {
+    assert.match(shoutInstruction(state), /answer/i);
+    assert.doesNotMatch(shoutInstruction(state), /Withhold what|waiting for an apology|Still withhold/i);
+  }
 });
 
 test('a phrase she has used in three of her last four replies is named, whatever the openers did', () => {

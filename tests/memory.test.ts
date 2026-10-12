@@ -395,7 +395,7 @@ test('findSuperseded returns null when no active memory contains the hinted word
   assert.equal(findSuperseded(memories, 'Ubuntu'), null);
 });
 
-test('findSuperseded prefers the tighter match when the hint fits more than one record', () => {
+test('findSuperseded refuses ambiguous hints instead of choosing a record to overwrite', () => {
   const memories: MemoryRecord[] = [{
     id: 'looser', text: 'Uses Ubuntu as the primary server operating system for everything', kind: 'fact',
     createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1,
@@ -403,9 +403,9 @@ test('findSuperseded prefers the tighter match when the hint fits more than one 
     id: 'tighter', text: 'Uses Ubuntu', kind: 'fact',
     createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1,
   }];
-  // Both records contain "Ubuntu" — the one with fewer leftover words wins.
+  // Both records contain Ubuntu. A correction must identify one record.
   const found = findSuperseded(memories, 'Ubuntu');
-  assert.equal(found?.id, 'tighter');
+  assert.equal(found, null);
 });
 
 test('supersede marks the old record without removing it', () => {
@@ -413,8 +413,9 @@ test('supersede marks the old record without removing it', () => {
     id: 'os1', text: 'Uses Ubuntu on the server', kind: 'fact',
     createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1,
   }];
+  memories.push({ ...memories[0], id: 'os2', text: 'Uses Debian on the server' });
   const updated = supersede(memories, 'os1', 'os2');
-  assert.equal(updated.length, 1);
+  assert.equal(updated.length, 2);
   assert.equal(updated[0].supersededBy, 'os2');
 });
 
@@ -651,7 +652,7 @@ test('their words are exempt from the nagging rule and nothing else', () => {
   assert.equal(isWorthRemembering('Thanks you for the help', { meantAsARule: true }), false);
 });
 
-test('a fact is in their words when it shares a third of its content with what they just said', () => {
+test('a supported personal fact allows conservative paraphrases', () => {
   // Paraphrase is normal: she writes "works nights" for "I'm on nights", "called" for "calling".
   assert.equal(isInTheirWords('Works night shifts at a warehouse', "I work nights at the warehouse, so I'm asleep till noon"), true);
   assert.equal(isInTheirWords('Does not like being called buddy', 'please stop calling me buddy'), true);

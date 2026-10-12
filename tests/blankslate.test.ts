@@ -53,17 +53,17 @@ test('a stranger is treated as a stranger, not interviewed', () => {
   // living and what she should be aware of today. That was the instruction's
   // fault, not the model's.
   const said = blankSlateInstruction(daysAgo(0), 0, NOW);
-  assert.match(said, /At most one question/);
-  assert.match(said, /Keep your replies short/);
-  assert.match(said, /earn/);
+  assert.match(said, /Never pretend to remember/);
+  assert.match(said, /limits factual claims, not your personality/);
+  assert.doesNotMatch(said, /be careful|not yours to help|earn|no mocking/);
   assert.doesNotMatch(said, /One or two questions/, 'the line that produced the interview');
   assert.doesNotMatch(said, /not sorry/, 'brisk where she should be wary');
 });
 
 test('her first line is wary rather than bright, and does not demand anything', () => {
   const opening = blankSlateOpening(daysAgo(0), 0, NOW);
-  assert.match(opening, /Wary rather than bright/);
-  assert.match(opening, /or ask nothing at all/);
+  assert.match(opening, /your own personality and current mood/);
+  assert.doesNotMatch(opening, /Wary|demanding anything/);
 });
 
 test('she starts colder than the defaults, and his affection at nothing', () => {
@@ -199,9 +199,9 @@ test('the persona is corrected in its own terms while she is a stranger', () => 
   // she had never met to stop stalling. This rides with the identity instead.
   const note = strangerIdentityNote(daysAgo(0), 0, NOW);
   assert.match(note, /no memory of him/);
-  assert.match(note, /nothing to be jealous of/);
-  assert.match(note, /You do not push him/);
-  assert.match(note, /guarded rather than demanding/);
+  assert.match(note, /not evidence/);
+  assert.doesNotMatch(note, /You do not push him|no mocking|No ordering/);
+  assert.match(note, /unfamiliarity does not restrict banter/);
   // Her spine is not taken away with it.
   assert.match(note, /still hold your own positions/);
 });

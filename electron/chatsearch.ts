@@ -1,3 +1,5 @@
+import {coreChatIndex,coreChatSearch,coreChatKeywordScores} from './core-final-chat';
+import {corePolicySync} from './core-policy-sync';
 // Her old chats, searched on purpose.
 //
 // recall.ts puts an old exchange or two in front of her unasked. That can only
@@ -41,6 +43,7 @@ function stem(word: string): string {
 
 /** Lowercase words, stop words out, endings off. */
 export function chatTerms(text: string): string[] {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-chat.terms',[text]);
   const out: string[] = [];
   for (const word of String(text ?? '').toLowerCase().replace(/['’]/g, '').match(/[a-z0-9]+/g) ?? []) {
     if (STOP.has(word) || (word.length < 3 && !/^\d+$/.test(word))) continue;
@@ -61,6 +64,7 @@ export type ChatIndex = {
 };
 
 export function buildChatIndex(exchanges: Exchange[]): ChatIndex {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreChatIndex(exchanges);
   const counts = exchanges.map(exchange => {
     const count = new Map<string, number>();
     for (const term of chatTerms(exchange.text)) count.set(term, (count.get(term) ?? 0) + 1);
@@ -81,6 +85,7 @@ export function buildChatIndex(exchanges: Exchange[]): ChatIndex {
 
 /** BM25 (k1 1.2, b 0.75, ReFind's values) of every exchange against the query; 0 where no word is shared. */
 export function keywordScores(index: ChatIndex, query: string): number[] {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreChatKeywordScores(index,query);
   const terms = [...new Set(chatTerms(query))];
   const total = index.exchanges.length;
   return index.counts.map((count, at) => {
@@ -109,6 +114,7 @@ const RARE_FLOOR = 5;
 
 /** The specific words of `text` that some kept exchange also uses. */
 export function rareTerms(index: ChatIndex, text: string): Set<string> {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return new Set(corePolicySync<string[]>('final-chat.rare',[index.exchanges.length,Object.fromEntries(index.spread),text]));
   const limit = Math.max(RARE_FLOOR, Math.round(index.exchanges.length * RARE_SHARE));
   return new Set(chatTerms(text).filter(term => {
     const spread = index.spread.get(term) ?? 0;
@@ -118,6 +124,7 @@ export function rareTerms(index: ChatIndex, text: string): Set<string> {
 
 /** Whether the exchange uses any of these words. */
 export function mentionsAny(index: ChatIndex, id: string, terms: Set<string>): boolean {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-chat.mentions',[Object.fromEntries(index.counts[index.position.get(id)??-1]??new Map()),[...terms]]);
   const at = index.position.get(id);
   if (at === undefined) return false;
   for (const term of terms) if (index.counts[at].has(term)) return true;
@@ -130,11 +137,13 @@ export function mentionsAny(index: ChatIndex, id: string, terms: Set<string>): b
  * lines alike; other models get the text as it is.
  */
 export function embedText(model: string, kind: 'query' | 'document', text: string): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-chat.embed',[model,kind,text]);
   return /nomic-embed/i.test(model) ? `search_${kind}: ${text}` : text;
 }
 
 /** Which vectors are comparable: the model and whether the prefixes were used. */
 export function embedFormat(model: string): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-chat.embedFormat',[model]);
   return `${model}${/nomic-embed/i.test(model) ? '+search-prefixes' : ''}`;
 }
 
@@ -176,6 +185,7 @@ const WORD_SHARE_WITHOUT_MEANING = 0.05;
  * the model works the dates out itself and is known to land a day out.
  */
 export function searchChats(index: ChatIndex, input: { query: string; queryVector?: number[] | null; vectors: Map<string, number[]>; from?: string; to?: string; limit?: number }): ChatHit[] {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreChatSearch(index,input);
   const from = isDay(input.from) ? shiftDay(input.from, -1) : '';
   const to = isDay(input.to) ? shiftDay(input.to, 1) : '';
   const words = keywordScores(index, input.query);
@@ -230,6 +240,7 @@ const clip = (text: string, most: number) => text.split('\n').map(line => line.l
 
 /** What she is handed: each find under its date, with the exchange either side trimmed, and relative dates written out. */
 export function chatHitsNote(hits: ChatHit[], weekday: Intl.DateTimeFormat): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-chat.note',[hits]);
   return hits.map(hit => {
     const [y, m, d] = hit.exchange.day.split('-').map(Number);
     const when = `${weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)))} ${hit.exchange.day}`;

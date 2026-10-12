@@ -11,10 +11,27 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh, HUME_DESCRIPTIONS, HUME_TTS_URL, BREEZE_DESCRIPTIONS, pcmToWav, wrapPcmAsWav } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh, HUME_DESCRIPTIONS, HUME_TTS_URL, BREEZE_DESCRIPTIONS, pcmToWav, wrapPcmAsWav, breezeSlot } from '../electron/voice';
 import { EMOTIONS } from '../electron/emotion';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
+
+test('cancelled speech leaves the queue immediately without bypassing its active owner', async () => {
+  const release = await breezeSlot();
+  const abort = new AbortController();
+  const pending = breezeSlot(abort.signal);
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  abort.abort();
+  await rejected;
+  let acquired = false;
+  const next = breezeSlot().then(done => { acquired = true; return done; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(acquired, false);
+  release();
+  (await next)();
+  assert.equal(acquired, true);
+  assert.throws(() => breezeSlot(abort.signal), { name: 'AbortError' });
+});
 
 // -- capitals: a shout, or an abbreviation? -------------------------------------
 

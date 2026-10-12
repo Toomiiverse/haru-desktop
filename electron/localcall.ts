@@ -1,3 +1,5 @@
+import {corePolicySync} from './core-policy-sync';
+import { addressedText, callInputCommand, callMicCheckReply, type CallInputMode } from './call-admission';
 // A call handled at home: her own ears, her own brain, her own voice.
 //
 // The phone's microphone arrives as frames; the detector in vad.ts decides
@@ -23,6 +25,8 @@
 import { makeVad, pcm16Level, type VadOptions } from './vad';
 import { pcmToWav } from './voice';
 import { looksUnfinished } from './call';
+import { completeNaturalUtterance } from './natural-conversation';
+import {randomUUID} from 'node:crypto';
 
 /** The phone's rate; what its ear already makes. */
 export const CALL_RATE = 16_000;
@@ -53,27 +57,31 @@ export const STRETCH_CHARS = 240;
 
 export type CallEvent = Record<string, unknown>;
 
+export type PreparedHearing = (() => string) & {text?:string};
+
 export type LocalCallDeps = {
+  inputMode?: CallInputMode;
   /** Words for one utterance, as WAV bytes — the phone's ear: transcription, the taught corrections, the hallucination filter. '' when nothing worth sending. */
-  hear(wav: Uint8Array): Promise<string>;
+  hear(wav: Uint8Array, signal?:AbortSignal): Promise<string>;
+  /** Tentative recognition cannot update hearing, memory, mood, tools or history.
+   * Its returned commit runs only for the exact final audio range. */
+  prepareHear?(wav: Uint8Array, signal?:AbortSignal): Promise<PreparedHearing>;
+  prepareAfterMs?: number;
+  unfinishedQuietMs?: number;
   /**
    * Her reply. Sentences arrive as they complete, with the mood read from the
    * line so far; a tool round announces itself as it starts. Resolves with the
    * reply that settled, which the brain has already written into the day.
    */
-  answer(text: string, options: { interrupted: boolean; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void }): Promise<{ reply: string; ignored?: boolean }>;
+  answer(text: string, options: { interrupted: boolean; signal?:AbortSignal; callTrace?:{id:string;turn:number}; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void }): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her voice for a line: a stream of mono PCM16 with no header, and its
    * rate. Null when she has no voice to give. Every line of one reply comes
-   * with the same seed, so the pieces are takes of one performance.
+   * with the same seed, reused after an interruption so the voice stays
+   * continuous while the words and their requested delivery can change.
    */
-  speak(text: string, emotion: string | null, seed: number): Promise<{ stream: ReadableStream<Uint8Array>; sampleRate: number } | null>;
-  /**
-   * Her mood right now, for the whole of a reply. Without it every sentence
-   * would be delivered in the mood read off the reply so far — dry for the
-   * first, sharp for the second, teasing for the third — which is heard as
-   * her switching voices mid-answer.
-   */
+  speak(text: string, emotion: string | null, seed: number, signal?: AbortSignal): Promise<{ stream: ReadableStream<Uint8Array>; sampleRate: number } | null>;
+  /** Her resting mood, only when no sentence delivery has been supplied. */
   moodNow?(): string | null;
   /** A line to say while a tool runs. */
   filler(): string;
@@ -103,6 +111,8 @@ export type LocalCall = {
   /** The phone says whether she is audible through its speaker right now. */
   herSpeaking(on: boolean): void;
   close(reason?: string): void;
+  manualInput(enabled:boolean):void;
+  inputHeld(active:boolean):void;
 };
 
 type Line = { text: string; emotion: string | null; seed: number; filler: boolean };
@@ -113,7 +123,9 @@ type Line = { text: string; emotion: string | null; seed: number; filler: boolea
  * turn's take, so a reply whose brain finishes after the next turn has begun
  * still finds what it got out.
  */
-type Take = { voiced: string[]; cut: { text: string; seconds: number } | null; reported: boolean };
+type HeardTiming = { speechEndAt: number; speechEndSample: number; detectedAt: number; heardAt: number; listenMs: number; segments: number; preparedRecognition?:boolean; manual?:boolean; inputEpoch?:number };
+type TurnTiming = HeardTiming & { turn: number; answerAt: number; queuedAt: number | null; speakAt: number | null; pcmAt: number | null };
+type Take = { voiced: string[]; cut: { text: string; seconds: number } | null; reported: boolean; timing: TurnTiming };
 type Queued = Line & { take: Take };
 
 /** About how much text a second of her voice carries, for cutting a line where the voice was cut. */
@@ -121,6 +133,7 @@ const CHARS_PER_SECOND = 15;
 
 /** The first `seconds` worth of a line, ended at a word, marked as cut. Nothing under half a second. */
 export function saidOf(text: string, seconds: number): string {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.saidOf',[text,seconds]);
   if (seconds < 0.5) return '';
   const chars = Math.round(seconds * CHARS_PER_SECOND);
   if (chars >= text.length) return text;
@@ -155,6 +168,7 @@ export function oneChunk(bytes: Uint8Array): ReadableStream<Uint8Array> {
 }
 
 export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps): LocalCall {
+  const callId=randomUUID();
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
   const startedAt = now();
@@ -163,14 +177,19 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let ringSamples = 0;
   let samples = 0;                // sample time, in samples since the call began
   let closed = false;
+  const listening = new AbortController();
   let phoneHearsHer = false;
   let sending = false;            // her voice is going down the socket
   let herEchoUntil = 0;           // wall clock; after her voice, the detector stays wary
   let interrupted = false;        // she was cut off; the next turn is told
+  let manual=false,held=false,inputEpoch=0,manualFrom=0,manualEnd:number|null=null;
+  let inputMode:CallInputMode = deps.inputMode ?? 'open';
+  let activeAnswer:AbortController | null = null;
   let thinking = false;           // the brain is on a turn
   let generation = 0;             // bumps on every interruption: stale audio is dropped
   let queue: Queued[] = [];
   let pumping = false;
+  let activeSpeech: AbortController | null = null;
   let spokeThisTurn = false;
   let fillerThisTurn = false;
   let turnDone: (() => void) | null = null;
@@ -178,12 +197,22 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let turns = 0;
   // What reached the phone this turn: whole lines, and the cut one by how much of it played.
   let lastEmotion: string | null = null;  // the mood of her last line, for the phone's face
+  // Only real reply audio can establish continuity; a queued sentence or a
+  // tool filler may never have been heard. This state lasts for this call only.
+  let lastDelivery: { emotion: string | null; seed: number } | null = null;
   // Words heard but not yet answered: a breath in the middle of a sentence
   // reads to the detector as its end. What was said before the breath waits
   // here for what comes after it, and the two go to her brain as one.
   let pending = '';
+  let pendingTiming: HeardTiming | null = null;
   let holdUntil = 0;              // sample time; a held fragment is answered alone once this passes in quiet
   let transcribing = 0;           // utterances at her ears right now; a held fragment waits for them
+  let preparation: {from:number;to:number;result:Promise<PreparedHearing|null>;settled:boolean} | null = null;
+  let ears:Promise<unknown> = Promise.resolve();
+  function atEars<T>(read:() => Promise<T>):Promise<T> {
+    const job=ears.then(()=>{if(closed)throw Error('call_closed');return read();});
+    ears=job.catch(()=>{});return job;
+  }
   // Words over her voice are not an interruption until they are known not to
   // be hers. On 2026-09-18 she said "Your psychologist appointment…", the
   // phone's speaker fed "Psychologist." back into its microphone past the
@@ -196,7 +225,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let probing = false;
   const herLines: string[] = [];  // the last few lines sent to the phone
 
-  const emit = (event: CallEvent) => { if (!closed) handlers.onEvent(event); };
+  const emit = (event: CallEvent) => { if (!closed) handlers.onEvent({...event,callId}); };
   const hers = () => phoneHearsHer || sending || now() < herEchoUntil;
 
   // -- the microphone ----------------------------------------------------------------
@@ -205,17 +234,33 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     if (closed || !frame.byteLength) return;
     const at = samples;
     samples += frame.byteLength >> 1;
+    if(manual && !held)return;
     ring.push({ at, frame });
     ringSamples += frame.byteLength >> 1;
     while (ringSamples > CALL_RATE * RING_SECONDS && ring.length) ringSamples -= ring.shift()!.frame.byteLength >> 1;
     const t = (samples * 1000) / CALL_RATE;
+    if(manual) {
+      if(pcm16Level(frame)>0.001)manualEnd=samples;
+      if(samples-manualFrom>=CALL_RATE*15)releaseInput();
+      return;
+    }
     const event = vad.feed(pcm16Level(frame), t, hers() ? OVER_HER_RATIO : undefined);
-    if (pending && holdUntil && !transcribing && !vad.speaking() && t >= holdUntil && !event) {
+    const preview = !event && !hers() && !transcribing && deps.prepareHear && deps.prepareAfterMs
+      ? vad.preview(t, deps.prepareAfterMs) : null;
+    if (preview && (!preparation || preparation.settled && (preparation.from !== preview.from || preparation.to !== preview.to))) {
+      const item = {from:preview.from,to:preview.to,settled:false,result:Promise.resolve(null) as Promise<PreparedHearing|null>};
+      const wav=cut(preview.from,preview.to);
+      item.result = atEars(()=>deps.prepareHear!(wav,listening.signal)).catch(() => null).finally(() => {item.settled=true;});
+      preparation = item;
+    }
+    if (pending && holdUntil && !transcribing && !vad.possibleSpeech() && t >= holdUntil && !event) {
       // Nothing more came: the half they said is the whole of it.
       const text = pending;
+      const timing = pendingTiming;
       pending = '';
+      pendingTiming = null;
       holdUntil = 0;
-      commit(text);
+      if (timing) commit(text, timing);
     }
     if (overHer === 'suspect' && !probing && !event && vad.speaking() && t - overHerAt >= PROBE_MS) {
       probing = true;
@@ -223,17 +268,25 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     if (!event) return;
     if (event.type === 'start') {
-      if (hers()) { overHer = 'suspect'; overHerAt = t; probing = false; } else { overHer = 'no'; spokeOver(); }
+      if (hers()) { overHer = 'suspect'; overHerAt = t; probing = false; } else { overHer = 'no'; if(inputMode==='open')spokeOver(); }
       return;
     }
     if (event.type === 'drop') { overHer = 'no'; return; }
     const suspect = overHer === 'suspect';
     overHer = 'no';
-    void heard(cut(event.from, event.to), suspect);
+    const detectedAt = now();
+    // Estimated from received sample time: microphone/network buffering is
+    // outside this interval. The WAV tail is not the end of voiced speech.
+    const speechEndAt = detectedAt - Math.max(0, t - event.speechEnd);
+    const prepared = preparation;
+    preparation = null;
+    void heard(cut(event.from, event.to), suspect, { speechEndAt, speechEndSample:Math.round(event.speechEnd*CALL_RATE/1000), detectedAt, heardAt: detectedAt, listenMs: 0, segments: 1,inputEpoch },
+      prepared ? {result:prepared.result,exact:prepared.from===event.from&&prepared.to===event.to} : undefined);
   }
 
   /** Words heard over her: hers, coming back through the phone, or his? */
   function echoOfHers(text: string): boolean {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.echoOfHers',[text,herLines]);
     const words = (line: string) => line.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
     const heardWords = words(text);
     if (!heardWords.length) return true;
@@ -247,8 +300,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   /** The first stretch of an utterance over her, heard early so his words stop her soon. */
   async function probe(wav: Uint8Array) {
     let text = '';
-    try { text = await deps.hear(wav); } catch { return; }
-    if (closed || overHer !== 'suspect') return;
+    try {
+      if (deps.prepareHear) {
+        const candidate=await atEars(()=>deps.prepareHear!(wav,listening.signal));
+        text=typeof candidate.text==='string' ? candidate.text : inputMode==='open' ? await atEars(()=>deps.hear(wav,listening.signal)) : '';
+      } else if(inputMode==='open')text=await atEars(()=>deps.hear(wav,listening.signal));
+    } catch { return; }
+    if(inputMode==='addressed' && !addressedText(text))return;
+    if (closed || manual || overHer !== 'suspect') return;
     if (echoOfHers(text)) { log(`[call] heard herself over her line: "${text.slice(0, 40)}"`); return; }
     overHer = 'his';
     log(`[call] words over her: "${text.slice(0, 40)}"`);
@@ -278,7 +337,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   /** They started talking. Over her, that is an interruption; over her thinking, the reply will not be voiced. */
   function spokeOver() {
-    if (sending || queue.length || (thinking && spokeThisTurn)) {
+    if (phoneHearsHer || sending || activeSpeech || queue.length || (thinking && spokeThisTurn)) {
       interrupted = true;
       dropHerVoice();
       emit({ type: 'user_interruption' });
@@ -288,6 +347,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       // Nothing of hers has gone out yet: the reply on its way is not spoken,
       // and what they are saying now is the turn that counts.
       generation++;
+      activeAnswer?.abort();
       queue = [];
       log('[call] they spoke before she could');
     }
@@ -295,62 +355,104 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   function dropHerVoice() {
     generation++;
+    activeAnswer?.abort();
     queue = [];
+    activeSpeech?.abort();
     sending = false;
     herEchoUntil = now() + HER_ECHO_MS;
   }
 
   // -- a turn --------------------------------------------------------------------------
 
-  async function heard(wav: Uint8Array, suspect = false) {
+  async function heard(wav: Uint8Array, suspect: boolean, timing: HeardTiming, prepared?: {result:Promise<PreparedHearing|null>;exact:boolean}) {
     let text = '';
+    const listenAt = now();
+    const stale=()=>closed || timing.inputEpoch!==undefined && timing.inputEpoch!==inputEpoch;
     transcribing++;
-    try { text = await deps.hear(wav); } catch (error) { log(`[call] her ears failed: ${error instanceof Error ? error.message : String(error)}`); return; } finally { transcribing--; }
-    if (closed) return;
+    try {
+      const commit = prepared ? await prepared.result : null;
+      if(stale())return;
+      timing.preparedRecognition=!!commit && !!prepared?.exact;
+      let candidate=commit && prepared?.exact ? commit : null;
+      if(!candidate && (inputMode==='addressed'||timing.manual) && deps.prepareHear)candidate=await atEars(()=>deps.prepareHear!(wav,listening.signal));
+      if(stale())return;
+      if(!timing.manual && inputMode==='addressed' && (typeof candidate?.text!=='string' || !addressedText(candidate.text))) {
+        log('[call-admission] '+JSON.stringify({callId,reason:'not_addressed',mode:inputMode}));
+        return;
+      }
+      text=candidate ? candidate() : await atEars(()=>deps.hear(wav,listening.signal));
+    } catch (error) { log(`[call] her ears failed: ${error instanceof Error ? error.message : String(error)}`); return; } finally { transcribing--; }
+    if (stale()) return;
+    const command=timing.manual ? null : callInputCommand(text);
+    if(!timing.manual && inputMode==='addressed') { const admitted=addressedText(text);if(!admitted)return;text=admitted; }
     if (suspect) {
       if (echoOfHers(text)) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`); return; }
       log(`[call] words over her: "${text.slice(0, 40)}"`);
       spokeOver();
     }
     if (!text) { log('[call] heard nothing worth answering'); return; }
+    timing.heardAt = now();
+    timing.listenMs = timing.heardAt - listenAt;
+    if(timing.manual){commit(text,timing);return;}
+    if(command) {
+      inputMode=command;pending='';pendingTiming=null;holdUntil=0;
+      log('[call-admission] '+JSON.stringify({callId,reason:'mode_changed',mode:inputMode}));
+      commit(text,timing,process.env.HARU_CORE_SPEECH_BOUNDARY==='on'?corePolicySync<string>('speech-boundary.commandReply',[command]):command==='addressed' ? 'Noisy room mode is on. Start each request with Haru.' : 'Hands free mode is on for this call.');
+      return;
+    }
+    if(inputMode==='addressed')spokeOver();
+    timing.segments += pendingTiming?.segments ?? 0;
     text = pending ? `${pending} ${text}` : text;
     pending = '';
+    pendingTiming = null;
     holdUntil = 0;
     // They went on talking while this was being written down: what they are
     // saying now belongs with it, and she answers the whole once it has ended.
-    if (vad.speaking()) { pending = text; log(`[call] holding "${text.slice(0, 40)}" — they are still talking`); return; }
+    if (vad.possibleSpeech()) { pending = text; pendingTiming = timing; holdUntil=(samples*1000)/CALL_RATE+UNFINISHED_HOLD_MS; log(`[call] holding "${text.slice(0, 40)}" — they are still talking`); return; }
     // A sentence they stopped in the middle of waits a moment for its end.
-    if (looksUnfinished(text)) {
+    if (process.env.HARU_CORE_SPEECH_BOUNDARY==='on'?corePolicySync<boolean>('speech-boundary.unfinished',[text]):looksUnfinished(text) && !completeNaturalUtterance(text) && !callMicCheckReply(text)) {
       pending = text;
-      holdUntil = (samples * 1000) / CALL_RATE + UNFINISHED_HOLD_MS;
+      pendingTiming = timing;
+      const hold = process.env.HARU_CORE_SPEECH_BOUNDARY==='on'?corePolicySync<number>('speech-boundary.unfinishedHold',[deps.unfinishedQuietMs??null,now()-timing.speechEndAt]):deps.unfinishedQuietMs ? Math.max(0, deps.unfinishedQuietMs - (now() - timing.speechEndAt)) : UNFINISHED_HOLD_MS;
+      if (!hold) {pending='';pendingTiming=null;commit(text,timing);return;}
+      holdUntil = (samples * 1000) / CALL_RATE + hold;
       log(`[call] holding "${text.slice(0, 40)}" — it sounds unfinished`);
       return;
     }
-    commit(text);
+    commit(text, timing);
   }
 
-  function commit(text: string) {
-    emit({ type: 'user_message', text, interim: false });
+  function commit(text: string, timing: HeardTiming, localReply?:string) {
+    if (!localReply) {
+      localReply = callMicCheckReply(text) ?? undefined;
+      if (localReply) log('[call-response] '+JSON.stringify({callId,turn:turns+1,route:'local_mic_check',model:null,at:Date.now()}));
+    }
+    activeAnswer?.abort();
+    emit({ type: 'user_message', text, interim: false, turn:turns+1,speechEndSample:timing.speechEndSample });
     if (thinking) {
       // Two things said before she could answer the first: the second is the
       // one she answers. The first turn finishes on its own, unvoiced.
       generation++;
       queue = [];
+      activeSpeech?.abort();
     }
-    void turn(text);
+    void turn(text, timing, localReply);
   }
 
-  async function turn(text: string) {
+  async function turn(text: string, heardTiming: HeardTiming, localReply?:string) {
+    const answering=new AbortController();
+    activeAnswer=answering;
     const mine = ++turns;
     const wasInterrupted = interrupted;
     interrupted = false;
     thinking = true;
     spokeThisTurn = false;
     fillerThisTurn = false;
-    const take: Take = { voiced: [], cut: null, reported: false };
+    const take: Take = { voiced: [], cut: null, reported: false,
+      timing: { ...heardTiming, turn: mine, answerAt: now(), queuedAt: null, speakAt: null, pcmAt: null } };
     const myGeneration = generation;
     const started = now();
-    let firstVoiceAt = 0;
+    let firstQueuedAt: number | null = null;
     let reply = '';
     // The day holds what she said. A reply she was cut off in is written
     // down as what came out — not as what was drafted. A reply she never got
@@ -360,6 +462,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const settleTake = (whole: boolean) => {
       if (take.reported || !reply || !deps.said) return;
       take.reported = true;
+      if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'){const p=corePolicySync<any>('speech-boundary.settleTake',[reply,take.voiced,take.cut,whole]);if(p.report)deps.said(reply,p.said);return;}
       const said = [...take.voiced, take.cut ? saidOf(take.cut.text, take.cut.seconds) : ''].filter(Boolean).join(' ').trim();
       // A play-time estimate can run past the text ("89 of 22 chars"): that is all of it.
       if (whole || said === reply || said.length >= reply.length) return;
@@ -367,12 +470,11 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       log(`[call] she got ${said.length} of ${reply.length} chars out — the day keeps what she said`);
       deps.said(reply, said);
     };
-    // One register and one take for the whole reply. The register is read off
-    // the first sentence — the words know their own tone — and only when that
-    // reads as nothing in particular does her resting mood decide.
-    const resting = deps.moodNow?.() ?? null;
-    let mood = resting;
-    const seed = Math.floor(Math.random() * 2 ** 31);
+    // One take preserves the voice identity. A labelled change of delivery
+    // must still reach the speech engine, including a return to neutral.
+    const continued = process.env.HARU_CORE_SPEECH_BOUNDARY==='on'?corePolicySync<typeof lastDelivery>('speech-boundary.continued',[wasInterrupted,lastDelivery]):wasInterrupted ? lastDelivery : null;
+    let mood = continued ? continued.emotion : deps.moodNow?.() ?? null;
+    const seed = continued ? continued.seed : Math.floor(Math.random() * 2 ** 31);
     lastEmotion = mood;
     let sentences = 0;
     let stretch = '';
@@ -382,13 +484,20 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       if (text) say({ text, emotion: mood, seed, filler: false });
     };
     try {
-      const answer = await deps.answer(text, {
+      const answer = localReply ? {reply:localReply,ignored:false} : await deps.answer(text, {
+        signal:answering.signal,
+        callTrace:{id:callId,turn:mine},
         interrupted: wasInterrupted,
         onSentence: (sentence, emotion) => {
           if (generation !== myGeneration || turns !== mine) return;
+          if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'){const p=corePolicySync<any>('speech-boundary.sentencePlan',[{mood,stretch,sentences},sentence,emotion]);mood=p.mood;stretch=p.stretch;sentences=p.sentences;if(p.moodChanged)lastEmotion=mood;for(const command of p.commands)say({...command,seed,filler:false});return;}
           sentences++;
+          if (emotion && emotion !== mood) {
+            flush();
+            mood = emotion;
+            lastEmotion = mood;
+          }
           if (sentences === 1) {
-            if (emotion && emotion !== 'neutral') { mood = emotion; lastEmotion = mood; }
             say({ text: sentence.trim(), emotion: mood, seed, filler: false });
             return;
           }
@@ -398,13 +507,15 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           if (/\n\s*\n\s*$/.test(stretch) || stretch.length >= STRETCH_CHARS) flush();
         },
         onToolCall: name => {
-          if (generation !== myGeneration || turns !== mine || fillerThisTurn || spokeThisTurn) return;
+          if (generation !== myGeneration || turns !== mine) return;
+          if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'?!corePolicySync<boolean>('speech-boundary.fillerAllowed',[fillerThisTurn,spokeThisTurn]):fillerThisTurn||spokeThisTurn)return;
           fillerThisTurn = true;
           log(`[call] a tool is running (${name}) — she says something meanwhile`);
           say({ text: deps.filler(), emotion: mood, seed, filler: true });
         },
       });
       reply = answer.reply ?? '';
+      if(answering.signal.aborted || closed || generation!==myGeneration){settleTake(false);return;}
       // The next turn began while her brain was still going: whatever of this
       // one was voiced is already cut, so it is settled here, not after a drain.
       if (turns !== mine) { settleTake(false); return; }
@@ -417,9 +528,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       }
       if (answer.ignored) log('[call] she is not answering that');
     } catch (error) {
-      log(`[call] her brain failed: ${error instanceof Error ? error.message : String(error)}`);
-      emit({ type: 'error', message: 'She lost her train of thought.' });
+      if(!answering.signal.aborted && !closed && turns===mine) {
+        log(`[call] her brain failed: ${error instanceof Error ? error.message : String(error)}`);
+        emit({ type: 'error', message: 'She lost her train of thought.' });
+      } else log('[call-cancelled] '+JSON.stringify({callId,turn:mine}));
     } finally {
+      if(activeAnswer===answering)activeAnswer=null;
       if (turns === mine) {
         thinking = false;
         // The turn is over once every queued line has been voiced.
@@ -428,16 +542,34 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           // The face goes with the end of the turn, read off her last line, so
           // the phone need not ask a model — that one shares the card with her voice.
           emit({ type: 'assistant_end', ...(lastEmotion ? { emotion: lastEmotion } : {}) });
-          log(`[call] turn ${mine}: ${firstVoiceAt ? `first voice at ${firstVoiceAt - started}ms, ` : 'nothing voiced, '}said as ${mood ?? 'her plain self'}, done in ${now() - started}ms`);
+          log(`[call] turn ${mine}: ${firstQueuedAt !== null ? `reply queued at ${firstQueuedAt - started}ms, ` : 'nothing queued, '}${take.timing.pcmAt !== null ? `first PCM at ${take.timing.pcmAt - started}ms, ` : 'no reply audio, '}said as ${mood ?? 'her plain self'}, done in ${now() - started}ms`);
+          logTiming(take.timing, 'done');
         }
         settleTake(generation === myGeneration && !take.cut && take.voiced.length > 0 && !queue.length);
       }
     }
     function say(line: Line) {
-      if (!firstVoiceAt) firstVoiceAt = now();
+      if (!line.filler && firstQueuedAt === null) {
+        firstQueuedAt = now();
+        take.timing.queuedAt = firstQueuedAt;
+      }
       queue.push({ ...line, take });
       void pump();
     }
+  }
+
+  function logTiming(timing: TurnTiming, stage: 'first-audio' | 'done') {
+    const { speechEndAt, detectedAt, heardAt, listenMs, answerAt, queuedAt, speakAt, pcmAt } = timing;
+    log(`[call-latency] ${JSON.stringify({ callId, turn: timing.turn, stage, segments: timing.segments,
+      endpointMs: detectedAt - speechEndAt, listenMs, holdMs: answerAt - heardAt,
+      recognitionWaitMs:listenMs,preparedRecognition:timing.preparedRecognition??false,
+      answerMs: queuedAt === null ? null : queuedAt - answerAt,
+      voiceQueueMs: speakAt === null || queuedAt === null ? null : speakAt - queuedAt,
+      ttsFirstPcmMs: pcmAt === null || speakAt === null ? null : pcmAt - speakAt,
+      transcriptToFirstPcmMs: pcmAt === null ? null : pcmAt - answerAt,
+      receivedSpeechEndToFirstPcmMs: pcmAt === null ? null : pcmAt - speechEndAt,
+      playbackMeasured: false, inputMode:timing.manual?'push-to-talk':'voice-activity',
+    })}`);
   }
 
   function finishTurn() {
@@ -458,16 +590,23 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         emit(line.filler ? { type: 'filler', text: line.text } : { type: 'assistant_message', text: line.text, id: String(++lineId) });
         if (!line.filler) spokeThisTurn = true;
         let voice: { stream: ReadableStream<Uint8Array>; sampleRate: number } | null = null;
-        try { voice = await deps.speak(line.text, line.emotion, line.seed); } catch (error) { log(`[call] her voice failed: ${error instanceof Error ? error.message : String(error)}`); }
+        const speech = new AbortController();
+        activeSpeech = speech;
+        if (!line.filler && line.take.timing.speakAt === null) line.take.timing.speakAt = now();
+        try { voice = await deps.speak(line.text, line.emotion, line.seed, speech.signal); } catch (error) {
+          if (!speech.signal.aborted) log(`[call] her voice failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
         if (!voice || generation !== myGeneration || closed) { if (voice) void voice.stream.cancel().catch(() => {}); continue; }
         const id = String(lineId);
         const rate = voice.sampleRate || VOICE_RATE;
         herLines.push(line.text);
         if (herLines.length > HER_LINES_KEPT) herLines.shift();
-        emit({ type: 'audio_start', id, sampleRate: rate });
+        emit({ type: 'audio_start', id, sampleRate: rate,turn:line.take.timing.turn,filler:line.filler,inputMode:line.take.timing.manual?'push-to-talk':'voice-activity' });
         const playingSince = now();
         sending = true;
         const reader = voice.stream.getReader();
+        const cancel = () => { void reader.cancel().catch(() => {}); };
+        speech.signal.addEventListener('abort', cancel, { once: true });
         let bytes = 0;
         let whole = false;
         // Whole samples per frame: an odd-length chunk put every later sample
@@ -483,10 +622,20 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
             let frame = value;
             if (carry) { const joined = new Uint8Array(carry.byteLength + value.byteLength); joined.set(carry); joined.set(value, carry.byteLength); frame = joined; carry = null; }
             if (frame.byteLength & 1) { carry = frame.subarray(frame.byteLength - 1); frame = frame.subarray(0, frame.byteLength - 1); }
-            if (frame.byteLength) handlers.onAudio(frame);
+            if (frame.byteLength) {
+              if (!line.filler) lastDelivery = { emotion: line.emotion, seed: line.seed };
+              if (!line.filler && line.take.timing.pcmAt === null) {
+                line.take.timing.pcmAt = now();
+                logTiming(line.take.timing, 'first-audio');
+              }
+              handlers.onAudio(frame);
+            }
           }
         } catch (error) {
-          log(`[call] her voice broke off: ${error instanceof Error ? error.message : String(error)}`);
+          if (!speech.signal.aborted) log(`[call] her voice broke off: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          speech.signal.removeEventListener('abort', cancel);
+          if (activeSpeech === speech) activeSpeech = null;
         }
         if (!line.filler) {
           if (whole && generation === myGeneration) line.take.voiced.push(line.text);
@@ -497,13 +646,37 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         if (generation === myGeneration) { sending = false; herEchoUntil = now() + HER_ECHO_MS; emit({ type: 'audio_end', id }); }
       }
     } finally {
+      activeSpeech = null;
       pumping = false;
       if (!queue.length) finishTurn();
     }
   }
 
+  function releaseInput() {
+    if(!manual||!held)return;
+    held=false;
+    emit({type:'input_gate',active:false});
+    const end=manualEnd===null ? null : samples,from=manualFrom,at=now();
+    if(end===null || samples-from<CALL_RATE*.15)return;
+    const audio=cut(from*1000/CALL_RATE,samples*1000/CALL_RATE);
+    void heard(audio,false,{speechEndAt:at-(samples-end)*1000/CALL_RATE,speechEndSample:end,detectedAt:at,heardAt:at,listenMs:0,segments:1,manual:true,inputEpoch});
+  }
   return {
     feed,
+    manualInput(enabled) {
+      if(closed)return;
+      inputEpoch++;manual=enabled;held=false;manualEnd=null;
+      preparation=null;pending='';pendingTiming=null;holdUntil=0;overHer='no';vad.reset();ring.length=0;ringSamples=0;
+      dropHerVoice();finishTurn();
+      emit({type:'input_mode',manual});
+    },
+    inputHeld(active) {
+      if(closed||!manual||active===held)return;
+      if(!active){releaseInput();return;}
+      inputEpoch++;held=true;manualFrom=samples;manualEnd=null;
+      ring.length=0;ringSamples=0;preparation=null;pending='';pendingTiming=null;holdUntil=0;
+      dropHerVoice();finishTurn();emit({type:'user_interruption'});emit({type:'input_gate',active:true});
+    },
     herSpeaking(on) {
       phoneHearsHer = on;
       if (!on) herEchoUntil = now() + HER_ECHO_MS;
@@ -511,6 +684,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     close(reason = 'hung up') {
       if (closed) return;
       closed = true;
+      listening.abort();
       dropHerVoice();
       finishTurn();
       handlers.onClose(reason, Math.round((now() - startedAt) / 1000));

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // How she writes in her diary.
 //
 // Five example entries were handed over to set the voice: exclamatory,
@@ -60,6 +61,7 @@ const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ')
  * the log can say what was lifted.
  */
 export function liftedFrom(entry: string, examples: string[], span = LIFTED_SPAN_WORDS): string | null {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.liftedFrom',[entry,examples,span]);
   const mine = words(entry);
   if (mine.length < span) return null;
   const runs = new Set<string>();
@@ -92,6 +94,7 @@ export const NOT_THOSE_LINES = 'You just used a sentence from an earlier entry w
  * it is the proper nouns that carry events.
  */
 export function unknownNames(entry: string, allowed: string[]): string[] {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.unknownNames',[entry,allowed]);
   // Curly apostrophes and possessives are not new names: "Tommy’s" is Tommy,
   // "Man’s Reze" is Chainsaw Man's Reze — both were refused one night.
   const plain = (text: string) => text.replace(/[‘’]/g, "'").replace(/'s\b/g, '').toLowerCase();

@@ -1,3 +1,5 @@
+import {activeTask} from './task-controller';
+import {corePolicySync} from './core-policy-sync';
 // The downloads on the server: qBittorrent, where the anime fetches land.
 //
 // "How are the downloads going", "pause the downloads, I'm on a call", "start
@@ -23,6 +25,7 @@ export const DEFAULT_DOWNLOADS: DownloadsConfig = {
 
 /** The `anime.qbittorrent` block, read forward; null when the anime stack is off. */
 export function readDownloadsConfig(anime: unknown): DownloadsConfig | null {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.config',[anime??null,homedir()]);
   if (!anime || typeof anime !== 'object' || (anime as Record<string, unknown>).enabled !== true) return null;
   const raw = ((anime as Record<string, unknown>).qbittorrent ?? {}) as Record<string, unknown>;
   const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
@@ -44,6 +47,7 @@ export type Standing = 'downloading' | 'paused' | 'stalled' | 'queued' | 'checki
 
 /** qBittorrent's dozen states, as the four or five words she needs. */
 export function standing(state: string): Standing {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.standing',[state]);
   if (/^(pausedDL|stoppedDL)$/.test(state)) return 'paused';
   if (/^(pausedUP|stoppedUP)$/.test(state)) return 'done';
   if (/^(uploading|stalledUP|forcedUP|queuedUP)$/.test(state)) return 'seeding';
@@ -58,11 +62,13 @@ const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').s
 
 /** A release name without its tag soup: "[Group] Naruto (001-220) [BD]…" → "Naruto (001-220)". */
 export function plainName(name: string): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.plainName',[name]);
   return name.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim() || name;
 }
 
 /** Whether every word of the show he named is in the torrent's name. */
 export function namesShow(torrentName: string, title: string): boolean {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.namesShow',[torrentName,title]);
   const have = new Set(words(torrentName));
   const want = words(title);
   return want.length > 0 && want.every(word => have.has(word));
@@ -83,6 +89,30 @@ export class Downloads {
 
   constructor(private readonly config: DownloadsConfig, private readonly host: DownloadsHost) {
     this.readFile = host.readFile ?? (file => readFileSync(file, 'utf8'));
+  }
+
+  private async core(action:'status'|'pause'|'resume',title?:string):Promise<Record<string,unknown>>{
+    const task=activeTask.getStore();if(!task)throw Error('downloads_task_required');await task.check();
+    let packet=corePolicySync<any>('final-downloads.start',[action,title??null,this.sid!==null,this.host.known?.()??[]]);
+    for(let n=0;n<24;n++){
+      if(Object.hasOwn(packet,'result'))return packet.result;
+      if(packet.error)throw Error(packet.error);
+      await task.check();const c=packet.command;let observation:any;
+      if(c.kind==='login'){
+        if(c.clear)this.sid=null;const password=this.password();if(!password)throw Error(`no qBittorrent password in ${this.config.passwordFile}`);
+        const r=await this.host.fetch(`${this.config.url}/api/v2/auth/login`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Referer:this.config.url},body:new URLSearchParams({username:this.config.username,password}).toString()});
+        const body=await r.text();observation={kind:'login',ok:r.ok,status:r.status,body};
+        // Cookie bytes are opaque transport state. Core decides authentication/retry.
+        const pair=(r.headers.get('set-cookie')??'').split(';')[0].trim();this.sid=/^[\w-]+=.+/.test(pair)?pair:'';
+      }else if(c.kind==='request'){
+        // Protocol confinement prevents Core payloads bypassing the adapter surface.
+        if(!['torrents/info','torrents/start','torrents/stop','torrents/pause','torrents/resume'].includes(c.endpoint))throw Error('downloads_endpoint_protocol');
+        try{const r=await this.host.fetch(`${this.config.url}/api/v2/${c.endpoint}`,{method:c.form?'POST':'GET',headers:{...(this.sid?{Cookie:this.sid}:{}),Referer:this.config.url,...(c.form?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(c.form?{body:new URLSearchParams(c.form).toString()}:{})});observation={kind:'request',ok:r.ok,status:r.status,body:await r.text()};}
+        catch(error){observation={okTransport:false,error:error instanceof Error?error.message:String(error)}}
+      }else throw Error('downloads_command_protocol');
+      await task.check();packet=corePolicySync('final-downloads.observed',[packet.state,observation]);
+    }
+    throw Error('downloads_program_bound');
   }
 
   private password(): string {
@@ -149,6 +179,7 @@ export class Downloads {
 
   /** What is on the server, by show, and how it is going. */
   async status(): Promise<Record<string, unknown>> {
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on')return this.core('status');
     const list = await this.torrents();
     const torrents = list.map(torrent => this.describe(torrent));
     const count = (state: Standing) => torrents.filter(t => t.state === state).length;
@@ -173,6 +204,7 @@ export class Downloads {
   }
 
   private async flip(action: 'pause' | 'resume', title?: string): Promise<Record<string, unknown>> {
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on')return this.core(action,title);
     const list = await this.torrents();
     const wanted = title ? list.filter(torrent => namesShow(torrent.name, title) || namesShow(this.showOf(torrent), title)) : list;
     if (!list.length) return { [action === 'pause' ? 'paused' : 'resumed']: [], note: 'There is nothing on the server to ' + action + '.' };

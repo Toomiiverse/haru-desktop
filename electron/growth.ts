@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Who she is at rest, and how a year of living moves it.
 //
 // Her state changes every minute and her character could not change at all: a
@@ -68,14 +69,20 @@ export const TRAIT_NAMES = Object.keys(CHARTER) as TraitName[];
 
 /** A whole year of consistent treatment crosses the whole band, and no faster. */
 export function maxStep(trait: TraitName): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.maxStep',[trait]);
+
   return (CHARTER[trait].band * 2) / 12;
 }
 
 export function charterTraits(): Traits {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.charterTraits',[]);
+
   return Object.fromEntries(TRAIT_NAMES.map(name => [name, CHARTER[name].charter])) as Traits;
 }
 
 export function readTraits(saved: unknown): Traits {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readTraits',[saved]);
+
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<Record<TraitName, unknown>>;
   return Object.fromEntries(TRAIT_NAMES.map(name => {
     const value = Number(record[name]);
@@ -120,6 +127,8 @@ export type Norm = { saidPerDay: number; hangingPerDay: number; hurtEvents?: num
 export const NORM_MONTHS = 6;
 
 export function normFrom(history: MonthSignals[]): Norm | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.normFrom',[history]);
+
   const recent = history.slice(-NORM_MONTHS);
   if (!recent.length) return null;
   const mean = (pick: (month: MonthSignals) => number | undefined) => {
@@ -149,6 +158,8 @@ export type Scored = { score: number; because: string } | null;
  * a word is not the kind of thing that gets graded on a curve.
  */
 export function scoreWarmth(now: MonthSignals, norm: Norm | null): Scored {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.scoreWarmth',[now,norm]);
+
   if (!norm) return null;
   const said = against(now.saidPerDay, norm.saidPerDay, 1);
   const answered = -against(now.hangingPerDay, norm.hangingPerDay, 0.5);
@@ -168,6 +179,8 @@ export function scoreWarmth(now: MonthSignals, norm: Norm | null): Scored {
  * until there is one.
  */
 export function scoreGuardedness(now: MonthSignals, norm: Norm | null): Scored {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.scoreGuardedness',[now,norm]);
+
   if (!norm || now.hurtEvents === undefined || norm.hurtEvents === undefined) return null;
   const hurt = against(now.hurtEvents, norm.hurtEvents, 1);
   const madeRight = -((now.apologies ?? 0) - (norm.apologies ?? 0)) / Math.max(1, now.days) * 6;
@@ -185,6 +198,8 @@ export function scoreGuardedness(now: MonthSignals, norm: Norm | null): Scored {
  * nothing — only his getting worse or better at it does.
  */
 export function scoreFuse(now: MonthSignals, norm: Norm | null): Scored {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.scoreFuse',[now,norm]);
+
   if (!norm || now.woundUp === undefined || norm.woundUp === undefined) return null;
   const wound = against(now.woundUp, norm.woundUp, 1);
   const score = clamp1(-wound * 0.8);
@@ -207,6 +222,8 @@ export type GrowthStep = { month: string; trait: TraitName; from: number; to: nu
  * her first month with him changes nothing — she has no idea yet what usual is.
  */
 export function growMonth(traits: Traits, now: MonthSignals, history: MonthSignals[]): { traits: Traits; steps: GrowthStep[] } {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.growMonth',[traits,now,history]);
+
   const norm = normFrom(history.filter(month => month.month !== now.month));
   const grown: Traits = { ...traits };
   const steps: GrowthStep[] = [];
@@ -228,6 +245,8 @@ export function growMonth(traits: Traits, now: MonthSignals, history: MonthSigna
 
 /** Her traits as they stood before that month, rebuilt from the ledger. */
 export function revertTo(traits: Traits, ledger: GrowthStep[], month: string): Traits {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.revertTo',[traits,ledger,month]);
+
   const undone: Traits = { ...traits };
   for (const step of [...ledger].reverse()) {
     if (step.month < month) break;
@@ -240,27 +259,37 @@ export function revertTo(traits: Traits, ledger: GrowthStep[], month: string): T
 
 /** Warmth is where her affection rests, so it reaches the vitals as a standing lean. */
 export function traitLean(traits: Traits): { affection: number } | Record<string, never> {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.traitLean',[traits]);
+
   const push = Math.round((traits.warmth - CHARTER.warmth.charter) * 1000) / 1000;
   return push ? { affection: push } : {};
 }
 
 /** How hard a thing lands on her and how fast it cools (mood.ts). */
 export function fuseOf(traits: Traits): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.fuseOf',[traits]);
+
   return traits.fuse;
 }
 
 /** Guardedness is the bar a feeling has to clear before it reaches her prompt. */
 export function feelingsShowAt(traits: Traits): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.feelingsShowAt',[traits]);
+
   return Math.round(traits.guardedness);
 }
 
 /** How far a trait has travelled, as a share of the room it has. */
 export function travelled(traits: Traits, trait: TraitName): number {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.travelled',[traits,trait]);
+
   return (traits[trait] - CHARTER[trait].charter) / CHARTER[trait].band;
 }
 
 /** For the status screen: where she sits, 0–100 across the whole band. */
 export function traitMeter(traits: Traits, trait: TraitName): { label: string; value: number; note: string } {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.traitMeter',[traits,trait]);
+
   const { label, band, charter, rising, falling } = CHARTER[trait];
   const share = travelled(traits, trait);
   return {
@@ -276,6 +305,8 @@ export function traitMeter(traits: Traits, trait: TraitName): { label: string; v
  * would come back to him as a number.
  */
 export function growthNote(traits: Traits): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.growthNote',[traits]);
+
   const far = TRAIT_NAMES
     .map(trait => ({ trait, share: travelled(traits, trait) }))
     .filter(({ share }) => Math.abs(share) >= 0.5)

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What she opens on, before the user has said anything.
 //
 // The failure mode this exists to prevent is not a bad line — it is the same
@@ -30,6 +31,7 @@ export const RETURN_AFTER_MINUTES = 120;
  * proceeds as before.
  */
 export function isRelaunchNotReturn(messages: { role: string; at?: string }[], nowMs: number): boolean {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.isRelaunchNotReturn',[messages,nowMs]);
   let sheSpokeAt: number | undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const at = Date.parse(messages[i].at ?? '');
@@ -68,6 +70,7 @@ export type OpeningAngle = { name: string; weight: number; instruction: string }
 
 /** How she would refer to the hour, rather than the number itself. */
 export function timeOfDay(hour: number): string {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.timeOfDay',[hour]);
   if (hour < 5) return 'the middle of the night';
   if (hour < 9) return 'early morning';
   if (hour < 12) return 'mid-morning';
@@ -89,6 +92,7 @@ function hourIsNotable(hour: number) {
  * precisely calibrated.
  */
 export function openingAngles(context: OpeningContext): OpeningAngle[] {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.openingAngles',[context]);
   const angles: OpeningAngle[] = [];
 
   // Being left to find out for herself is the thing she has most reason to open
@@ -197,6 +201,7 @@ export const PIPE_UP_CHANCE = 0.14;
  * case where piping up is the point.
  */
 export function shouldPipeUp(state: IdleState, random: () => number = Math.random, chance = PIPE_UP_CHANCE): boolean {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.shouldPipeUp',[{...state,minutesSinceUserSpoke:state.minutesSinceUserSpoke===Infinity?Number.MAX_SAFE_INTEGER:state.minutesSinceUserSpoke,minutesSinceSheSpoke:state.minutesSinceSheSpoke===Infinity?Number.MAX_SAFE_INTEGER:state.minutesSinceSheSpoke},random(),chance]);
   // Nobody there. Anything she says now is said to nobody.
   if (state.machineIdleSeconds > AWAY_SECONDS) return false;
   // Half asleep, and the hour is doing the talking.
@@ -218,6 +223,7 @@ export function shouldPipeUp(state: IdleState, random: () => number = Math.rando
  * without depending on chance.
  */
 export function pickAngle(angles: OpeningAngle[], random: () => number = Math.random): OpeningAngle | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.pickAngle',[angles,random()]);
   const usable = angles.filter(angle => angle.weight > 0);
   if (!usable.length) return null;
   const total = usable.reduce((sum, angle) => sum + angle.weight, 0);

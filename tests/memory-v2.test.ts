@@ -91,12 +91,12 @@ test('rememberInto carries evidence detail through create and repeat', () => {
   assert.equal(second.record.evidence?.[1].detail, "from 2026-08-14's conversation");
 });
 
-test('a repeat bumps confidence and adds evidence, keeping importance', () => {
+test('a repeat adds evidence without inflating confidence or importance', () => {
   const first = rememberInto([], { text: 'Allergic to shellfish', kind: 'fact', id: 'm1', now: NOW });
   const second = rememberInto(first.memories, { text: 'Allergic to shellfish', kind: 'fact', id: 'm2', now: NOW });
   assert.equal(second.created, false);
   assert.equal(second.record.mentions, 2);
-  assert.equal(second.record.confidence, 0.83);
+  assert.equal(second.record.confidence, 0.8);
   assert.equal(second.record.evidence?.length, 2);
   assert.equal(second.record.evidence?.[1].kind, 'repeat');
   assert.equal(second.record.importance, 0.8);

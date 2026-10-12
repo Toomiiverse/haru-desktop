@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { FetchLike } from '../electron/embeddings';
 import { EmbeddingCache, cachedEmbedder, ollamaEmbedder, openAIEmbedder, createEmbedder } from '../electron/embeddings';
 import { stubEmbedder, wordEmbedding } from './helpers';
+import { EmbeddingQueue } from '../electron/embedding-queue';
 
 function mockFetch(respond: (init?: { body?: string; headers?: Record<string, string> }) => { status: number; body: string }) {
   const calls: { url: string; body: string; headers: Record<string, string> }[] = [];
@@ -91,4 +92,75 @@ test('stubEmbedder produces deterministic vectors that separate topics', async (
   const related = wordEmbedding('the server runs arch linux');
   const unrelated = wordEmbedding('the garden needs watering');
   assert.ok(cosine(wordEmbedding('arch linux'), related) > cosine(wordEmbedding('arch linux'), unrelated));
+});
+
+test('a query takes the next embedding slot ahead of queued background batches', async () => {
+  const queue = new EmbeddingQueue();
+  const order: string[] = [];
+  let finish!: () => void;
+  const first = queue.run(false, () => new Promise<void>(resolve => { order.push('first'); finish = resolve; }));
+  await Promise.resolve();
+  const background = queue.run(false, async () => { order.push('background'); });
+  const query = queue.run(true, async () => { order.push('query'); });
+  const abort = new AbortController();
+  const cancelled = queue.run(true, async () => { order.push('cancelled'); }, abort.signal);
+  const rejected = assert.rejects(cancelled);
+  abort.abort();
+  finish();
+  await Promise.all([first, background, query, rejected]);
+  assert.deepEqual(order, ['first', 'query', 'background']);
+});
+
+test('large local refreshes yield between four-text batches and retain input order', async () => {
+  const counts: number[] = [];
+  const embedder = ollamaEmbedder('http://localhost:11437', 'nomic', async (_url, init) => {
+    const texts = JSON.parse(init!.body!).input as string[];
+    counts.push(texts.length);
+    return new Response(JSON.stringify({ embeddings: texts.map(text => [Number(text)]) }));
+  });
+  const vectors = await embedder.embedBatch(Array.from({ length: 11 }, (_, i) => String(i)));
+  assert.deepEqual(counts, [4, 4, 3]);
+  assert.deepEqual(vectors, Array.from({ length: 11 }, (_, i) => [i]));
+});
+
+test('cancelling a hung local response frees the queue and does not cache its late result', async () => {
+  let late!: (r: Response) => void;
+  let captured: AbortSignal | undefined;
+  let calls = 0;
+  const cache = new EmbeddingCache();
+  const embedder = cachedEmbedder(ollamaEmbedder('http://localhost:11437', 'nomic', async (_url, init) => {
+    captured = init?.signal;
+    if (++calls === 1) return new Promise(resolve => { late = resolve; });
+    return new Response(JSON.stringify({ embeddings: [[2]] }));
+  }), cache);
+  const abort = new AbortController();
+  const pending = embedder.embed('query', { signal: abort.signal });
+  await new Promise(resolve => setImmediate(resolve));
+  const rejected = assert.rejects(pending);
+  abort.abort();
+  await rejected;
+  assert.equal(captured?.aborted, true);
+  late(new Response(JSON.stringify({ embeddings: [[999]] })));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(cache.size(), 0);
+  assert.deepEqual(await embedder.embed('query'), [2]);
+});
+
+test('completed refresh chunks survive a later failure and endpoint changes miss the cache', async () => {
+  const cache = new EmbeddingCache();
+  let fail = true;
+  const seen: string[][] = [];
+  const inner = { model: 'same', cacheKey: 'first', async embed() { return [1]; }, async embedBatch(texts: string[]) {
+    seen.push(texts);
+    if (texts.includes('4') && fail) throw Error('offline');
+    return texts.map(text => [Number(text)]);
+  } };
+  const embedder = cachedEmbedder(inner, cache);
+  const inputs = ['0', '1', '2', '3', '4'];
+  await assert.rejects(embedder.embedBatch(inputs));
+  fail = false;
+  assert.deepEqual(await embedder.embedBatch(inputs), [[0], [1], [2], [3], [4]]);
+  assert.deepEqual(seen, [inputs.slice(0, 4), ['4'], ['4']]);
+  const changed = cachedEmbedder({ ...inner, cacheKey: 'second', async embed() { return [22]; } }, cache);
+  assert.deepEqual(await changed.embed('0'), [22]);
 });

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What she is made of, and what of it she may change.
 //
 // Asked "what's your system?" she reached for get_system_info — the machine —
@@ -38,11 +39,13 @@ const count = (value: unknown, fallback: number): number => (typeof value === 'n
 
 /** The tail of a long model id — "hf.co/DavidAU/Qwen3.5-9B-…:Q4_K_M.gguf" is not a name anyone says. */
 export function shortModelName(model: string): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.shortModelName',[model]);}
   const tail = model.split('/').pop() ?? model;
   return tail.length > 48 ? `${tail.slice(0, 45)}…` : tail;
 }
 
 export function readSelfSnapshot(get: Get): SelfSnapshot {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const keys=corePolicySync<string[]>('self.keys',[]);return corePolicySync('self.readSelfSnapshot',[Object.fromEntries(keys.map(k=>[k,get(k)]))]);}
   const route = (key: string) => {
     const config = record(get(key));
     return typeof config.model === 'string' && config.model ? { provider: text(config.provider, 'unknown'), model: config.model } : null;
@@ -96,6 +99,7 @@ const onOff = (value: boolean) => (value ? 'on' : 'off');
 
 /** The snapshot as lines she can answer from — facts in her second person, no advice in them. */
 export function describeMyself(s: SelfSnapshot): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.describeMyself',[s]);}
   const lines = [
     s.conversation
       ? `Every reply you give comes from ${s.conversation.model} (${s.conversation.provider}, hosted); the local model stands in only when it cannot answer.`
@@ -127,17 +131,33 @@ export type Setting = {
   kind: SettingKind;
   what: string;
   /** For a model: which hosted route's endpoint the id must be listed by. */
-  route?: 'conversation' | 'nudge';
+  route?: 'conversation' | 'nudge' | 'config';
   options?: readonly string[];
   min?: number;
   max?: number;
   /** For a time: the window it must fall in, in minutes since midnight (a bedtime may pass midnight). */
   between?: [number, number];
   allowEmpty?: boolean;
+  /** For a model: the words they actually say, mapped to ids, so a mode is a phrase. */
+  aliases?: Record<string, string>;
 };
 
 export const SETTINGS = {
-  conversation_model: { path: 'ai.conversation.model', kind: 'model', route: 'conversation', what: 'the hosted model that answers as you' },
+  conversation_model: {
+    path: 'ai.conversation.model', kind: 'model', route: 'conversation', allowEmpty: true,
+    // "off" is the one word that has to mean less than a model id.
+    aliases: { off: '' },
+    what: 'the hosted model that answers as you ? say "off" to clear it and keep every reply on this machine',
+  },
+  brain_model: {
+    path: 'ai.config.model', kind: 'model', route: 'config',
+    // The words they say, so Explicit mode is a phrase and not a model id.
+    aliases: {
+      normal: 'hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-IQ4_XS-mtp.gguf',
+      explicit: 'hf.co/mradermacher/Cydonia-24B-v4.3-i1-GGUF:Q4_K_M',
+    },
+    what: 'the main model that answers as you — "explicit" turns on Explicit mode at once, "normal" puts it back',
+  },
   nudge_model: { path: 'ai.nudge.model', kind: 'model', route: 'nudge', what: 'the hosted model that writes your unprompted lines' },
   voice_engine: { path: 'voice.engine', kind: 'enum', options: ['breeze', 'hume', 'gpt-sovits', 'off'], what: 'which engine speaks for you' },
   voice_on_phone: { path: 'voice.webEnabled', kind: 'boolean', what: 'whether you speak on the phone at all' },
@@ -156,17 +176,33 @@ export const SETTINGS = {
   machine_level: { path: 'system.config.level', kind: 'number', min: 1, max: 4, what: 'how far you may reach into the server: 1 look, 2 act with their word, 3 run commands they give you, 4 hands of your own in your own time' },
 } as const satisfies Record<string, Setting>;
 
+/**
+ * Whether her brain is the one Explicit mode selects.
+ *
+ * The alias table is the single source of truth: the mode is on when the model
+ * it names is the model she is actually running. There is no second flag to
+ * fall out of step with what she is thinking with.
+ */
+export function explicitModeOn(model: string | undefined): boolean {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.explicitModeOn',[model]);}
+  const explicit = (SETTINGS.brain_model as Setting).aliases?.explicit;
+  return Boolean(explicit && model && model === explicit);
+}
+
 export type SettingName = keyof typeof SETTINGS;
 export const SETTING_NAMES = Object.keys(SETTINGS) as SettingName[];
 
 export type SettingPlan = { name: SettingName; path: string; what: string; from: unknown; to: unknown };
 
 export type ChangeVerdict =
-  | { ok: true; unchanged: boolean; plan: SettingPlan }
+  | { ok: true; unchanged: boolean; plan: SettingPlan;
+      /** True when the value was one of the setting's spoken words rather than an id. */
+      fromAlias?: boolean }
   | { ok: false; error: string };
 
 /** The settings and their current values, for describe_myself. */
 export function describeSettings(get: Get): { name: SettingName; what: string; current: unknown }[] {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const settings=corePolicySync<Record<string,Setting>>('self.settings',[]);return corePolicySync('self.describeSettings',[Object.fromEntries(Object.values(settings).map(s=>[s.path,get(s.path)]))]);}
   return SETTING_NAMES.map(name => ({ name, what: SETTINGS[name].what, current: get(SETTINGS[name].path) }));
 }
 
@@ -178,10 +214,12 @@ const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
  * Nothing here writes; the plan is handed back for the confirm handshake.
  */
 export function planChange(name: string, value: unknown, current: unknown, world: { models?: string[] | null } = {}): ChangeVerdict {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.planChangeWire',[name,value,{present:current!==undefined,value:current},world]);}
   const setting = (SETTINGS as Record<string, Setting>)[name];
   if (!setting) return { ok: false, error: `"${name}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` };
   const raw = typeof value === 'string' ? value.trim() : value;
   let to: unknown;
+  let fromAlias = false;
   switch (setting.kind) {
     case 'boolean': {
       const word = String(raw).toLowerCase();
@@ -225,8 +263,18 @@ export function planChange(name: string, value: unknown, current: unknown, world
       break;
     }
     case 'model': {
-      const id = String(raw ?? '');
-      if (!id) return { ok: false, error: `${name} needs a model id.` };
+      let id = String(raw ?? '');
+      // A word they say, rather than an id they would have to read out.
+      if (setting.aliases) {
+        const said = id.trim().toLowerCase();
+        const named = Object.entries(setting.aliases).find(([word]) => word.toLowerCase() === said);
+        if (named) { id = named[1]; fromAlias = true; }
+      }
+      if (!id) {
+        // Clearing is a change too: an empty route means nothing hosted answers.
+        if (setting.allowEmpty) { to = ''; break; }
+        return { ok: false, error: `${name} needs a model id.` };
+      }
       if (world.models && !world.models.includes(id)) {
         const words = id.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length >= 3);
         const close = world.models.filter(candidate => words.some(word => candidate.toLowerCase().includes(word))).slice(0, 6);
@@ -236,5 +284,5 @@ export function planChange(name: string, value: unknown, current: unknown, world
       break;
     }
   }
-  return { ok: true, unchanged: current === to, plan: { name: name as SettingName, path: setting.path, what: setting.what, from: current, to } };
+  return { ok: true, unchanged: current === to, ...(fromAlias ? { fromAlias: true } : {}), plan: { name: name as SettingName, path: setting.path, what: setting.what, from: current, to } };
 }

@@ -38,6 +38,15 @@ const conversation = [{ role: 'user', content: 'hi' }];
 const tools = [{ type: 'function', function: { name: 'noop', description: '', parameters: { type: 'object', properties: {}, required: [] } } }];
 const body = (model: string) => toOpenAIBody({ model, conversation, tools, temperature: 0.7, maxTokens: 160, json: true, stream: true }) as Record<string, unknown>;
 
+test('MiMo chat disables thinking while preserving tools and streaming', () => {
+  const out = body('mimo-v2.6-pro');
+  assert.deepEqual(out.thinking, { type: 'disabled' });
+  assert.equal(out.max_completion_tokens, 160);
+  assert.equal(out.stream, true);
+  assert.deepEqual(out.tools, tools);
+  assert.equal('thinking' in body('kimi-k2-5'), false);
+});
+
 test('gpt-5.1 and later: max_completion_tokens, reasoning off, temperature kept, tools kept', () => {
   for (const model of ['gpt-5.6-terra', 'gpt-5.1', 'gpt-5.4-mini', 'gpt-5.5-pro']) {
     const out = body(model);

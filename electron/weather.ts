@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // The weather where they are, and what has changed about it.
 //
 // Open-Meteo, because it needs no key and no account: a forecast for a pair
@@ -65,6 +66,8 @@ export function weatherUrl(lat: number, lon: number): string {
 
 /** WMO weather codes, as words she can use. */
 export function skyOf(code: number): Sky {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.skyOf',[code]);
+
   if (code === 0) return 'clear';
   if (code <= 2) return 'cloudy';
   if (code === 3) return 'overcast';
@@ -90,6 +93,8 @@ function instant(local: string, offsetSeconds: number): number {
 }
 
 export function readForecast(payload: unknown, nowMs = Date.now()): WeatherSample | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readForecast',[payload,nowMs]);
+
   const p = (payload ?? {}) as Payload;
   const c = p.current;
   if (!c || typeof c.temperature_2m !== 'number' || typeof c.weather_code !== 'number') return null;
@@ -155,14 +160,20 @@ const DISPUTES_RAIN = /\b(?:it(?:'s|’s| is|s)?|its|it’s)\s+(?:not|isn(?:'|�
 
 /** They said it is not raining where they are. */
 export function disputesRain(text: string): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.disputesRain',[text]);
+
   return DISPUTES_RAIN.test(text ?? '');
 }
 
 export function disputeStands(disputedAtMs: number | undefined, nowMs: number): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.disputeStands',[disputedAtMs??null,nowMs]);
+
   return typeof disputedAtMs === 'number' && nowMs - disputedAtMs >= 0 && nowMs - disputedAtMs <= DISPUTE_STANDS_MS;
 }
 
 export function weatherEvents(previous: WeatherSample | null, current: WeatherSample, notified: Record<string, number>, nowMs = Date.now(), disputedAtMs?: number): WeatherEvent[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.weatherEvents',[previous,current,notified,nowMs,disputedAtMs??null]);
+
   const fresh = (kind: WeatherEvent['kind']) => nowMs - (notified[kind] ?? 0) >= COOLDOWN_MS[kind];
   const out: WeatherEvent[] = [];
   // Told it is not raining where they are, nothing about rain is news for a
@@ -210,6 +221,8 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
 const WEATHER_TALK = /-?\d+\s*°|\bdegrees?\b|\brain(?:ing|y)?\b|\bsunny\b|\bclouds?\b|\bcloudy\b|\bovercast\b|\bhumid\b|\bmuggy\b|\bwind(?:y)?\b|\bstorm\w*\b|\bdrizzl\w*\b|\bchilly\b|\bfreezing\b|\bweather\b|\bforecast\b/i;
 
 export function mentionsWeather(line: string): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.mentionsWeather',[line]);
+
   return WEATHER_TALK.test(line ?? '');
 }
 
@@ -235,6 +248,8 @@ export const WEATHER_RECENT_LINES = 4;
  * and do not depend on this.
  */
 export function weatherToDrawOn(sample: WeatherSample | null, where: string, recentLines: string[], nowMs = Date.now(), disputedAtMs?: number): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.weatherToDrawOn',[sample,where,recentLines,nowMs,disputedAtMs??null]);
+
   if (recentLines.slice(-WEATHER_RECENT_LINES).some(mentionsWeather)) return '';
   const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
   return facts ? `${facts}. Background only: they have not asked, and it is not what this is about.` : '';
@@ -256,6 +271,8 @@ function weatherFacts(sample: WeatherSample | null, where: string, nowMs: number
 
 /** The one line the prompt gets when they have asked, or nothing when the reading is old. */
 export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now(), disputedAtMs?: number): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.describeWeather',[sample,where,nowMs,disputedAtMs??null]);
+
   const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
   return facts ? `${facts}. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check.` : '';
 }

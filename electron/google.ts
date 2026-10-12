@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 import { net, safeStorage, shell } from 'electron';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -81,6 +82,7 @@ function credentials(store: StoreLike) {
 }
 
 export function googleStatus(store: StoreLike): GoogleStatus {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-google.status',[{google:store.get('google')??{}}]);
   return {
     hasCredentials: Boolean(store.get('google.clientId')),
     connected: Boolean(store.get('google.refreshToken')),
@@ -239,6 +241,7 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
 // Sending a floating dateTime with an explicit timeZone avoids computing UTC
 // offsets here and keeps the event correct if the zone ever changes.
 export function eventTimes(item: KeptForSync, timeZone: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-google.eventTimes',[item,timeZone]);
   const parsed = item.time ? parseTimeOfDay(item.time) : null;
   if (!parsed) {
     const end = new Date(`${item.date}T00:00:00Z`);
@@ -256,6 +259,7 @@ export function eventTimes(item: KeptForSync, timeZone: string) {
 }
 
 export async function pushItem(store: StoreLike, item: KeptForSync, timeZone: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   const body = { summary: item.title, description: 'Created in Haru', ...eventTimes(item, timeZone) };
   if (item.googleEventId) {
     await authorisedFetch(store, `/calendars/primary/events/${encodeURIComponent(item.googleEventId)}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -266,6 +270,7 @@ export async function pushItem(store: StoreLike, item: KeptForSync, timeZone: st
 }
 
 export async function removeItem(store: StoreLike, googleEventId: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   try {
     await authorisedFetch(store, `/calendars/primary/events/${encodeURIComponent(googleEventId)}`, { method: 'DELETE' });
   } catch (error) {
@@ -275,6 +280,7 @@ export async function removeItem(store: StoreLike, googleEventId: string) {
 }
 
 export function eventToItem(event: Record<string, unknown>, timeZone: string): CalendarEvent | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-google.eventToItem',[event,timeZone]);
   const id = typeof event.id === 'string' ? event.id : null;
   const start = event.start as { date?: string; dateTime?: string } | undefined;
   if (!id || !start) return null;
@@ -304,6 +310,7 @@ export function eventToItem(event: Record<string, unknown>, timeZone: string): C
 // task is something you tick off.
 
 export function taskToItem(task: Record<string, unknown>): GoogleTask | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-google.taskToItem',[task]);
   const id = typeof task.id === 'string' ? task.id : null;
   const title = typeof task.title === 'string' && task.title.trim() ? task.title.trim() : null;
   if (!id || !title) return null;
@@ -321,6 +328,7 @@ export function taskToItem(task: Record<string, unknown>): GoogleTask | null {
 }
 
 export async function pullTasks(store: StoreLike, fromDate: string, days: number): Promise<GoogleTask[]> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   const until = new Date(`${fromDate}T00:00:00Z`);
   until.setUTCDate(until.getUTCDate() + days);
   const query = new URLSearchParams({
@@ -335,6 +343,7 @@ export async function pullTasks(store: StoreLike, fromDate: string, days: number
 }
 
 export async function pushTask(store: StoreLike, task: { title: string; date: string; done: boolean; googleTaskId?: string }) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   const body = {
     title: task.title,
     // Google stores the due date at UTC midnight and ignores any time of day.
@@ -353,6 +362,7 @@ export async function pushTask(store: StoreLike, task: { title: string; date: st
 }
 
 export async function removeTask(store: StoreLike, googleTaskId: string) {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   try {
     await authorisedFetch(store, `/lists/@default/tasks/${encodeURIComponent(googleTaskId)}`, { method: 'DELETE' }, TASKS_API);
   } catch (error) {
@@ -362,6 +372,7 @@ export async function removeTask(store: StoreLike, googleTaskId: string) {
 }
 
 export async function pullEvents(store: StoreLike, fromDate: string, days: number, timeZone: string): Promise<CalendarEvent[]> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')throw Error('google_legacy_entry_requires_core_intent');
   // The window is padded by a day at each end and the results trimmed by their
   // rendered date below. Building the bounds from a bare date string would parse
   // them in the machine's zone, which need not be `timeZone`, clipping events
@@ -381,4 +392,30 @@ export async function pullEvents(store: StoreLike, fromDate: string, days: numbe
   return items
     .map(item => eventToItem(item, timeZone))
     .filter((event): event is CalendarEvent => event !== null && event.date >= fromDate);
+}
+
+let ownedAccessTokenKey:string|null=null;
+/** Exact Core-authored resource HTTP. Credential plumbing remains local. */
+export async function executeGoogleCommand(store: StoreLike, command: any, beforeSend: () => void): Promise<import('./core-agenda-lifecycle').GoogleObservation> {
+  let dispatched=false;
+  try {
+    const tokenKey=JSON.stringify([store.get('google.clientId'),store.get('google.refreshToken')]);
+    if(ownedAccessTokenKey!==tokenKey){accessToken=null;ownedAccessTokenKey=tokenKey;}
+    if(!accessToken||accessToken.expiresAt-TOKEN_EXPIRY_MARGIN_MS<Date.now()){
+      const {clientId,clientSecret}=credentials(store),refreshToken=getSecret(store,'google.refreshToken');
+      if(!refreshToken)throw Error('Haru is not connected to Google Calendar.');
+      const tokens=await postForm(TOKEN_ENDPOINT,{client_id:clientId,client_secret:clientSecret,refresh_token:refreshToken,grant_type:'refresh_token'});
+      accessToken={value:tokens.access_token as string,expiresAt:Date.now()+Number(tokens.expires_in??3600)*1000};
+    }
+    // Fixed service roots and relative paths are a transport containment check;
+    // request choice, body, timing and interpretation were issued by Core.
+    const base=command.service==='task'?TASKS_API:command.service==='event'?CALENDAR_API:null;
+    if(!base||typeof command.path!=='string'||!command.path.startsWith('/')||command.path.startsWith('//')||!['GET','POST','PATCH','DELETE'].includes(command.method))throw Error('google_adapter_request_invalid');
+    beforeSend();dispatched=true;
+    const response=await net.fetch(base+command.path,{method:command.method,headers:{Authorization:`Bearer ${accessToken.value}`,'Content-Type':'application/json'},...(command.body===undefined?{}:{body:JSON.stringify(command.body)}),signal:AbortSignal.timeout(command.timeoutMs)});
+    if(response.status===401)accessToken=null; // credential revoked: invalidate only, never retry.
+    const text=await response.text();let data:Record<string,unknown>|undefined;
+    try{data=text?JSON.parse(text):undefined;}catch{/* preserve the actual body as an observation */}
+    return {dispatched,status:response.status,...(data?{data}:{}),text:text.slice(0,2000)};
+  }catch(error){return {dispatched,error:error instanceof Error?error.message:String(error)};}
 }

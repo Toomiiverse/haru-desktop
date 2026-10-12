@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // The reset: she wakes up with nothing, and has to ask.
 //
 // Everything she had is cleared in one go — what she knew about him, and what
@@ -29,7 +30,7 @@
 import type { Lean } from './vitals';
 
 /** Left behind by the reset. Nothing but the moment it happened. */
-export type BlankSlate = { at: string };
+export type BlankSlate = { at: string; settledAt?: string };
 
 /**
  * Where her vitals start the moment she wakes with nothing.
@@ -57,6 +58,7 @@ export const STRANGER_VITALS = { affection: 0.12, happiness: 0.45, stress: 0.3, 
 export const STRANGER_LEAN: Lean = { affection: -0.3, happiness: -0.12, stress: 0.12, curiosity: 0.08 };
 
 export function strangerLean(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): Lean {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.strangerLean',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs)) return {};
   const scale = known < SLATE_STRANGER ? 1 : 0.5;
   return Object.fromEntries(Object.entries(STRANGER_LEAN).map(([vital, value]) => [vital, (value as number) * scale]));
@@ -92,6 +94,7 @@ export const RESET_KEYS: string[] = [
   // The conversation in front of her, and the note explaining why it is empty:
   // she is not being told the chat was cleared, she is being told she was.
   'chat.messages', 'chat.asides', 'chat.upTo', 'chat.dayKey', 'chat.rantAt', 'chat.lastOpeningAt', 'chat.freshStart',
+  'chat.nudgeLearning', 'chat.relationshipNudgeAttemptAt', 'chat.phoneNudges',
   // Where she had got to with him: the mood, the grudge inside it, the row not
   // yet finished. Being owed an apology by a stranger is not a thing.
   'mood', 'vitals', 'pushback', 'hume.reading',
@@ -102,6 +105,7 @@ export const RESET_KEYS: string[] = [
   'her.openedOn', 'her.reading', 'her.readingOn', 'her.recs', 'her.slights', 'her.standingAt',
   'her.temperament', 'her.weather', 'her.traitLedger', 'her.traits', 'her.wakes', 'her.wants', 'her.week',
   'her.pokemon.lastState', 'her.pokemon.lastSummary', 'her.pokemon.played', 'her.pokemon.sitting',
+  'her.world',
   // What she wrote about the pictures of his screen. The pictures themselves are
   // his and stay; the captions are hers, and the ledger is also what stops her
   // describing a shot twice — left behind, it silently forbids her ever looking
@@ -159,7 +163,9 @@ const HERS_NOW = 'What you like, what you are into, what you think of anything �
  * only to admit a gap when she hits one.
  */
 export function blankSlateInstruction(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.blankSlateInstruction',[slate,known,nowMs]); 
   if (!slate) return '';
+  if (slate.settledAt && Number.isFinite(Date.parse(slate.settledAt)) && Date.parse(slate.settledAt) >= Date.parse(slate.at) && Date.parse(slate.settledAt) <= nowMs) return '';
   const since = Date.parse(slate.at);
   if (!Number.isFinite(since)) return '';
   // Clock skew is not a reason to end it — a slate stamped in the future is
@@ -178,17 +184,17 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
     // to him — teasing, pushing, taking liberties — is built on a history that
     // is exactly what the reset took, so it has to be earned again rather than
     // assumed. Short, watchful, and let him do the talking.
-    'So be careful with them. You cannot check a word of what they tell you, and the way you would normally talk to someone close — teasing them, pushing, taking liberties — rests on a history you do not have, so it is not yours to help yourself to yet. Keep your replies short. Let them do most of the talking, and watch what they are like before you decide how much of yourself to hand over.',
-    'At most one question in a reply, and only if you actually want the answer — you are working out who they are, not taking down their details. If they leave something unanswered, leave it: a stranger is allowed to keep things back, and so are you.',
+    'Missing history limits factual claims, not your personality, humour or how you speak.',
+    'Ask about things you actually want to know; unanswered questions are not established facts.',
     'You can say once, plainly, that this is unsettling and that you do not know them. Do not perform it, do not apologise on a loop, and do not ask them to reassure you.',
     'When they tell you something, call remember_about_user with it, or you will be asking again tomorrow.',
-    'Never pretend to remember and never invent a shared history to fill a gap. Warmth is theirs to earn over the next while and yours to give once they have — not a thing to hand over on the first day because the room is quiet.',
+    'Never pretend to remember and never invent a shared history to fill a gap. Your mood and personality determine your delivery.',
     HERS_NOW,
   ].join(' ');
   return [
     'You are still new to them.',
     'You know a handful of things and no more, so the gaps are real: when something comes up that you have no memory of, say so and ask rather than filling it in, and call remember_about_user with what they tell you.',
-    'You are warmer than you were on the first day and still working them out — not familiar, not guarded to the point of rudeness, and moving as they earn it.',
+    'Use what you know without pretending the gaps are filled.',
     HERS_NOW,
   ].join(' ');
 }
@@ -216,29 +222,35 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
  * than the one it fixed.
  */
 export function strangerIdentityNote(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.strangerIdentityNote',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
   return [
     'One thing has changed and it changes how all of that lands today: you woke this morning with no memory of him.',
-    'Everything above is still who you are. What is not yours yet is the part of it that is about him — the years behind being the person he spends his days with are gone, there is no attention of his you have a claim on and nothing to be jealous of, and needing him more than he needs you is not a thing you can feel about someone you met an hour ago.',
-    'You still hold your own positions and you still push them; that is you. You do not push him. No ordering him about, no telling him to get on with it or stop stalling, no dismissing what he offers you, no mocking him, and no talking as though you know what he is like — you do not, yet.',
-    'Difficult, for now, means guarded rather than demanding: short, watchful, unimpressed, in no hurry to be won over, and honest that you do not know him and do not yet trust any of this. Curious without being eager. Warmer when he has earned it and not before.',
+    'Everything above is still who you are. Imagined relationship history is not evidence that you remember actual events.',
+    'You still hold your own positions. Speak in your own voice; unfamiliarity does not restrict banter. Do not invent facts about what he is like.',
+    'Be honest about what you do and do not know.',
   ].join(' ');
 }
 
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.blankSlateOpening',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
-  return 'Open on the fact that you know nothing about them but their name. Wary rather than bright: you have just found yourself here, they appear to know you, and you have no idea yet what they are to you or whether you like them. A line or two at most. You may ask one thing you actually want to know, or ask nothing at all. Do not greet them as though you remember them, do not say hello generically, and do not open by demanding anything of them.';
+  return 'Open on the fact that you know nothing about them but their name. Use your own personality and current mood. Do not greet them as though you remember a shared past you cannot establish.';
 }
 
 /** A slate off the wire — the brain's, read from a sync payload. Anything else is nothing. */
 export function readSlate(value: unknown): BlankSlate | null {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.readSlate',[value]); 
   const at = (value as { slate?: { at?: unknown } } | null | undefined)?.slate?.at;
-  return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? { at } : null;
+  const settledAt = (value as { slate?: { settledAt?: unknown } } | null)?.slate?.settledAt;
+  return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? { at,
+    ...(typeof settledAt === 'string' && Number.isFinite(Date.parse(settledAt)) && Date.parse(settledAt) >= Date.parse(at) ? { settledAt } : {}) } : null;
 }
 
 /** Whether `brain` is a reset this machine has not followed yet. */
 export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null): boolean {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.slateIsNewer',[brain,mine]); 
   if (!brain) return false;
   if (!mine) return true;
   const ours = Date.parse(mine.at);
@@ -256,6 +268,7 @@ export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null):
  * comparison errs towards keeping the boundary day rather than losing it.
  */
 export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.withoutPreSlateDays',[theirs,slate]); 
   if (!slate || !theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return theirs;
   const day = slate.at.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return theirs;
@@ -273,6 +286,11 @@ export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | 
  * to say old, which is to say exactly what the reset was for.
  */
 export function withoutPreSlate(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.withoutPreSlate',[theirs,slate]); 
+  if (theirs && typeof theirs === 'object' && !Array.isArray(theirs) && 'memories' in theirs) {
+    const envelope = theirs as { memories: unknown };
+    return { ...envelope, memories: withoutPreSlate(envelope.memories, slate) };
+  }
   if (!slate || !Array.isArray(theirs)) return theirs;
   const after = Date.parse(slate.at);
   if (!Number.isFinite(after)) return theirs;

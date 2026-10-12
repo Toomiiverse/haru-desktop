@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -74,6 +75,7 @@ export const DEFAULT_KNOWLEDGE: KnowledgeConfig = {
 };
 
 export function readKnowledgeConfig(saved: unknown): KnowledgeConfig {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.config',[saved]); 
   if (!saved || typeof saved !== 'object') return DEFAULT_KNOWLEDGE;
   const record = saved as Partial<KnowledgeConfig>;
   const clamp = (value: unknown, fallback: number, min: number, max: number) =>
@@ -94,6 +96,7 @@ export function readKnowledgeConfig(saved: unknown): KnowledgeConfig {
 }
 
 export function emptyKnowledge(): KnowledgeStore {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.empty',[]); 
   return { documents: [], chunks: [] };
 }
 
@@ -153,6 +156,7 @@ function asChunk(value: unknown): KnowledgeChunk | null {
 }
 
 export function normalizeKnowledge(saved: unknown): KnowledgeStore {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.normalize',[saved,new Date().toISOString()]); 
   if (!saved || typeof saved !== 'object') return emptyKnowledge();
   const record = saved as Partial<KnowledgeStore>;
   const documents = Array.isArray(record.documents) ? record.documents.map(asDocument).filter((doc): doc is KnowledgeDocument => doc !== null) : [];
@@ -178,22 +182,27 @@ export function saveKnowledge(file: string, store: KnowledgeStore): void {
 }
 
 export function hashContent(text: string): string {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.hash',[text]); 
   return createHash('sha256').update(text).digest('hex').slice(0, 24);
 }
 
 export function stableId(parts: string[]): string {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.stable',[parts]); 
   return createHash('sha256').update(parts.join('\u0000')).digest('hex').slice(0, 16);
 }
 
 export function documentIdFor(source: string, sourceType: string): string {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.documentId',[source,sourceType]); 
   return stableId([source, sourceType]);
 }
 
 export function findDocument(store: KnowledgeStore, id: string): KnowledgeDocument | undefined {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.find',[store,id]); 
   return store.documents.find(document => document.id === id);
 }
 
 export function findDocumentBySource(store: KnowledgeStore, source: string): KnowledgeDocument | undefined {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.findSource',[store,source]); 
   return store.documents.find(document => document.source === source && document.status === 'active');
 }
 
@@ -226,6 +235,7 @@ export function planIngest(
     now: string;
   },
 ): IngestOutcome {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.plan',[store,args]); 
   const existing = findDocument(store, args.id);
   const hash = hashContent(args.text);
   if (existing && existing.status === 'active' && existing.hash === hash) {
@@ -300,6 +310,7 @@ export function planIngest(
 }
 
 export function applyIngest(store: KnowledgeStore, outcome: IngestOutcome): KnowledgeStore {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.apply',[store,outcome]); 
   if (outcome.action === 'unchanged') return store;
   return {
     documents: [...store.documents.filter(document => document.id !== outcome.document.id), outcome.document],
@@ -308,6 +319,7 @@ export function applyIngest(store: KnowledgeStore, outcome: IngestOutcome): Know
 }
 
 export function deleteDocument(store: KnowledgeStore, id: string, now: string): KnowledgeStore {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.delete',[store,id,now]); 
   return {
     documents: store.documents.map(document => document.id === id ? { ...document, status: 'deleted' as const, updatedAt: now } : document),
     chunks: store.chunks.map(chunk => chunk.documentId === id ? { ...chunk, status: 'stale' as const, updatedAt: now } : chunk),
@@ -315,6 +327,7 @@ export function deleteDocument(store: KnowledgeStore, id: string, now: string): 
 }
 
 export function reconcileChunkIds(store: KnowledgeStore): KnowledgeStore {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.reconcile',[store]); 
   const documents = store.documents.map(document => {
     const ids = store.chunks.filter(chunk => chunk.documentId === document.id).map(chunk => chunk.id);
     return ids.length && ids.length === document.chunkIds.length ? document : { ...document, chunkIds: ids };
@@ -323,6 +336,7 @@ export function reconcileChunkIds(store: KnowledgeStore): KnowledgeStore {
 }
 
 export function knowledgeStats(store: KnowledgeStore) {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync<{documents:number;chunks:number;stale:number;characters:number;byCategory:Record<string,number>;sources:Record<string,number>;embedModels:string[];embedDimensions:number[];lastIngestedAt:string}>('knowledge-index.stats',[store]); 
   const activeDocuments = store.documents.filter(document => document.status === 'active');
   const activeChunks = store.chunks.filter(chunk => chunk.status === 'active');
   const byCategory = Object.fromEntries(KNOWLEDGE_CATEGORIES.map(category => [
@@ -347,6 +361,7 @@ export function knowledgeStats(store: KnowledgeStore) {
 }
 
 export function guessCategory(source: string): KnowledgeCategory {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-index.guess',[source]); 
   const name = source.toLowerCase();
   if (name.includes('haru') || name.includes('companion')) return 'haru';
   if (/(^|\/)projects?\//.test(name) || name.includes('project')) return 'projects';

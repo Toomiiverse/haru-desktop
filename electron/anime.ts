@@ -24,8 +24,12 @@
 // plays it), raws, dubs-only, and subtitles in a language he does not read.
 
 import { readFileSync } from 'node:fs';
+import {corePolicySync} from './core-policy-sync';
+import {runAnimePlayback, type PlaybackMemory} from './anime-playback';
+import {runAnimeDownload,runAnimeFetchWatch,type DownloadMemory} from './anime-downloads';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import type {Job,Outcome} from './scheduler';
 import type { ImportCandidate, ImportFile } from './animefetch';
 
 export type AnimeConfig = {
@@ -57,6 +61,7 @@ const text = (value: unknown, fallback: string): string => (typeof value === 'st
 const trimSlash = (url: string) => url.replace(/\/+$/, '');
 
 export function readAnimeConfig(saved: unknown): AnimeConfig {
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.config',[saved??null,homedir()]);
   if (!saved || typeof saved !== 'object') return { ...DEFAULT_ANIME };
   const record = saved as Record<string, unknown>;
   const sonarr = (record.sonarr ?? {}) as Record<string, unknown>;
@@ -94,8 +99,8 @@ export function apiKeyFrom(file: string, readFile: (file: string, encoding: 'utf
 
 export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<Response>;
 
-type JellyfinItem = { Id: string; Name: string; ProductionYear?: number; SeriesName?: string; SeriesId?: string; ParentIndexNumber?: number; IndexNumber?: number; UserData?: { Played?: boolean } };
-type JellyfinSession = { Id: string; Client?: string; DeviceName?: string; DeviceId?: string; SupportsRemoteControl?: boolean; LastActivityDate?: string; NowPlayingItem?: { Name?: string; SeriesName?: string } };
+type JellyfinItem = { Id: string; Name: string; ProductionYear?: number; ProviderIds?: {Tvdb?: string}; SeriesName?: string; SeriesId?: string; ParentIndexNumber?: number; IndexNumber?: number; UserData?: { Played?: boolean } };
+type JellyfinSession = { Id: string; Client?: string; DeviceName?: string; DeviceId?: string; SupportsRemoteControl?: boolean; LastActivityDate?: string; PlayState?: {IsPaused?: boolean}; NowPlayingItem?: { Id?: string; Name?: string; SeriesName?: string } };
 type SonarrSeries = { id: number; title: string; tvdbId: number; monitored: boolean; year?: number; statistics?: { episodeFileCount?: number; episodeCount?: number } };
 type SonarrLookup = { title: string; tvdbId: number; year?: number; status?: string; seriesType?: string; seasons?: { seasonNumber: number }[] } & Record<string, unknown>;
 type SonarrEpisode = { id: number; seasonNumber: number; episodeNumber: number; absoluteEpisodeNumber?: number; hasFile: boolean; title?: string };
@@ -138,6 +143,7 @@ export function normaliseTitle(title: string): string {
  * show.
  */
 export function matchTitle<T extends { title: string }>(wanted: string, candidates: T[]): { one: T } | { several: T[] } | null {
+  if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.matchTitle',[wanted,candidates]);
   const want = normaliseTitle(wanted);
   if (!want || !candidates.length) return null;
   const exact = candidates.filter(item => normaliseTitle(item.title) === want);
@@ -185,6 +191,7 @@ const PACK_WORDS = /\b(?:complete|collection|batch|series|the complete series|fu
  * title Sonarr could not read at all is not vouched for either way.
  */
 export function sameShow(parsedTitle: string | undefined, wanted: string): boolean | null {
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.sameShow',[parsedTitle??null,wanted]);
   if (!parsedTitle) return null;
   const strip = (value: string) => normaliseTitle(value).replace(PACK_WORDS, ' ').replace(/\s+/g, ' ').trim();
   return strip(parsedTitle) === strip(wanted);
@@ -200,6 +207,7 @@ export function sameShow(parsedTitle: string | undefined, wanted: string): boole
  * ten thousand, for the reason at the top of the file.
  */
 export function rateRelease(release: ProwlarrRelease, parsed: SonarrParse, want: Want): Rated {
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.rateRelease',[release,parsed,want]);
   const formats = (parsed.customFormats ?? []).map(format => format.name);
   const info = parsed.parsedEpisodeInfo ?? undefined;
   const sizeGb = (release.size ?? 0) / GB;
@@ -232,6 +240,7 @@ export function rateRelease(release: ProwlarrRelease, parsed: SonarrParse, want:
 
 /** The one to fetch: best that leaves the room; failing that, best that fits at all, for them to approve. */
 export function pickRelease(rated: Rated[]): { pick: Rated; needsWord: boolean } | null {
+  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.pickRelease',[rated]);
   const good = rated.filter(item => item.ok).sort((a, b) => b.score - a.score);
   const roomy = good.find(item => item.fits);
   if (roomy) return { pick: roomy, needsWord: false };
@@ -241,7 +250,7 @@ export function pickRelease(rated: Rated[]): { pick: Rated; needsWord: boolean }
 
 // -- the link ----------------------------------------------------------------
 
-export type WatchInput = { title: string; tvdbId?: number; confirm?: boolean; where?: string };
+export type WatchInput = { title: string; tvdbId?: number; jellyfinSeriesId?: string; confirm?: boolean; where?: string };
 
 /** What a Jellyfin session calls itself, read for the kind of thing it is running on. */
 const PHONE = /\b(?:iphone|ipad|ios|android|mobile|safari|swiftfin|streamyfin|findroid|infuse)\b/i;
@@ -255,6 +264,7 @@ const TV = /\b(?:tv|television|telly|roku|shield|fire|tizen|webos|android tv|app
  * word, every player.
  */
 export function playersWhere<T extends { Client?: string; DeviceName?: string }>(players: T[], where: string | undefined): T[] {
+  if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.playersWhere',[players,where??null]);
   const said = (where ?? '').trim().toLowerCase();
   if (!said) return players;
   const label = (player: T) => `${player.DeviceName ?? ''} ${player.Client ?? ''}`;
@@ -271,7 +281,7 @@ export class AnimeLink {
     private readonly config: AnimeConfig,
     private readonly keys: Keys,
     private readonly fetcher: Fetcher,
-    private readonly memory: { fetches(): Fetch[]; keep(fetch: Fetch): void; markImported?(seriesId: number, atIso: string): void },
+    private readonly memory: { fetches(): Fetch[]; keep(fetch: Fetch): void | Promise<void>; markImported?(seriesId: number, atIso: string): void } & PlaybackMemory & DownloadMemory,
   ) {}
 
   /** The import step (animefetch.ts) says the show is filed; "how's it going" stops calling it stalled. */
@@ -299,14 +309,20 @@ export class AnimeLink {
 
   async findOnServer(title: string): Promise<JellyfinItem | null> {
     const user = encodeURIComponent(this.keys.jellyfinUserId);
-    const found = await this.jf<{ Items?: JellyfinItem[] }>(`/Items?userId=${user}&IncludeItemTypes=Series&Recursive=true&SearchTerm=${encodeURIComponent(title)}&Limit=6`);
+    const found = await this.jf<{ Items?: JellyfinItem[];TotalRecordCount?:number }>(`/Items?userId=${user}&IncludeItemTypes=Series&Recursive=true&SearchTerm=${encodeURIComponent(title)}&EnableTotalRecordCount=true&Limit=${process.env.HARU_CORE_ANIME_DOWNLOADS==='on'?100:6}`);
+    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on'&&typeof found?.TotalRecordCount==='number'&&found.TotalRecordCount>(found.Items?.length??0))throw Error('anime_library_truncated');
     const items = (found?.Items ?? []).map(item => ({ ...item, title: item.Name }));
     const match = matchTitle(title, items);
+    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on'){
+      if(match&&'several' in match)throw Error('anime_title_ambiguous');
+      return match&&'one' in match?match.one:null;
+    }
     return match && 'one' in match ? match.one : (items[0] ?? null);
   }
 
   /** The next unwatched episode, or the first when it has all been seen. */
   async nextEpisode(seriesId: string): Promise<{ episode: JellyfinItem; fresh: boolean } | null> {
+    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')throw Error('anime_legacy_playback_not_permitted');
     const user = encodeURIComponent(this.keys.jellyfinUserId);
     const next = await this.jf<{ Items?: JellyfinItem[] }>(`/Shows/NextUp?userId=${user}&seriesId=${encodeURIComponent(seriesId)}&Limit=1`);
     if (next?.Items?.[0]) return { episode: next.Items[0], fresh: false };
@@ -320,6 +336,7 @@ export class AnimeLink {
   async players(): Promise<JellyfinSession[]> {
     const user = encodeURIComponent(this.keys.jellyfinUserId);
     const sessions = await this.jf<JellyfinSession[]>(`/Sessions?controllableByUserId=${user}&activeWithinSeconds=960`);
+    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.activePlayers',[sessions??[],Date.now()]);
     return (sessions ?? [])
       .filter(session => session.SupportsRemoteControl !== false && session.DeviceId !== 'haru-desktop' && !/^Haru\b/i.test(session.Client ?? ''))
       .sort((a, b) => Date.parse(b.LastActivityDate ?? '') - Date.parse(a.LastActivityDate ?? ''));
@@ -401,6 +418,7 @@ export class AnimeLink {
    * and the rows fold to one per download id, which is what a fetch is.
    */
   async queue(): Promise<SonarrQueueItem[]> {
+    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.queueSnapshot',[await this.queueRaw()]);
     const lines: SonarrQueueItem[] = [];
     const seen = new Set<string>();
     for (let page = 1; page <= 10; page++) {
@@ -414,6 +432,20 @@ export class AnimeLink {
       if ((got?.records?.length ?? 0) < 500 || page * 500 >= (got?.totalRecords ?? 0)) break;
     }
     return lines;
+  }
+
+  /** Raw complete pagination. No download choice, grouping or capacity arithmetic. */
+  private async queueRaw():Promise<SonarrQueueItem[]>{
+    const rows:SonarrQueueItem[]=[];let total:number|undefined;
+    for(let page=1;page<=10;page++){
+      const got=await this.sonarr<{records?:SonarrQueueItem[];totalRecords?:number}>(`/queue?includeUnknownSeriesItems=true&pageSize=500&page=${page}`);
+      if(!Array.isArray(got?.records)||!Number.isSafeInteger(got?.totalRecords)||got!.totalRecords!<0||got.records.length>500)throw Error('anime_queue_response_invalid');
+      if(total!==undefined&&total!==got.totalRecords)throw Error('anime_queue_changed_during_read');
+      total=got.totalRecords!;rows.push(...got.records);
+      if(rows.length===total)return rows;
+      if(rows.length>total||got.records.length<500)throw Error('anime_queue_incomplete');
+    }
+    throw Error('anime_queue_truncated');
   }
 
   /** Bytes still to come across everything downloading, which the free-space figure does not know about yet. */
@@ -481,11 +513,67 @@ export class AnimeLink {
    * `ok: false` on the answers that changed nothing, so the deeds ledger does
    * not record a fetch she only asked about.
    */
+  runFetchWatch(job:Job,notificationTransport:(op:string,args:any[])=>Promise<unknown>):Promise<Outcome>{
+    return runAnimeFetchWatch(job,(op,args)=>['notifyFacts','composeNotice','publish'].includes(op)?notificationTransport(op,args):this.downloadTransport(op,args),this.memory);
+  }
+
+  /** Exact Core-selected transport; no selection/profile/root fallback. */
+  async downloadTransport(op:string,args:any[]):Promise<unknown>{
+    switch(op){
+      case 'shows':return this.shows();
+      case 'lookup':return this.lookUp(args[0]);
+      case 'profiles':return this.sonarr('/qualityprofile');
+      case 'roots':return this.sonarr('/rootfolder');
+      case 'queue':return {queue:await this.queue(),fetches:this.memory.fetches(),ledger:this.memory.downloadEffects?.()??null};
+      case 'episodes':return this.episodes(args[0]);
+      case 'search':return this.prowlarr(`/search?query=${encodeURIComponent(args[0])}&type=search&limit=100&categories=5070`,{},SEARCH_MS);
+      case 'parse':return this.parse(args[0]);
+      case 'show':return this.sonarr(`/series/${args[0]}`);
+      case 'add':return this.sonarr('/series',{method:'POST',body:JSON.stringify(args[0])});
+      case 'monitor':return this.sonarr(`/series/${args[0]}`,{method:'PUT',body:JSON.stringify(args[1])});
+      case 'grab':await this.grab(args[0]);return null;
+      case 'scan':await this.rescanLibrary();return null;
+      case 'library':return this.playbackTransport('library',args);
+      case 'libraryEpisodes':return this.episodesOnServer(args[0]);
+      case 'importCandidates':return this.importCandidates(args[0],args[1]);
+      case 'import':await this.manualImport(args[0]);return null;
+      default:throw Error('anime_download_command_invalid');
+    }
+  }
+
+  private async playbackTransport(op:string,args:any[]):Promise<unknown>{
+    const user=encodeURIComponent(this.keys.jellyfinUserId);
+    switch(op){
+      case 'library':return (await this.jf<{Items?:JellyfinItem[];TotalRecordCount?:number}>(`/Items?userId=${user}&IncludeItemTypes=Series&Recursive=true&SearchTerm=${encodeURIComponent(args[0])}&Fields=ProviderIds&EnableTotalRecordCount=true&Limit=100`))??{Items:[]};
+      case 'next':return (await this.jf<{Items?:JellyfinItem[]}>(`/Shows/NextUp?userId=${user}&seriesId=${encodeURIComponent(args[0])}&Limit=1`))?.Items??[];
+      case 'unplayed':return (await this.jf<{Items?:JellyfinItem[]}>(`/Items?userId=${user}&ParentId=${encodeURIComponent(args[0])}&IncludeItemTypes=Episode&Recursive=true&Filters=IsUnplayed&SortBy=ParentIndexNumber,IndexNumber&Limit=1`))?.Items??[];
+      case 'count':return (await this.jf<{TotalRecordCount?:number}>(`/Items?userId=${user}&ParentId=${encodeURIComponent(args[0])}&IncludeItemTypes=Episode&Recursive=true&Limit=1`))?.TotalRecordCount??0;
+      case 'episode':return this.jf(`/Users/${user}/Items/${encodeURIComponent(args[0])}`);
+      case 'sessions':return (await this.jf<JellyfinSession[]>(`/Sessions?controllableByUserId=${user}&activeWithinSeconds=960`))??[];
+      case 'link':return this.link(args[0]);
+      case 'play':await this.play(args[0],args[1]);return null;
+      default:throw Error('anime_playback_command_invalid');
+    }
+  }
+
   async watch(input: WatchInput): Promise<Record<string, unknown>> {
+    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on'){
+      const plan=await runAnimePlayback(input,(op,args)=>this.playbackTransport(op,args),this.memory);
+      if(plan.delegateDownload)return this.watchDownload(input);
+      if(!plan.result)throw Error('anime_playback_result_missing');
+      return plan.result;
+    }
     const title = input.title.trim();
     const onServer = await this.findOnServer(title);
     if (onServer) return this.putOn(onServer, input.where);
 
+    return this.watchDownload(input);
+  }
+
+  /** Retained download policy; HARU_CORE_ANIME_PLAYBACK does not claim ownership. */
+  private async watchDownload(input:WatchInput):Promise<Record<string,unknown>>{
+    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return runAnimeDownload(input,this.config,(op,args)=>this.downloadTransport(op,args),this.memory);
+    const title=input.title.trim();
     // Not on the server. In Sonarr already?
     const shows = await this.shows();
     const known = input.tvdbId ? shows.find(show => show.tvdbId === input.tvdbId) : (match => match && 'one' in match ? match.one : null)(matchTitle(title, shows));
@@ -520,6 +608,7 @@ export class AnimeLink {
 
   /** "How's Naruto going": where a fetch is up to, or what is on the server. */
   async status(title: string): Promise<Record<string, unknown>> {
+    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return runAnimeDownload({title},this.config,(op,args)=>this.downloadTransport(op,args),this.memory,'status');
     const shows = await this.shows();
     const match = matchTitle(title, shows);
     const show = match && 'one' in match ? match.one : null;
@@ -616,7 +705,7 @@ export class AnimeLink {
     }
     await this.monitor(show);
     await this.grab(pick.release);
-    this.memory.keep({
+    await this.memory.keep({
       title: show.title,
       seriesId: show.id,
       tvdbId: show.tvdbId,

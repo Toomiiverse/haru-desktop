@@ -1,0 +1,7 @@
+[Unit]
+Description=Watch Haru's door and raise a phone alert if she goes unreachable
+After=haru.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /home/toomii/haru-desktop/scripts/haru-watchdog.mjs

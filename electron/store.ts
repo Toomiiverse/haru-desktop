@@ -1,41 +1,14 @@
-// Haru's persistence layer — the only module that reads or writes the on-disk
-// store files: config.json for application/configuration state, knowledge.json
-// for structured memory, archive.json for the day-by-day transcripts,
-// memories.json for what she actually remembers, activity.json for the day at
-// the desk, graph.json for who is who in his life (factgraph.ts), schedule.json
-// for what is to be done later (scheduler.ts), thoughts.json for what is on her
-// mind (thoughts.ts).
-//
-// Four files rather than one, and the split is not filing tidiness.
-// electron-store rewrites the whole of config.json on every set, and the life
-// loop sets one key every twenty seconds — so the transcripts, which change
-// twice a day, were being written to disk four thousand times a day along with
-// everything else. See archive.ts.
-//
-// The memories left for the same reason from the other end. They are not large
-// but they are written constantly — every remembered fact, every decay pass,
-// every sync with the server — and each of those writes was dragging the
-// persona and the API keys through a full serialise with it. Now the two things
-// that change often, the vitals and the memories, no longer share a file.
-//
-// What that buys is real and worth keeping. No other module imports
-// electron-store or knows where the files live, and this is the one place that
-// owns the safety net: atomic saves, backups before migration, corruption
-// recovery, schema versioning and file permissions. Move a file, change how it
-// is written, add a migration — only this file changes.
-//
-// What it does not buy is a different database, and this header used to say
-// otherwise: that the files could be swapped for SQLite, Postgres or a graph
-// database without changing any caller. They cannot. get and set below are
-// electron-store's own surface re-exported, and 282 call sites across four
-// modules reach through them for 65 dotted string keys — 'chat.messages',
-// 'ai.config', 'journal.config' — and cast whatever comes back. That is a
-// key-value store's shape and it is load-bearing in every one of those callers.
-//
-// The typed accessors below — getMemories, setBlocks, appendForgettingLog — are
-// what an actual boundary looks like, and the distance to one is those 65 keys.
-// Said plainly here because a sentence promising portability is worse than no
-// sentence: it is the kind of thing somebody plans a weekend around.
+import {corePolicySync} from './core-policy-sync';
+import { CoreStore, coreStoreOptions, type CoreStoreOptions } from './core-store';
+import { assertIdentityWritable, coreIdentityValue } from './core-identity';
+import { memorySourceRevision } from './memory-revision';
+import { mergeDeletions, type MemoryDeletion } from './memorysync';
+// The persistence boundary for Haru's memory and application state.
+// HARU_CORE_STORAGE=on selects the Core SQLite authority: typed documents and
+// dotted config keys are committed through CoreStore, with no JSON fallback.
+// The file backend remains available for explicit rollback and isolated tests.
+// Callers retain the synchronous API; Core commits documents and derived belief
+// state atomically before a write returns. See core-store.ts for the transport.
 
 import Store from 'electron-store';
 import { execFile } from 'node:child_process';
@@ -130,6 +103,7 @@ export const MIGRATIONS: MigrationStep[] = [
       if (moved.memories.length || moved.sessions.length || moved.forgettingLog.length) {
         const held = haruStore.readMemoryFile();
         haruStore.writeMemoryFile({
+          ...held,
           memories: moved.memories.length ? moved.memories : held.memories,
           sessions: moved.sessions.length ? moved.sessions : held.sessions,
           // monthNotes never lived in config.json — carried across untouched.
@@ -153,6 +127,7 @@ export type MemoryFile = {
   sessions: SessionSummary[];
   monthNotes: MonthNote[];
   forgettingLog: ForgettingEntry[];
+  deletions?: MemoryDeletion[];
 };
 
 const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], monthNotes: [], forgettingLog: [] };
@@ -161,6 +136,7 @@ const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], monthNotes: 
  *  hand, or half-written by a machine that lost power, comes back usable rather
  *  than throwing at startup — the same bargain loadArchive makes. */
 export function normalizeMemoryFile(value: unknown): MemoryFile {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.normalizeFile',[value]);
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_MEMORY_FILE };
   const held = value as Partial<Record<keyof MemoryFile, unknown>>;
   const list = <T>(candidate: unknown): T[] => (Array.isArray(candidate) ? candidate as T[] : []);
@@ -169,10 +145,12 @@ export function normalizeMemoryFile(value: unknown): MemoryFile {
     sessions: list<SessionSummary>(held.sessions),
     monthNotes: list<MonthNote>(held.monthNotes),
     forgettingLog: list<ForgettingEntry>(held.forgettingLog),
+    ...(Array.isArray(held.deletions) ? { deletions: mergeDeletions(held.deletions) } : {}),
   };
 }
 
 export type HaruStoreOptions = {
+  core?: CoreStoreOptions | false;
   /** Where knowledge.json lives. */
   knowledgeFile: string;
   /** Where archive.json lives. Defaults to sitting beside config.json, which
@@ -240,6 +218,7 @@ function backupStamp(): string {
 }
 
 export class HaruStore {
+  private readonly core?: CoreStore;
   private readonly electron: Store<Record<string, unknown>>;
   private readonly knowledgeFile: string;
   private readonly archiveFile: string;
@@ -272,7 +251,9 @@ export class HaruStore {
     this.maxBackups = options.maxBackups ?? 10;
     const storeOptions: Record<string, unknown> = { cwd: path.resolve(options.cwd) };
     if (options.configName) storeOptions.name = options.configName;
-    this.electron = new Store<Record<string, unknown>>(storeOptions);
+    const coreOptions = options.core === false ? undefined : options.core ?? coreStoreOptions();
+    this.core = coreOptions ? new CoreStore(coreOptions, path.resolve(options.cwd)) : undefined;
+    this.electron = this.core ? undefined as unknown as Store<Record<string, unknown>> : new Store<Record<string, unknown>>(storeOptions);
     this.archiveFile = files.archive;
     this.memoriesFile = files.memories;
     this.activityFile = files.activity;
@@ -289,6 +270,11 @@ export class HaruStore {
    *  so call sites that check `get(key, fallback) === x` or cast the result
    *  keep compiling unchanged. */
   get(key: string, defaultValue?: unknown): unknown {
+    const owned = coreIdentityValue(key);
+    if (owned) return owned.value ?? defaultValue;
+    if (this.core) {
+      return this.core.getPath('config', key.split('.'), defaultValue);
+    }
     return defaultValue === undefined
       ? this.electron.get(key)
       : this.electron.get(key, defaultValue);
@@ -297,6 +283,16 @@ export class HaruStore {
   set(key: string, value: unknown): void;
   set(object: Record<string, unknown>): void;
   set(keyOrObject: string | Record<string, unknown>, value?: unknown): void {
+    assertIdentityWritable(typeof keyOrObject === 'string' ? [keyOrObject] : Object.keys(keyOrObject));
+    if (this.core) {
+      const config = this.core.get('config');
+      for (const [key, entry] of Object.entries(typeof keyOrObject === 'string' ? { [keyOrObject]: value } : keyOrObject)) {
+        const parts = key.split('.'); if (parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) throw new Error('invalid_config_path');
+        let target = config; for (const part of parts.slice(0, -1)) { if (!target[part] || typeof target[part] !== 'object') target[part] = {}; target = target[part]; }
+        target[parts.at(-1)!] = entry;
+      }
+      this.core.set('config', config); return;
+    }
     if (typeof keyOrObject === 'string') {
       this.electron.set(keyOrObject, value);
     } else {
@@ -305,10 +301,18 @@ export class HaruStore {
   }
 
   delete(key: string): void {
+    assertIdentityWritable([key]);
+    if (this.core) {
+      const config = this.core.get('config'), parts = key.split('.');
+      if (parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) throw new Error('invalid_config_path');
+      let target = config; for (const part of parts.slice(0, -1)) { if (!target?.[part] || typeof target[part] !== 'object') return; target = target[part]; }
+      delete target[parts.at(-1)!]; this.core.set('config', config); return;
+    }
     this.electron.delete(key);
   }
 
   has(key: string): boolean {
+    if (this.core) return this.get(key) !== undefined;
     return this.electron.has(key);
   }
 
@@ -320,6 +324,7 @@ export class HaruStore {
    *  can reach it before the cache is trusted; everything else goes through the
    *  accessors below. */
   readMemoryFile(): MemoryFile {
+    if (this.core) return normalizeMemoryFile(this.core.get('memories'));
     try {
       if (!existsSync(this.memoriesFile)) return { ...EMPTY_MEMORY_FILE };
       return normalizeMemoryFile(JSON.parse(readFileSync(this.memoriesFile, 'utf8')));
@@ -334,14 +339,16 @@ export class HaruStore {
   /** Temp file then rename, so a crash mid-write cannot leave half a memory
    *  file behind — the same write knowledge.json and archive.json get. */
   writeMemoryFile(file: MemoryFile): void {
-    this.memoryCache = file;
+    if (this.core) { this.core.set('memories', file); return; }
     mkdirSync(path.dirname(this.memoriesFile), { recursive: true });
     const tmp = `${this.memoriesFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
     writeFileSync(tmp, JSON.stringify(file));
     renameSync(tmp, this.memoriesFile);
+    this.memoryCache = file;
   }
 
   private memories(): MemoryFile {
+    if (this.core) return this.readMemoryFile();
     if (!this.memoryCache) this.memoryCache = this.readMemoryFile();
     return this.memoryCache;
   }
@@ -351,7 +358,22 @@ export class HaruStore {
   }
 
   setMemories(items: MemoryRecord[]): void {
-    this.writeMemoryFile({ ...this.memories(), memories: items });
+    this.setMemoryState(items, this.getMemoryDeletions());
+  }
+
+  getMemoryDeletions(): MemoryDeletion[] {
+    return mergeDeletions(this.memories().deletions);
+  }
+
+  /** Records and their deletion markers commit together, including pruning. */
+  setMemoryState(items: MemoryRecord[], incoming: MemoryDeletion[]): void {
+    if(process.env.HARU_CORE_MEMORY_TOOLS==='on'){this.writeMemoryFile(corePolicySync('memory-tools.storeState',[this.memories(),items,incoming,new Date().toISOString()]));return;}
+    const kept = new Set(items.map(m => m.id));
+    const at = new Date().toISOString();
+    const removed = this.getMemories().filter(m => !kept.has(m.id)).map(m => ({ id: m.id, at }));
+    const deletions = mergeDeletions(this.getMemoryDeletions(), incoming, removed);
+    const deleted = new Set(deletions.map(d => d.id));
+    this.writeMemoryFile({ ...this.memories(), memories: items.filter(m => !deleted.has(m.id)), deletions });
   }
 
   getSessions(): SessionSummary[] {
@@ -373,11 +395,13 @@ export class HaruStore {
   /** The trail of what she forgot and why — bounded so the log itself cannot
    *  grow forever. */
   getForgettingLog(): ForgettingEntry[] {
+    if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.forgetting',[this.memories()]);
     return this.memories().forgettingLog
       .filter(entry => entry && typeof entry.id === 'string' && typeof entry.at === 'string');
   }
 
   setForgettingLog(entries: ForgettingEntry[]): void {
+    if(process.env.HARU_CORE_MEMORY_TOOLS==='on'){this.writeMemoryFile({...this.memories(),forgettingLog:corePolicySync('memory-tools.boundForgetting',[entries])});return;}
     this.writeMemoryFile({ ...this.memories(), forgettingLog: entries.slice(-200) });
   }
 
@@ -402,6 +426,7 @@ export class HaruStore {
   //    appended to on every window change and holds nothing config.json needs.
 
   getActivityLog(): ActivityLog {
+    if (this.core) return this.core.get('activity');
     if (!this.activityCache) {
       try {
         this.activityCache = existsSync(this.activityFile)
@@ -418,6 +443,7 @@ export class HaruStore {
   }
 
   setActivityLog(log: ActivityLog): void {
+    if (this.core) { this.core.set('activity', log); return; }
     this.activityCache = log;
     mkdirSync(path.dirname(this.activityFile), { recursive: true });
     const tmp = `${this.activityFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
@@ -429,6 +455,7 @@ export class HaruStore {
   //    nothing in config.json needs it.
 
   getFactGraph(): FactGraph {
+    if (this.core) return this.core.get('graph');
     if (!this.graphCache) {
       try {
         this.graphCache = existsSync(this.graphFile) ? normalizeGraph(JSON.parse(readFileSync(this.graphFile, 'utf8'))) : normalizeGraph(null);
@@ -441,6 +468,7 @@ export class HaruStore {
   }
 
   setFactGraph(graph: FactGraph): void {
+    if (this.core) { this.core.set('graph', graph); return; }
     this.graphCache = graph;
     mkdirSync(path.dirname(this.graphFile), { recursive: true });
     const tmp = `${this.graphFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
@@ -451,6 +479,7 @@ export class HaruStore {
   // -- for later. Its own file, written before every run it records.
 
   getSchedule(): ScheduleFile {
+    if (this.core) return this.core.get('schedule');
     if (!this.scheduleCache) {
       try {
         this.scheduleCache = existsSync(this.scheduleFile) ? normalizeSchedule(JSON.parse(readFileSync(this.scheduleFile, 'utf8'))) : normalizeSchedule(null);
@@ -463,6 +492,7 @@ export class HaruStore {
   }
 
   setSchedule(file: ScheduleFile): void {
+    if (this.core) { this.core.set('schedule', file); return; }
     this.scheduleCache = file;
     mkdirSync(path.dirname(this.scheduleFile), { recursive: true });
     const tmp = `${this.scheduleFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
@@ -473,6 +503,7 @@ export class HaruStore {
   // -- on her mind. Its own file, written each time she thinks something through.
 
   getThoughts(): ThoughtState {
+    if (this.core) return this.core.get('thoughts');
     if (!this.thoughtsCache) {
       try {
         this.thoughtsCache = existsSync(this.thoughtsFile) ? normalizeThoughtState(JSON.parse(readFileSync(this.thoughtsFile, 'utf8'))) : normalizeThoughtState(null);
@@ -485,6 +516,7 @@ export class HaruStore {
   }
 
   setThoughts(state: ThoughtState): void {
+    if (this.core) { this.core.set('thoughts', state); return; }
     this.thoughtsCache = state;
     mkdirSync(path.dirname(this.thoughtsFile), { recursive: true });
     const tmp = `${this.thoughtsFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
@@ -499,10 +531,12 @@ export class HaruStore {
    *  full of the wrong shapes all come back empty rather than throwing.
    *  loadKnowledge normalises what it reads, so this does not do it again. */
   getKnowledge(): KnowledgeStore {
+    if (this.core) return this.core.get('knowledge');
     return loadKnowledge(this.knowledgeFile);
   }
 
   setKnowledge(value: KnowledgeStore): void {
+    if (this.core) { this.core.set('knowledge', value); return; }
     saveKnowledge(this.knowledgeFile, value);
   }
 
@@ -511,6 +545,7 @@ export class HaruStore {
   /** Every day of transcript she still has. Always an object, never undefined —
    *  callers used to write `?? {}` after every read of the old key. */
   getArchive(): Archive {
+    if (this.core) return this.core.get('archive');
     if (!this.archiveCache) this.archiveCache = loadArchive(this.archiveFile);
     // A copy of the top level, so a caller that deletes a day it was only
     // reading cannot quietly delete it for everyone else too. The transcripts
@@ -519,9 +554,18 @@ export class HaruStore {
   }
 
   setArchive(archive: Archive): void {
+    if (this.core) { this.core.set('archive', archive); return; }
     this.archiveCache = archive;
     saveArchive(this.archiveFile, archive);
   }
+
+  memorySourceRevision(): string {
+    return this.core ? this.core.sourceRevision() : memorySourceRevision({ profile: this.get('profile'), her: { slate: this.get('her.slate') }, vault: { admitted: this.get('vault.admitted') } }, this.readMemoryFile(), this.getFactGraph());
+  }
+
+  resetMemoryAssets(): void { this.core?.clearExperiences(); }
+  memoryBackend(): string { return this.core ? 'core' : 'desktop'; }
+  close(): void { this.core?.close(); }
 
   // -- lifecycle safety.
 
@@ -531,7 +575,12 @@ export class HaruStore {
    * the function still happen (electron-store saves on every set); the rollback
    * restores the previous state afterwards.
    */
+  transactionAsync<T>(fn: () => T): Promise<T> {
+    return this.core ? this.core.transactionAsync(fn) : Promise.resolve(this.transaction(fn));
+  }
+
   transaction<T>(fn: () => T): T {
+    if (this.core) return this.core.transaction(fn);
     const snapshot = JSON.parse(JSON.stringify(this.electron.store)) as Record<string, unknown>;
     // The memories are no longer inside electron-store, so restoring its
     // snapshot alone would roll back half of what the block tools do in here:
@@ -555,6 +604,7 @@ export class HaruStore {
    * most `maxBackups` survive per reason. Returns the backup paths created.
    */
   backup(reason: string): string[] {
+    if (this.core) return [this.core.backup(reason)];
     const made: string[] = [];
     for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile, this.graphFile, this.scheduleFile, this.thoughtsFile]) {
       if (!existsSync(file)) continue;
@@ -594,6 +644,7 @@ export class HaruStore {
 
   /** Whether every store file parses as JSON right now. */
   verify(): boolean {
+    if (this.core) { try { return this.core.health().integrity === 'ok'; } catch { return false; } }
     const ok = (file: string) => {
       if (!existsSync(file)) return true;
       try {
@@ -617,6 +668,7 @@ export class HaruStore {
    * from booting.
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
+    if (options.core || options.core !== false && coreStoreOptions()) return false;
     const files = storePaths(options);
     let restored = false;
     for (const file of new Set(Object.values(files))) {
@@ -658,6 +710,7 @@ export class HaruStore {
    * Best effort — a failure to tighten is logged, not fatal.
    */
   hardenPermissions(): void {
+    if (this.core) return; // Core enforces 0600 for its database and backups.
     if (process.platform !== 'win32') return;
     // Every store file, not just the two that existed when this was written:
     // archive.json is ninety days of what was said and memories.json is what

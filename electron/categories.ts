@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What a memory is, finer than its kind.
 //
 // `kind` has four values — preference, relationship, event, fact — and they
@@ -63,6 +64,7 @@ export const LEGACY_KIND: Record<Exclude<Category, 'passing'>, MemoryKind> = {
 };
 
 export function isCategory(value: unknown): value is Category {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isCategory>>('memory-category.isCategory', [value]);
   return typeof value === 'string' && (CATEGORIES as readonly string[]).includes(value);
 }
 
@@ -79,6 +81,7 @@ const UNDER_WAY = /\b(currently|is (working on|building|creating|designing|readi
  * already said, so an unsorted record behaves the way it always did.
  */
 export function guessCategory(record: Pick<MemoryRecord, 'kind' | 'text' | 'subject'>): Category {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof guessCategory>>('memory-category.guessCategory', [record]);
   const text = record.text ?? '';
   switch (record.kind) {
     case 'relationship': return 'person';
@@ -99,6 +102,7 @@ export const UNDATED_PLAN_DAYS = 14;
  * today is still a plan whichever side of UTC midnight the clock is on.
  */
 export function categoryOf(record: Pick<MemoryRecord, 'kind' | 'text' | 'subject' | 'lastSeenAt'> & { category?: Category; when?: string }, now?: Date): Category {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof categoryOf>>('memory-category.categoryOf', [record, now]);
   const category = isCategory(record.category) ? record.category : guessCategory(record);
   if (category !== 'plan' || !now) return category;
   if (isDay(record.when)) return Date.parse(`${record.when}T00:00:00Z`) < now.getTime() - 2 * 86_400_000 ? 'event' : 'plan';
@@ -118,6 +122,7 @@ const NOT_A_NAME = new Set(['they', 'their', 'them', 'the', 'this', 'that', 'the
  * and people are shown on every turn (2026-09-17).
  */
 export function namesSomeoneElse(text: string, userName = ''): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof namesSomeoneElse>>('memory-category.namesSomeoneElse', [text, userName]);
   if (RELATION.test(text)) return true;
   const user = userName.trim().toLowerCase();
   return (text.match(/\b[A-Z][a-z]+(?:['’]s)?\b/g) ?? [])
@@ -135,6 +140,7 @@ export type SortNote = { id: string; text: string; kind: MemoryKind; subject?: s
 export type Sorted = { category: Category; when?: string };
 
 export function sortPrompt(userName = ''): string {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof sortPrompt>>('memory-category.sortPrompt', [userName]);
   const name = userName.trim();
   return [
     'You sort the notes Haru keeps about the user she lives with into exactly one category each.',
@@ -164,6 +170,7 @@ const WEEKDAY = new Intl.DateTimeFormat('en-AU', { weekday: 'short', timeZone: '
 
 /** The notes as the model reads them, each with the day it was written. */
 export function sortInput(notes: SortNote[], dayOf: (iso: string) => string): string {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<string>('memory-category.sortInput', [notes, notes.map(note => dayOf(note.createdAt))]);
   return notes.map((note, index) => {
     const day = dayOf(note.createdAt);
     const weekday = isDay(day) ? `${WEEKDAY.format(new Date(`${day}T00:00:00Z`))} ` : '';
@@ -178,6 +185,7 @@ export function sortInput(notes: SortNote[], dayOf: (iso: string) => string): st
  * and that note stays unsorted for the next batch rather than guessed at.
  */
 export function readSorting(answer: string, notes: SortNote[]): Map<string, Sorted> {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return new Map(corePolicySync<[string, Sorted][]>('memory-category.readSorting', [answer, notes]));
   const out = new Map<string, Sorted>();
   for (const line of String(answer ?? '').split('\n')) {
     const match = line.trim().replace(/^[-*]\s*/, '').match(/^(\d+)\s*[.|:)]\s*\|?\s*([a-z]+)\s*(?:\|\s*(\S+))?/i);

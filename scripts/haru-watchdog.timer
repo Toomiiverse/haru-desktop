@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Haru's liveness every half minute
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=haru-watchdog.service
+
+[Install]
+WantedBy=timers.target

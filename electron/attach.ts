@@ -1,3 +1,5 @@
+import {attachmentPolicy} from './core-attachments';
+import {coreExtractFrames,coreMediaRun} from './core-attachment-files';
 // Showing her a file, whatever kind it is.
 //
 // The picture button already worked; this is the same act for everything else.
@@ -31,6 +33,7 @@ const VIDEO = /\.(mp4|mkv|mov|avi|webm|wmv|flv|m4v|mpe?g|ts)$/i;
 const TEXT = /\.(txt|md|markdown|csv|tsv|json|jsonc|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|scss|js|jsx|ts|tsx|py|rb|go|rs|java|c|h|cpp|hpp|cs|sh|ps1|sql|srt|vtt|ass)$/i;
 
 export function classify(file: string): FileKind {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('classify',[file]);
   const name = file ?? '';
   if (DOCUMENT.test(name)) return 'document';
   if (IMAGE.test(name)) return 'image';
@@ -75,6 +78,7 @@ export function findFfmpeg(exists = fs.existsSync, env = process.env): { ffmpeg:
 }
 
 function run(file: string, args: string[], timeoutMs = 120_000): Promise<string> {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return coreMediaRun(file,args,timeoutMs);
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { windowsHide: true });
     let out = '', err = '';
@@ -132,6 +136,7 @@ export const FRAMES = 4;
  * same and describes the video instead of its intro.
  */
 export async function extractFrames(file: string, tools: { ffmpeg: string; ffprobe: string }, count = FRAMES): Promise<string[]> {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return coreExtractFrames(file,tools,count,{duration,dir:scratchDir,run});
   const length = await duration(file, tools);
   const dir = scratchDir();
   const stamp = Date.now();
@@ -157,6 +162,7 @@ export async function extractFrames(file: string, tools: { ffmpeg: string; ffpro
 export const MAX_TEXT = 12_000;
 
 export function readText(file: string): string {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on'){const bytes=fs.readFileSync(file),result=attachmentPolicy('text',[bytes.toString('utf8'),bytes.subarray(0,1024).includes(0)]);if(result.error)throw Error(result.error);return result.text;}
   const raw = fs.readFileSync(file);
   // A file claiming to be text that is full of zero bytes is not text, whatever
   // its extension says.

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What was actually said in a video.
 //
 // She cannot watch anything. There is no audio path from a page to a model
@@ -74,6 +75,8 @@ function clock(seconds: number): string {
  * and a silent truncation reads as the video simply stopping.
  */
 export function formatTranscript(captions: Caption[], limit = TRANSCRIPT_CHARS): string {
+  if(process.env.HARU_CORE_LOCAL_REPLY==='on')return corePolicySync('local-reply-defaults.transcript',[captions,arguments[1]===undefined?{supplied:false}:{supplied:true,value:arguments[1]}]);
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.formatTranscript',[captions,limit]);
   if (!captions.length) return '';
   const lines: string[] = [];
   let stampedAt = -Infinity;
@@ -91,6 +94,7 @@ export function formatTranscript(captions: Caption[], limit = TRANSCRIPT_CHARS):
 
 /** What she is handed with it, and the one thing she must not say. */
 export function transcriptInstruction(title: string, generated: boolean, transcript: string): string {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.transcriptInstruction',[title,generated,transcript]);
   return [
     `This is the transcript of "${title}" — the words spoken in it, nothing else.`,
     generated ? 'It was written by speech recognition, so names and unusual words in it may be wrong; treat an odd-looking one as a mishearing rather than a fact.' : '',

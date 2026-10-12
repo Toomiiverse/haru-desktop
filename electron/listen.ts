@@ -135,7 +135,7 @@ export function looksLikeNothing(text: string, vocabulary: string[] = []) {
  * Narrower than `typeof fetch` on purpose: Electron's net.fetch takes a string
  * rather than a URL, and only this one call shape is ever used here.
  */
-type PostAudio = (url: string, init: { method: string; body: FormData; headers?: Record<string, string> }) => Promise<Response>;
+type PostAudio = (url: string, init: { method: string; body: FormData; headers?: Record<string, string>; signal?:AbortSignal }) => Promise<Response>;
 
 export async function transcribe(
   audio: Uint8Array,
@@ -144,6 +144,7 @@ export async function transcribe(
   fetchImpl: PostAudio,
   auth: Record<string, string> = {},
   vocabulary: string[] = [],
+  signal?:AbortSignal,
 ): Promise<string> {
   if (config.engine === 'off') throw new Error('Speech to text is switched off.');
   if (!audio.length) throw new Error('The recording was empty.');
@@ -164,7 +165,7 @@ export async function transcribe(
 
   // No Content-Type: the boundary belongs to the FormData and setting it by hand
   // breaks the upload. Only the bearer goes in, and only when there is one.
-  const response = await fetchImpl(`${trimEndpoint(config.endpoint)}/v1/audio/transcriptions`, { method: 'POST', body: form, headers: auth });
+  const response = await fetchImpl(`${trimEndpoint(config.endpoint)}/v1/audio/transcriptions`, { method: 'POST', body: form, headers: auth, ...(signal?{signal}:{}) });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     throw new Error(`the speech server returned ${response.status}: ${body || response.statusText}`);

@@ -1,3 +1,4 @@
+import {supplement,supplementOwned} from './core-context-supplement';
 // Her manga shelf, on Suwayomi (2026-09-18).
 //
 // Suwayomi is the household's manga server: one login, one library, one set
@@ -20,6 +21,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { normaliseTitle } from './anime';
 import { GRUDGE } from './grudge';
+import {corePolicySync} from './core-policy-sync';
 
 export type SuwayomiConfig = {
   url: string;
@@ -67,6 +69,7 @@ export const DEFAULT_SUWAYOMI: SuwayomiConfig = {
 
 /** The `manga.suwayomi` block, read forward; null when it is off. */
 export function readSuwayomiConfig(manga: unknown): SuwayomiConfig | null {
+  if(process.env.HARU_CORE_MANGA_FETCH==='on')return corePolicySync<SuwayomiConfig|null>('manga-fetch.config',[manga,homedir()]);
   const raw = ((manga && typeof manga === 'object' ? (manga as Record<string, unknown>).suwayomi : undefined) ?? null) as Record<string, unknown> | null;
   if (!raw || raw.enabled === false) return null;
   const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
@@ -125,18 +128,43 @@ export class Suwayomi {
   }
 
   /** One GraphQL call, logged in first and once more if the token had lapsed. */
-  async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async gql<T>(query: string, variables: Record<string, unknown> = {}, relogin = true): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       if (!this.token) await this.login();
       const response = await this.fetch(`${this.config.url}/api/graphql`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
         body: JSON.stringify({ query, variables }),
       });
-      if (response.status === 401 && attempt === 0) { this.token = null; continue; }
+      if (response.status === 401) { this.token = null; if(relogin && attempt === 0)continue; }
       const body = JSON.parse(await response.text()) as { data?: T; errors?: { message: string }[] };
       if (!response.ok || body.errors?.length || !body.data) throw new Error(`Suwayomi: ${body.errors?.[0]?.message ?? `HTTP ${response.status}`}`);
       return body.data;
     }
+  }
+
+  /** Raw, bounded observations and fixed mutations for the Core user-fetch driver.
+   * No title/category/source selection, implicit installation or mutation replay.
+   */
+  async fetchCommand(op:string,args:any[]):Promise<unknown>{
+    const call=<T>(query:string,variables:Record<string,unknown>={})=>this.gql<T>(query,variables,false);
+    const mangaFields='id title inLibrary categories { totalCount nodes { id name default } }';
+    if(op==='library')return (await call<any>('query { mangas(condition: { inLibrary: true }, first: 5000) { totalCount nodes { '+mangaFields+' } } }')).mangas;
+    if(op==='identity')return (await call<any>('query($id: Int!) { manga(id: $id) { '+mangaFields+' } }',{id:args[0]})).manga;
+    if(op==='sources')return (await call<any>('query { sources(first: 5000) { totalCount nodes { id name lang } } }')).sources;
+    if(op==='categories')return (await call<any>('query { categories(first: 5000) { totalCount nodes { id name default } } }')).categories;
+    if(op==='chapters')return (await call<any>('query($id: Int!) { chapters(condition: { mangaId: $id }, first: 2000) { totalCount nodes { id name chapterNumber isDownloaded } } }',{id:args[0]})).chapters;
+    if(op==='queue')return (await call<any>('query { downloadStatus { state queue { progress state chapter { id name mangaId } } } }')).downloadStatus;
+    if(op==='search')return (await call<any>('mutation($source: LongString!, $query: String!) { fetchSourceManga(input: { source: $source, type: SEARCH, query: $query, page: 1 }) { hasNextPage mangas { id title } } }',{source:args[0],query:args[1]})).fetchSourceManga;
+    if(op==='install'){
+      await call('mutation { fetchExtensions(input: {}) { clientMutationId } }');
+      return call('mutation($id: String!) { updateExtension(input: { id: $id, patch: { install: true } }) { clientMutationId } }',{id:args[0]});
+    }
+    if(op==='libraryAdd')return call('mutation($id: Int!) { updateManga(input: { id: $id, patch: { inLibrary: true } }) { clientMutationId } }',{id:args[0]});
+    if(op==='categoryAdd')return call('mutation($id: Int!, $cat: [Int!]!) { updateMangaCategories(input: { id: $id, patch: { addToCategories: $cat } }) { clientMutationId } }',{id:args[0],cat:[args[1]]});
+    if(op==='refreshChapters')return (await call<any>('mutation($id: Int!) { fetchMangaAndChapters(input: { id: $id, fetchChapters: true, fetchManga: true }) { manga { id } chapters { id } } }',{id:args[0]})).fetchMangaAndChapters;
+    if(op==='enqueue')return call('mutation($ids: [Int!]!) { enqueueChapterDownloads(input: { ids: $ids }) { clientMutationId } }',{ids:args[1]});
+    if(op==='start')return call('mutation { startDownloader(input: {}) { clientMutationId } }');
+    throw Error('manga_fetch_unknown_transport');
   }
 
   /** The source she reads from, installed the first time it is missing. */
@@ -297,11 +325,15 @@ export type HisTitle = { title: string; chapter: number; page: number; at: numbe
 
 /** Whether a title sits on one of his shelves. Suwayomi's Default category is implicit: no category at all is Default. */
 export function onHisShelf(manga: Pick<ShelfManga, 'categories'>, shelf: string): boolean {
+  if(supplementOwned())return supplement('onHisShelf',[manga,shelf]);
+
   return manga.categories.length === 0 || manga.categories.some(name => name.toLowerCase() !== shelf.toLowerCase());
 }
 
 /** His titles: on his shelves, with a marker of his. Hers-only titles are not his reading. */
 export function hisReading(library: ShelfManga[], shelf: string): HisTitle[] {
+  if(supplementOwned())return supplement('hisReading',[library,shelf]);
+
   return library
     .filter(manga => manga.his && onHisShelf(manga, shelf))
     .map(manga => ({ title: manga.title, chapter: manga.his!.chapter, page: manga.his!.page, at: manga.his!.at, highest: manga.highest }))
@@ -320,6 +352,8 @@ function ago(at: number | null, nowMs: number): string {
  * it — and at a high enough grudge, the spite that breaks it (grudge.ts).
  */
 export function hisReadingNote(his: HisTitle[], hers: { title: string; chapter: string; finished: number } | null, nowMs: number, grudge: number, spite: boolean): string {
+  if(supplementOwned())return supplement('hisReadingNote',[his,hers,nowMs,grudge,spite]);
+
   if (!his.length) return '';
   const lines = his.slice(0, 4).map(item => {
     const when = ago(item.at, nowMs);
@@ -342,6 +376,8 @@ export const SPITE_GRUDGE = GRUDGE.spite;
 export const SPITE_ODDS = 0.3;
 
 export function spiteful(grudge: number, roll: number, threshold = SPITE_GRUDGE, odds = SPITE_ODDS): boolean {
+  if(supplementOwned())return supplement('spitefulArgs',[grudge,roll,{thresholdSupplied:arguments[2]!==undefined,threshold:arguments[2]??null,oddsSupplied:arguments[3]!==undefined,odds:arguments[3]??null}]);
+
   return grudge >= threshold && roll < odds;
 }
 
