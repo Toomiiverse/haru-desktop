@@ -26,3 +26,14 @@ test('without an opening the commit publishes everything', () => {
   gate.commit('[neutral] Hi.');
   assert.deepEqual(out, ['[neutral] Hi.']);
 });
+
+test('a reset takes the opening back and the next round may open again', () => {
+  const out: string[] = [];
+  const gate = new ReplyGate(t => out.push(t));
+  gate.opening('[smug] Odokawa.');
+  gate.reset();
+  gate.reset();   // idle resets publish nothing more
+  gate.opening('[neutral] Two things.');
+  gate.commit('[neutral] Two things. [happy] The walrus.');
+  assert.deepEqual(out, ['[smug] Odokawa.', '\uFFFD', '[neutral] Two things.', ' [happy] The walrus.']);
+});

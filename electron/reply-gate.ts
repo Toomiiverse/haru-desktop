@@ -9,7 +9,13 @@ export class ReplyGate {
     this.publish?.(text);
   };
   chunk = (_text: string): void => {};
-  reset = (): void => {};
+  /** A round taken back takes its published opening with it: the reset marker clears the phone's bubble, and the
+   *  next round may open again (3300; a retried round re-opened on 2026-10-12 and the turn failed). */
+  reset = (): void => {
+    if (this.committed || !this.prefix) return;
+    this.prefix = '';
+    this.publish?.('\uFFFD');
+  };
   commit(content: string): void {
     if (this.committed) throw new Error('reply_already_published');
     this.committed = true;
