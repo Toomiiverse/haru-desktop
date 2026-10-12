@@ -16,3 +16,10 @@ test('naming a secret keeps their message home; her own line only when a value i
   assert.equal(conversationMayLeave([{ role: 'user', content: 'remind me of my password later' }, { role: 'user', content: 'hi' }]).because, 'it is about passwords or keys', 'their own earlier message, said plainly');
   assert.match(conversationMayLeave([{ role: 'assistant', content: 'the password is hunter2now' }, { role: 'user', content: 'hi' }]).because, /from earlier in this conversation/, 'hers, with a value in it');
 });
+
+test('a message id that happens to pass the card-number check does not keep the turn local', () => {
+  const { assertOutboundSafe } = require('../electron/outbound');
+  const messages = [{ id: '36582565-3772-4202-9a59-354ca2f23cdf-u', role: 'user', content: 'Ok ok looks cool', time: 'now', at: '2026-10-12T07:09:24.549Z' }];
+  assert.doesNotThrow(() => assertOutboundSafe(messages, undefined));
+  assert.throws(() => assertOutboundSafe([{ id: 'x', role: 'user', content: 'my card is 4111 1111 1111 1111' }], undefined), /outbound_privacy_blocked/);
+});
