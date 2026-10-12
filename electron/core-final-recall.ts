@@ -8,8 +8,18 @@ export function coreExchanges(archive:Record<string,{role?:string;content?:strin
 export function corePickRecalled(exchanges:Exchange[],vectors:Map<string,number[]>,query:number[],limit:number,floor:number,shares?:(e:Exchange)=>boolean){
  let found:any[]=[];recallFrames(exchanges.map(exchange=>({exchange,vector:vectors.get(exchange.id)??[],allowed:shares?shares(exchange):true})),rows=>{found=corePolicySync('final-recall.rankBatch',[rows,query,limit,floor,found]);});return found;
 }
-export function coreProactiveRecall(index:ChatIndex,vectors:Map<string,number[]>,query:number[]|null,shown:string[],specific:string[]):any[]{
+export function coreProactiveRecall(index:ChatIndex,vectors:Map<string,number[]>,query:number[]|null,shown:string[],specific:string[],key?:string):any[]{
  if(query===null)return [];let found:any[]=[];
+ if(key){
+  // 3410: the Core holds the index (handed over once per rebuild) and the vectors (as they load or refresh), so a turn's
+  // recall is one small call. 46 frames carried 5 MB of vectors every turn before (383 ms on 2026-10-12). Any mismatch
+  // between what the Core holds and what the brain has falls back to the frames below: same ranking, slower.
+  const rank=()=>corePolicySync<any>('final-recall.proactiveRankHeld',[key,query,shown,specific,vectors.size]);
+  let held=rank();
+  if(held.missing){let first=true;recallFrames(index.exchanges.map((exchange,i)=>({exchange,count:Object.fromEntries(index.counts[i])})),frame=>{corePolicySync('final-recall.holdIndex',[key,frame,first]);first=false;});held=rank();}
+  if(!held.missing)return held.found;
+  console.log('[recall] '+JSON.stringify({heldIndex:held.held,heldVectors:held.vectors,vectors:vectors.size,fallback:'frames'}));
+ }
  recallFrames(index.exchanges.map((exchange,i)=>({exchange,vector:vectors.get(exchange.id)??[],count:Object.fromEntries(index.counts[i])})),rows=>{
   found=corePolicySync('final-recall.proactiveRank',[rows,query,shown,specific,found]);
  });return found;

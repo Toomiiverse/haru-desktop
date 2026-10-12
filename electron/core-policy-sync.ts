@@ -13,7 +13,9 @@ let buffers=new Map<number,SharedArrayBuffer>();
 // 3290: within one turn these pure getters are asked again and again with the same value (mood.normalize and readSlate 18
 // times each on 2026-10-12, 600+ round trips per turn in all); the answer is kept for the turn, serialised so no caller
 // shares an object with another. A new turn starts a new memo; outside a turn nothing is kept.
-export const MEMO_OPS=new Set(['mood.normalize','memory-admin.readSlate','memory-tools.normalizeFile','agenda-life.get','conversation-program.todaysExamples']);
+export const MEMO_OPS=new Set(['mood.normalize','memory-admin.readSlate','memory-tools.normalizeFile','agenda-life.get','conversation-program.todaysExamples',
+ // 3410: pure of their arguments, asked 4-12 times a turn each (final-system.config x12, self.explicitModeOn x9, credit-guard.conversationRoute x5 = 80 ms, ...)
+ 'credit-guard.conversationRoute','self.explicitModeOn','route-admission.local','natural-policy.contextDefault','memory-admin.known','final-system.config','final-search.config','manga-fetch.config','anime-downloads.config']);
 let memoTurn:unknown=null;let memo=new Map<string,string>();
 // Date carries the local fields the caller observed, including zonedNow's
 // shifted date. ISO serialization alone would change sleep-window semantics.

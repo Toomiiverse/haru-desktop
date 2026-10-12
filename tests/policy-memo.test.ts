@@ -4,7 +4,7 @@ import { MEMO_OPS } from '../electron/core-policy-sync';
 import { currentTurn, runTimedTurn } from '../electron/turn-timing';
 
 test('only pure per-turn getters are memoised', () => {
-  assert.deepEqual([...MEMO_OPS].sort(), ['agenda-life.get', 'conversation-program.todaysExamples', 'memory-admin.readSlate', 'memory-tools.normalizeFile', 'mood.normalize']);
+  assert.deepEqual([...MEMO_OPS].sort(), ['agenda-life.get', 'anime-downloads.config', 'conversation-program.todaysExamples', 'credit-guard.conversationRoute', 'final-search.config', 'final-system.config', 'manga-fetch.config', 'memory-admin.known', 'memory-admin.readSlate', 'memory-tools.normalizeFile', 'mood.normalize', 'natural-policy.contextDefault', 'route-admission.local', 'self.explicitModeOn']);
 });
 
 test('a turn has one identity for its whole run and none outside it', async () => {

@@ -5876,7 +5876,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     : undefined;
   // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
   const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
-  const recalled = ((archiveIndex?coreProactiveRecall(archiveIndex,recallVectors,recallVector,[...(shownDays??[])],[...specific]):[]));
+  const recalled = ((archiveIndex?coreProactiveRecall(archiveIndex,recallVectors,recallVector,[...(shownDays??[])],[...specific],chatIndexCache?.key):[]));
   if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
   // Who and what the message names, and one step further (factgraph.ts). A
   // lookup, not a call — and nothing at all when nobody is named.
