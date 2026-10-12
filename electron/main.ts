@@ -5489,6 +5489,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   const affect = currentAffect();
   if (affect) messages = [{ role: 'system', content: affect.guidance }, ...messages];
   const narratedTools:string[]=[];
+  const voiceCall = call;   // runTool's parameter is also named call (the tool call) and hides this flag (3360)
   const nudgeResponseMessages = messages;
   // Capture current-utterance evidence before any slow work or another input.
   const voiceContext = voiceSense.beginTurn(latest);
@@ -6331,7 +6332,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
             if(packet.speak)void speak(packet.line);
             // 3320 speak-first: the phone's bubble shows the same line while the tool runs instead of a 6–15 s wait;
             // a call speaks its own filler (localcall.ts), so its stream is left alone.
-            if(!call){replyGate.hold(packet.line);console.log('[reply-gate] '+JSON.stringify({hold:tool,chars:packet.line.length}));}
+            if(!voiceCall){replyGate.hold(packet.line);console.log('[reply-gate] '+JSON.stringify({hold:tool,chars:packet.line.length}));}
           }
         } catch(error) { console.warn('[ai] tool narration unavailable:',error instanceof Error?error.message:'transport'); }
       const result = await runChatTool(call, latest, toolDeps(turn));
