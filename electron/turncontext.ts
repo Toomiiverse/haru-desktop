@@ -14,6 +14,8 @@ export function createTurnContext({ hands = false, web = false, choices = false 
   let restart = false;
   let searchQuery = '';
   let searchResults: SearchResult[] = [];
+  // Pictures she attached to this reply (web-picture.ts, venice-image.ts), for the phone's chat to show beside it.
+  let pictures: unknown[] = [];
 
   return {
     handsAllowed: () => allowed,
@@ -36,6 +38,8 @@ export function createTurnContext({ hands = false, web = false, choices = false 
     },
     lastSearchQuery: () => searchQuery,
     lastResults: () => searchResults.map(result => ({ ...result })),
+    attachPicture: (record: unknown) => { pictures.push(record); },
+    pictures: () => [...pictures],
   };
 }
 

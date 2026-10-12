@@ -1129,6 +1129,8 @@ export type ToolDeps = {
   myself(): unknown;
   /** Make a picture and push it to his phone (venice-image.ts). Only wired in Explicit mode. */
   makePicture?(prompt: string): Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  /** Attach a picture from the last search's results to this reply (web-picture.ts). */
+  showWebPicture?(result: number): Promise<{ ok: true; source: string; bytes: number } | { ok: false; error: string }>;
   /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */
   hostedModels(route: 'conversation' | 'nudge' | 'config'): Promise<string[] | null>;
   /** Writes one allowlisted setting at their word: a backup first, then the value, then the note that says how she runs. */

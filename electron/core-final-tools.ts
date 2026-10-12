@@ -30,7 +30,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    systemConfig:()=>deps.readSystemConfig(),lastResults:()=>deps.lastResults(),lastSearchQuery:()=>deps.lastSearchQuery(),
    wardrobe:()=>deps.getWardrobeControls(),interests:()=>deps.getInterests(),config:()=>{if(!deps.policyConfig)throw Error('final_tool_config_required');return deps.policyConfig()},
    clock:()=>{const now=zonedNow(deps.CHAT_TIMEZONE);return {day:localDateKey(now),iso:now.toISOString()}},uuid:()=>randomUUID(),
-   capabilities:()=>Object.fromEntries(['makePicture','claude','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
+   capabilities:()=>Object.fromEntries(['makePicture','showWebPicture','claude','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
    vaultRoot:()=>deps.vault.root(),knowledgeConfig:()=>deps.getKnowledgeConfig()
   };
   return Object.fromEntries(keys.map(key=>{if(!values[key])throw Error('final_tool_fact_protocol');return [key,values[key]()] }));
@@ -63,6 +63,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    case 'showWardrobe':return deps.sendToWindows('wardrobe:open');
    case 'commit':if(!deps.applyToolPlan)throw Error('final_tool_commit_required');return deps.applyToolPlan(c.plan);
    case 'picture':if(!deps.makePicture)throw Error('final_tool_capability_revoked');return deps.makePicture(c.prompt);
+   case 'webPicture':if(!deps.showWebPicture)throw Error('final_tool_capability_revoked');return deps.showWebPicture(c.result);
    case 'myself':return deps.myself();
    case 'claudeOpen':if(!deps.claude)throw Error('final_tool_capability_revoked');return deps.claude.open({folder:c.folder,name:c.name});
    case 'claudeList':if(!deps.claude)throw Error('final_tool_capability_revoked');return deps.claude.list();

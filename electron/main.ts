@@ -261,6 +261,7 @@ import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replac
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine, outboundNamesFrom } from './sensitivity';
 import { makePicture, PictureRefused } from './venice-image';
+import { fetchWebPicture } from './web-picture';
 import {commitUserRecord,runOwnedJournal} from './core-user-records';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
@@ -3977,6 +3978,7 @@ function toolDeps(turn: TurnContext): ToolDeps {
     applyToolPlan:plan=>applyRemainingPlan(remainingStore(app.getPath('userData')),plan),
     changeMySetting: plan => applyPlanAtTheirWord(plan),
     makePicture: prompt => makeAndSendPicture(prompt),
+    showWebPicture: result => showWebPicture(result, turn),
     lastResults: turn.lastResults,
     lastSearchQuery: turn.lastSearchQuery,
     rememberSearch: turn.rememberSearch,
@@ -6526,7 +6528,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   noteWhoSpoke(config.model, brainName);
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'complete', elapsedMs: Date.now() - enteredAt })}`);
   markTurn('harness_end');
-  return { content, ignored: false, irritation, ego, choices: turn.pendingChoices() };
+  return { content, ignored: false, irritation, ego, choices: turn.pendingChoices(), attachments: turn.pictures() };
 }
 
 /** The route that just spoke, kept so a rating can be read by model. */
@@ -8406,6 +8408,25 @@ async function makeAndSendPicture(prompt: string): Promise<{ ok: true; url: stri
   });
 }
 
+/**
+ * A picture from the last search, into the chat beside her reply. Fetched here,
+ * never described by address: the model only ever sees the result's number.
+ */
+async function showWebPicture(result: number, turn: TurnContext): Promise<{ ok: true; source: string; bytes: number } | { ok: false; error: string }> {
+  const row = turn.lastResults()[result - 1];
+  if (!row) return { ok: false, error: 'There is no search result with that number.' };
+  if (!row.image) return { ok: false, error: 'That result has no picture.' };
+  try {
+    const made = await fetchWebPicture(row.image, row.url, pictureFolder());
+    const source = new URL(row.url).hostname.replace(/^www\./, '');
+    turn.attachPicture({ id: made.id, kind: 'image', name: `a picture from ${source}`, saved: made.file, bytes: made.bytes, source: row.url });
+    sweepPictures();
+    return { ok: true, source, bytes: made.bytes };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 function herAsleepNow(): boolean {
   return corePolicySync<any>('sleep.availability',[store.get('her.sleep'),store.get('her.sleepState'),zonedNow(CHAT_TIMEZONE),explicitModeNow()]).asleep;
 }
@@ -9291,7 +9312,7 @@ function webDeps(): WebDeps {
       const reply = stripDelivery(answer.content ?? '');
       rememberDelivery(answer.content ?? '', reply);
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
       // Her face used to be read here, before returning, and the phone waited on
       // it — a second round trip to a model, spent so her eyebrows would be
       // right at the instant the text appeared rather than a moment after. That

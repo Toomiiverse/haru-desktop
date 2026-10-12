@@ -12,7 +12,7 @@ import {corePolicySync} from './core-policy-sync';
 // mostly sits unused. The shape here is a provider boundary all the same, so a
 // keyed API can be dropped in without anything upstream noticing.
 
-export type SearchResult = { title: string; url: string; snippet: string };
+export type SearchResult = { title: string; url: string; snippet: string; image?: string };
 
 /**
  * 'duckduckgo' needs nothing and works immediately, which is why it is the
