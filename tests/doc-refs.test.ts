@@ -24,3 +24,24 @@ test('a document reference crosses with its body until acknowledged, and again w
   const plain = wire([{ $doc: 'config', digest: 'd1' }]) as any[];   // no body field: not a reference, passed through
   assert.deepEqual(plain[0], { $doc: 'config', digest: 'd1' });
 });
+
+import { memoKey } from '../electron/core-policy-sync';
+
+test('a memo key is the same whether or not the reference carried its body', () => {
+  const a = memoKey('op', [{ $doc: 'config', digest: 'd1', body: { big: 'x'.repeat(50) } }, 2]);
+  const b = memoKey('op', [{ $doc: 'config', digest: 'd1' }, 2]);
+  assert.equal(a, b);
+  assert.notEqual(a, memoKey('op', [{ $doc: 'config', digest: 'd2' }, 2]));
+});
+
+test('a reference with a lazy body is sent with that body once', () => {
+  let pulled = 0;
+  const ref = { $doc: 'config', digest: 'lazy1', get body() { pulled++; return { v: 1 }; } };
+  const carry = { force: null, sent: [] as string[] };
+  const wired = wire([ref], carry) as any[];
+  assert.deepEqual(wired[0], { $doc: 'config', digest: 'lazy1', body: { v: 1 } });
+  assert.equal(pulled, 1);
+  assert.equal(pulled, 1);   // the key walk never pulls it
+  memoKey('op', [ref]);
+  assert.equal(pulled, 1);
+});

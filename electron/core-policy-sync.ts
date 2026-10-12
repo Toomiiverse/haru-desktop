@@ -22,20 +22,21 @@ let memoTurn:unknown=null;let memo=new Map<string,string>();
 // 3440: a document reference (CoreStore.docRef) crosses with its body only for a digest the Core has not acknowledged;
 // the Core answers `needs` for a digest it lacks and the call is sent once more with that body.
 const acked=new Set<string>();
-type Carry={force:Set<string>|null;sent:string[]};
+type Carry={force:Set<string>|null;sent:string[];strip?:boolean};
 export function wire(value:unknown,carry:Carry={force:null,sent:[]}):unknown {
  if(value instanceof Date)return {$date:{epochMs:value.getTime(),year:value.getFullYear(),month:value.getMonth()+1,day:value.getDate(),hour:value.getHours(),minute:value.getMinutes()}};
  if(Array.isArray(value))return value.map(v=>wire(v,carry));
  if(value&&typeof value==='object'){
   const ref=value as {$doc?:unknown;digest?:unknown;body?:unknown};
   if(typeof ref.$doc==='string'&&typeof ref.digest==='string'&&Object.hasOwn(ref,'body')){
-   if(!acked.has(ref.digest)||carry.force?.has(ref.digest)){carry.sent.push(ref.digest);return {$doc:ref.$doc,digest:ref.digest,body:wire(ref.body,carry)};}
+   if(!carry.strip&&(!acked.has(ref.digest)||carry.force?.has(ref.digest))){carry.sent.push(ref.digest);return {$doc:ref.$doc,digest:ref.digest,body:wire(ref.body,carry)};}
    return {$doc:ref.$doc,digest:ref.digest};
   }
   return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,wire(v,carry)]));
  }
  return value;
 }
+export function memoKey(operation:string,args:unknown[]):string{return operation+'\0'+JSON.stringify(wire(args,{force:null,sent:[],strip:true}));}
 export function coreAdapterOwner(){
  const stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');
  return {pid:process.pid,birth:stat.slice(stat.lastIndexOf(')')+2).split(' ')[19]};
@@ -55,7 +56,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  let force:Set<string>|null=null;
  for(let round=0;round<2;round++){
  const carry:Carry={force,sent:[]};const wired=wire(args,carry);const turn=MEMO_OPS.has(operation)?currentTurn():undefined;
- const key=turn?operation+'\0'+JSON.stringify(wired):null;
+ const key=turn?memoKey(operation,args):null;   // 3520: by reference, so the call that carried a body and the ones after it share one answer
  if(key){if(memoTurn!==turn){memoTurn=turn;memo=new Map();}const hit=memo.get(key);if(hit!==undefined){status='ok';return JSON.parse(hit) as T;}}
  const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wired};
  const encoded=JSON.stringify(packet);

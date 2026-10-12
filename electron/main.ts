@@ -805,8 +805,12 @@ function broadcastChatReset() {
 // The "chat day" runs from CHAT_RESET_HOUR to CHAT_RESET_HOUR the next day, not
 // midnight to midnight — chatting with Haru at 1am shouldn't get wiped by a plain
 // date rollover mid-conversation.
+let dayKeyAt = 0, dayKeyHeld = '';
 function currentChatDayKey(): string {
-  return corePolicySync('chat-lifecycle.dayKey',[Date.now(),CHAT_TIMEZONE,CHAT_RESET_HOUR]);
+  // 3520: asked seven times a turn; the day rolls at a fixed hour, so a key is good for a second.
+  const now = Date.now();
+  if (now - dayKeyAt >= 1000) { dayKeyHeld = corePolicySync('chat-lifecycle.dayKey',[now,CHAT_TIMEZONE,CHAT_RESET_HOUR]); dayKeyAt = now; }
+  return dayKeyHeld;
 }
 
 // Archives under the day key, suffixing when that day already has an entry —

@@ -22,9 +22,15 @@ const defaultSink = (event: TimingEvent) => console.log(`[turn-timing] ${JSON.st
 export function timingFor(id: string, sink: (event: TimingEvent) => void = defaultSink) {
   const trace = createHash('sha256').update(id).digest('hex').slice(0,24);
   let count = 0, spans = 0;
+  // 3520: the ~500 span lines a turn are written together at its end (same lines, same monoMs), not one by one while the
+  // Core parses each off the brain's stdout between the policy calls they describe.
+  const held: TimingEvent[] = [];
+  let ended = false;   // a span after the turn ended (write-behind commits) goes straight out
+  const flush = () => { ended = true; for (const event of held.splice(0)) sink(event); };
   return (stage: TurnStage, fields: Fields = {}, phase: 'turn' | 'review' = 'turn') => {
     try {
-      if (stage === 'policy_span' || stage === 'storage_span') { if (++spans > 768) return; }
+      const span = stage === 'policy_span' || stage === 'storage_span';
+      if (span) { if (++spans > 768) return; }
       else if (++count > 256) return;
       const safe: Fields = {};
       // Only explicitly selected fields are serialized, even if a caller passes
@@ -38,7 +44,9 @@ export function timingFor(id: string, sink: (event: TimingEvent) => void = defau
       if (fields.mode === 'plain' || fields.mode === 'stream') safe.mode = fields.mode;
       if (typeof fields.fresh === 'boolean') safe.fresh = fields.fresh;
       if (typeof fields.connected === 'boolean') safe.connected = fields.connected;
-      sink({version:1,trace,pid:process.pid,at:Date.now(),monoMs:performance.now(),stage,phase,...safe});
+      const event: TimingEvent = {version:1,trace,pid:process.pid,at:Date.now(),monoMs:performance.now(),stage,phase,...safe};
+      if (span && !ended) held.push(event);
+      else { sink(event); if (stage === 'runner_end' || stage === 'review_end' || stage === 'completion_saved' || stage === 'completion_failed') flush(); }
     } catch { /* diagnostics must never change delivery or task settlement */ }
   };
 }

@@ -15,3 +15,15 @@ test('a turn has one identity for its whole run and none outside it', async () =
   assert.ok(seen[0] && seen[0] === seen[1] && seen[2] && seen[2] !== seen[0]);
   assert.equal(currentTurn(), undefined);
 });
+
+test('span lines are held until the turn ends; other stages go out at once', async () => {
+  const { timingFor } = await import('../electron/turn-timing');
+  const out: string[] = [];
+  const mark = timingFor('t', e => out.push(e.stage + (e.operation ? ':' + e.operation : '')));
+  mark('runner_start'); mark('policy_span', { operation: 'a.b', durationMs: 1 }); mark('storage_span', { step: 'commit', durationMs: 2 }); mark('dispatch');
+  assert.deepEqual(out, ['runner_start', 'dispatch']);
+  mark('runner_end', { status: 'ok', durationMs: 3 });
+  assert.deepEqual(out, ['runner_start', 'dispatch', 'runner_end', 'policy_span:a.b', 'storage_span']);
+  mark('storage_span', { step: 'behind', durationMs: 1 });
+  assert.equal(out.length, 6);
+});

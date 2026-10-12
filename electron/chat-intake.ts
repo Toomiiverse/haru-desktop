@@ -105,6 +105,8 @@ export class ChatIntake {
       const coded = error instanceof Error && typeof (error as Error & { code?: unknown }).code === 'string';
       const reason = (error instanceof Error ? error.name + (coded ? `:${(error as Error & { code?: unknown }).code}: ${error.message}` : '') : typeof error).slice(0, 500);
       completion = {op:'finish',owner:this.owner,id:claim.id,failed:true,reason};
+      // 3520: the Core forwards this line to the journal; the generic receipt the phone gets says nothing (13:19 today).
+      console.log('[turn-failed] '+JSON.stringify({id:claim.id,reason:(error instanceof Error?error.name+': '+error.message:String(error)).slice(0,300)}));
     }
     this.completion = completion;
     await this.finishCompletion();

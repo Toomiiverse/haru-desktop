@@ -34,7 +34,7 @@ export class CoreStore {
  private worker:Worker;private buffer=new SharedArrayBuffer(64*1024*1024);private state!:Snapshot;private broken=false;
  private depth=0;private staged:Record<string,any>|null=null;private touched=new Set<string>();
  private captured:Record<string,any>|undefined;
- private pendingAsync=false;private pendingPatches:Record<string,any>|null=null;private asyncTail:Promise<unknown>=Promise.resolve();
+ private pendingAsync=false;private pendingPatches:Record<string,any>|null=null;private digests=new Map<string,{revision:number;digest:string}>();private asyncTail:Promise<unknown>=Promise.resolve();
  private finishPendingCommit:(()=>any)|undefined;
  constructor(readonly options:CoreStoreOptions,userData:string){
   if(![options.root,options.db,options.node,userData].every(path.isAbsolute))throw Error('absolute_paths_required');
@@ -122,8 +122,19 @@ export class CoreStore {
   for(const part of parts){if(value==null||!Object.hasOwn(value,part))return fallback;value=value[part];}
   return value===undefined?fallback:structuredClone(value);
  }
- docRef(name:string,fallback?:any):DocRef{const body=this.get(name,fallback);return {$doc:name,digest:docDigest(body),body};}
- sameDoc(name:string,expected:unknown,fallback?:any):boolean{return sameDocument(this.get(name,fallback),expected);}
+ /** 3520: the digest of a committed document is kept per revision (hashing the 361 KB config took 2 ms, twelve times a turn)
+  *  and the body is a getter, cloned only when the bridge actually sends it (another 2 ms each time before). */
+ private digestOf(name:string,fallback:any):string{
+  this.refreshPending(name);
+  const settled=!this.staged&&!(this.pendingAsync&&this.pendingPatches&&Object.hasOwn(this.pendingPatches,name));
+  const held=settled?this.digests.get(name):undefined;
+  if(held&&held.revision===this.state.revision)return held.digest;
+  const digest=docDigest(this.view(name)[name]??fallback);
+  if(settled)this.digests.set(name,{revision:this.state.revision,digest});
+  return digest;
+ }
+ docRef(name:string,fallback?:any):DocRef{const store=this;const digest=this.digestOf(name,fallback);return {$doc:name,digest,get body(){return store.get(name,fallback);}};}
+ sameDoc(name:string,expected:unknown,fallback?:any):boolean{return isDigestRef(expected)?this.digestOf(name,fallback)===expected.$digest:sameDocument(this.get(name,fallback),expected);}
  has(name:string):boolean{this.refreshPending(name);return Object.hasOwn(this.view(name),name);}
  set(name:string,value:any):void{
   this.refreshPending();
