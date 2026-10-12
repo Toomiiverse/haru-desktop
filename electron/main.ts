@@ -6204,11 +6204,17 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
         const available=chatTools(availableTools(turn),latest);
         const table=planning?(planningTable??[]):[];
         if(table.some(tool=>!available.some(current=>current.function.name===tool.function.name)))throw Error('general_tool_unavailable');
+        // 3330 route once: a response round keeps the conversation route this turn already decided while that entry is still
+        // usable — the ledger prices and the dispatch scans every send regardless (task-controller.ts post) — and selects
+        // afresh only when it is not. Two selections a turn (55-90 ms each, on the way to the first word) were the same answer.
+        const decided=planning||!cloudAllowed||!brain.hosted||brain.role!=='conversation'?undefined
+          :registry.find(candidate=>candidate.id===brain.entryId&&providerAvailability.available(candidate.config)&&hasKeyFor(candidate.config.endpoint));
+        if(decided)console.log('[core-router] '+JSON.stringify({event:'reuse',role:'conversation',candidateId:decided.id,model:decided.config.model}));
         const entry=planning?corePolicySync<(typeof registry)[number]|undefined>('route-admission.planningEntry',[{
             registry,candidateId,cloudAllowed,conversation:sending,table,maxTokens:workflowMaxTokens,budgetMicros:task.remainingBudgetMicros,
             availableIds:registry.filter(candidate=>providerAvailability.available(candidate.config)&&(isLocalConfig(candidate.config)||hasKeyFor(candidate.config.endpoint))).map(candidate=>candidate.id),
           }])
-          :await coreSelectTaskModel(registry,'conversation',{cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],maxOutputTokens:workflowMaxTokens,budgetMicros:task.remainingBudgetMicros,
+          :decided??await coreSelectTaskModel(registry,'conversation',{cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],maxOutputTokens:workflowMaxTokens,budgetMicros:task.remainingBudgetMicros,
             available:candidate=>providerAvailability.available(candidate.config)&&(isLocalConfig(candidate.config)||hasKeyFor(candidate.config.endpoint))});
         if(!entry)throw Error('general_tool_split_model_unavailable');
         if(!planning){
