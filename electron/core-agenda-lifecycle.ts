@@ -5,12 +5,12 @@ import {activeTask} from './task-controller';
 import type {CoreStore} from './core-store';
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const current=()=>activeTask.getStore()?.signal.throwIfAborted();
-export const agendaFacts=(core:CoreStore)=>({config:core.get('config',{}),memory:core.get('memories',{})});
+export const agendaFacts=(core:CoreStore)=>({config:core.docRef('config',{}),memory:core.docRef('memories',{})});
 export const agendaClock=(now:Date)=>({year:now.getFullYear(),month:now.getMonth()+1,day:now.getDate(),hour:now.getHours(),minute:now.getMinutes(),second:now.getSeconds(),millisecond:now.getMilliseconds()});
 export function applyAgendaPlan(core:CoreStore,packet:any,changed?:(packet:any)=>void){
  const p=packet?.plan;if(!p)return packet?.result;
- core.transaction(()=>{current();if(!same(core.get('config',{}),p.expectedConfig))throw Error('core_agenda_config_stale');
-  if(Object.hasOwn(p,'expectedMemory')&&!same(core.get('memories',{}),p.expectedMemory))throw Error('core_agenda_memory_stale');
+ core.transaction(()=>{current();if(!core.sameDoc('config',p.expectedConfig,{}))throw Error('core_agenda_config_stale');
+  if(Object.hasOwn(p,'expectedMemory')&&!core.sameDoc('memories',p.expectedMemory,{}))throw Error('core_agenda_memory_stale');
   core.set('config',p.config);if(Object.hasOwn(p,'memory'))core.set('memories',p.memory);
  });
  // Observers run only after the native commit is confirmed. No callback means

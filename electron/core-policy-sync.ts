@@ -19,10 +19,21 @@ export const MEMO_OPS=new Set(['mood.normalize','memory-admin.readSlate','memory
 let memoTurn:unknown=null;let memo=new Map<string,string>();
 // Date carries the local fields the caller observed, including zonedNow's
 // shifted date. ISO serialization alone would change sleep-window semantics.
-function wire(value:unknown):unknown {
+// 3440: a document reference (CoreStore.docRef) crosses with its body only for a digest the Core has not acknowledged;
+// the Core answers `needs` for a digest it lacks and the call is sent once more with that body.
+const acked=new Set<string>();
+type Carry={force:Set<string>|null;sent:string[]};
+export function wire(value:unknown,carry:Carry={force:null,sent:[]}):unknown {
  if(value instanceof Date)return {$date:{epochMs:value.getTime(),year:value.getFullYear(),month:value.getMonth()+1,day:value.getDate(),hour:value.getHours(),minute:value.getMinutes()}};
- if(Array.isArray(value))return value.map(wire);
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,wire(v)]));
+ if(Array.isArray(value))return value.map(v=>wire(v,carry));
+ if(value&&typeof value==='object'){
+  const ref=value as {$doc?:unknown;digest?:unknown;body?:unknown};
+  if(typeof ref.$doc==='string'&&typeof ref.digest==='string'&&Object.hasOwn(ref,'body')){
+   if(!acked.has(ref.digest)||carry.force?.has(ref.digest)){carry.sent.push(ref.digest);return {$doc:ref.$doc,digest:ref.digest,body:wire(ref.body,carry)};}
+   return {$doc:ref.$doc,digest:ref.digest};
+  }
+  return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,wire(v,carry)]));
+ }
  return value;
 }
 export function coreAdapterOwner(){
@@ -41,7 +52,9 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  // A failed call is never replayed. A later fresh snapshot may open a new
  // transport worker; it still has to receive a fresh Core decision.
  const transport=worker;
- const wired=wire(args);const turn=MEMO_OPS.has(operation)?currentTurn():undefined;
+ let force:Set<string>|null=null;
+ for(let round=0;round<2;round++){
+ const carry:Carry={force,sent:[]};const wired=wire(args,carry);const turn=MEMO_OPS.has(operation)?currentTurn():undefined;
  const key=turn?operation+'\0'+JSON.stringify(wired):null;
  if(key){if(memoTurn!==turn){memoTurn=turn;memo=new Map();}const hit=memo.get(key);if(hit!==undefined){status='ok';return JSON.parse(hit) as T;}}
  const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wired};
@@ -60,8 +73,16 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const value=reply.value;
  if(value.version!==1||value.requestId!==packet.requestId||value.operation!==operation||value.executes!==false
    ||JSON.stringify(value.owner)!==JSON.stringify(packet.owner)||typeof value.policyEpoch!=='string'
-   ||!Object.hasOwn(value,'result')||Date.now()-packet.nowMs>1500)throw Error('core_policy_protocol_error');
+   ||Date.now()-packet.nowMs>1500)throw Error('core_policy_protocol_error');
+ if(Array.isArray(value.needs)&&!Object.hasOwn(value,'result')){
+  if(round===1||!value.needs.every((d:unknown)=>typeof d==='string'))throw Error('core_policy_doc_unknown');
+  force=new Set(value.needs as string[]);continue;
+ }
+ if(!Object.hasOwn(value,'result'))throw Error('core_policy_protocol_error');
+ if(acked.size>64)acked.clear();for(const digest of carry.sent)acked.add(digest);
  if(key)memo.set(key,JSON.stringify(value.result));
  status='ok';return value.result as T;
+ }
+ throw Error('core_policy_doc_unknown');
  } finally {markTurn('policy_span',{operation,durationMs:performance.now()-started,status});}
 }

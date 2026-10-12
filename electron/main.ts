@@ -53,7 +53,7 @@ import {coreSweepPictures,corePictureMutation} from './core-picture-maintenance'
 import {navigationPolicy,runCoreDirections,startCoreTrafficWatch,runCoreTrafficWatch,runCorePlaceSearch} from './core-navigation-policy';
 import {conversationProgram,conversationCommit} from './core-conversation-policy';
 
-function conversationPolicyFacts(){return {config:remainingStore(app.getPath('userData')).get('config',{}),now:Date.now(),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),mood:getMood(),character:getActiveCharacter(),local:store.get('ai.config')??null,route:conversationRoute(),sideNumCtx:sideNumCtx()};}
+function conversationPolicyFacts(){return {config:remainingStore(app.getPath('userData')).docRef('config',{}),now:Date.now(),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),mood:getMood(),character:getActiveCharacter(),local:store.get('ai.config')??null,route:conversationRoute(),sideNumCtx:sideNumCtx()};}
 function conversationApply(packet:any){conversationCommit(app.getPath('userData'),packet);}
 function conversationRun(kind:string,args:any,onChunk?: (text:string)=>void,signal?:AbortSignal){
   return conversationProgram(kind,args,conversationPolicyFacts,async command=>{
@@ -2292,7 +2292,7 @@ async function reviveVoiceServer() {
 
 function deviceFacts(withContext=false){
  const core=remainingStore(app.getPath('userData')),now=new Date(),character=withContext?getActiveCharacter():null;
- return {config:core.get('config',{}),activityLog:core.get('activity',{}),now:now.getTime(),at:now.toISOString(),day:currentChatDayKey(),ducked,watchingTitle,steamIndex:[...steamGames],reacting:reactingToActivity,activitySpokenAt,placeSpokenAt,irritation:withContext?getMood().irritation:0,sleepiness:vitals.sleepiness,speaking:speakingNow,gameName:gameNow(),identity:character?.identity??'',style:character?.style??'',rightNow:withContext?rightNow():'',fullscreenSpokenAt,currentPlace};
+ return {config:core.docRef('config',{}),activityLog:core.docRef('activity',{}),now:now.getTime(),at:now.toISOString(),day:currentChatDayKey(),ducked,watchingTitle,steamIndex:[...steamGames],reacting:reactingToActivity,activitySpokenAt,placeSpokenAt,irritation:withContext?getMood().irritation:0,sleepiness:vitals.sleepiness,speaking:speakingNow,gameName:gameNow(),identity:character?.identity??'',style:character?.style??'',rightNow:withContext?rightNow():'',fullscreenSpokenAt,currentPlace};
 }
 function deviceStateAdapter(){return {core:remainingStore(app.getPath('userData')),facts:deviceFacts};}
 function coreHelperAdapter(){return {...deviceStateAdapter(),update:(u:any)=>{
@@ -3588,7 +3588,7 @@ function getTraits(): Traits {
 }
 
 function getMonthHistory(): MonthSignals[] {
-  return corePolicySync<any>('conversation-program.monthHistory',[remainingStore(app.getPath('userData')).get('config',{})]);
+  return corePolicySync<any>('conversation-program.monthHistory',[remainingStore(app.getPath('userData')).docRef('config',{})]);
 }
 
 /** Hurt she was left holding, and what he put right: tallied live, because no
@@ -3596,7 +3596,7 @@ function getMonthHistory(): MonthSignals[] {
 type MonthTally = { month: string; hurtEvents: number; apologies: number; woundUp: number };
 
 function getMonthTally(): MonthTally {
-  return corePolicySync<any>('conversation-program.monthTally',[remainingStore(app.getPath('userData')).get('config',{}),currentChatDayKey()]);
+  return corePolicySync<any>('conversation-program.monthTally',[remainingStore(app.getPath('userData')).docRef('config',{}),currentChatDayKey()]);
 }
 
 function tallyMonth(what: 'hurt' | 'apology' | 'wound-up') {
@@ -3687,7 +3687,7 @@ let machineCheckedAt = 0;
 const LONG_SILENCE_MINUTES = 4 * 60;
 
 function getMute(): MuteState | null {
-  return corePolicySync<any>('conversation-program.getMute',[remainingStore(app.getPath('userData')).get('config',{})]);
+  return corePolicySync<any>('conversation-program.getMute',[remainingStore(app.getPath('userData')).docRef('config',{})]);
 }
 
 /**
@@ -3700,7 +3700,7 @@ function muteTurn(latest: string): string {
 }
 
 function setMood(mood: Mood) {
-  {const p=corePolicySync<any>('conversation-program.mergeMood',[remainingStore(app.getPath('userData')).get('config',{}),getMood(),mood]);conversationApply(p);sendToWindows('mood:changed',p.result);return;}
+  {const p=corePolicySync<any>('conversation-program.mergeMood',[remainingStore(app.getPath('userData')).docRef('config',{}),getMood(),mood]);conversationApply(p);sendToWindows('mood:changed',p.result);return;}
 }
 
 // Works out where her patience stands for this message: cool off for time away,
@@ -5422,7 +5422,7 @@ let pendingGoogleConsent: Promise<{ url: string; port: number }> | null = null;
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
   if (process.env.HARU_SERVICE_FUNDING_GUARD === 'on') {
-    return corePolicySync<ProviderConfig | null>('credit-guard.conversationRoute', [remainingStore(app.getPath('userData')).get('config', {}), {
+    return corePolicySync<ProviderConfig | null>('credit-guard.conversationRoute', [remainingStore(app.getPath('userData')).docRef('config', {}), {
       allowed: Boolean(route?.model && isAllowedTaskProvider(route)), keyAvailable: Boolean(route?.model && hasKeyFor(route.endpoint)),
     }]);
   }
@@ -5441,7 +5441,7 @@ function brainFromEntry(entry: ModelEntry, because: string): Brain {
   return naturalPolicy<any>('brainFromEntry',[entry,because]);
 }
 function observeTaskModel(model: string, succeeded: boolean) {
-  conversationCommit(app.getPath('userData'),naturalPolicy<any>('modelObserved',[remainingStore(app.getPath('userData')).get('config',{}),model,succeeded]));return;
+  conversationCommit(app.getPath('userData'),naturalPolicy<any>('modelObserved',[remainingStore(app.getPath('userData')).docRef('config',{}),model,succeeded]));return;
 }
 
 // There used to be a fastBrain() here that sent the one-shot composers — the
@@ -5586,7 +5586,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // the GPS knows the place, not that it is work or that it ends at half four.
   // "It's not raining here" — their window, against the forecast's model. Kept
   // for a couple of hours: no rain pushes, and the prompt takes their word.
-  conversationApply(corePolicySync<any>('conversation-program.weatherDispute',[remainingStore(app.getPath('userData')).get('config',{}),messages.at(-1)?.role??null,latest,Date.now()]));
+  conversationApply(corePolicySync<any>('conversation-program.weatherDispute',[remainingStore(app.getPath('userData')).docRef('config',{}),messages.at(-1)?.role??null,latest,Date.now()]));
   // Their answer to what she asked about their day, taken as one: the aside is
   // marked answered, and the brain that replies is told what this is.
   let answering = '';
@@ -7425,7 +7425,7 @@ let examplesCache: { key: string; examples: Example[] } | null = null;
 
 /** Today's few exchanges of her at her best: picked once a day, and again when a revoice pass adds rewrites. */
 function todaysExamples(): Example[] {
-  {const now=zonedNow(CHAT_TIMEZONE),today=localDateKey(now),yesterday=localDateKey(new Date(now.getFullYear(),now.getMonth(),now.getDate()-1));const p=corePolicySync<any>('conversation-program.todaysExamples',[remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),today,yesterday]);examplesCache=p;return p.examples;}
+  {const now=zonedNow(CHAT_TIMEZONE),today=localDateKey(now),yesterday=localDateKey(new Date(now.getFullYear(),now.getMonth(),now.getDate()-1));const p=corePolicySync<any>('conversation-program.todaysExamples',[remainingStore(app.getPath('userData')).docRef('config',{}),remainingStore(app.getPath('userData')).docRef('archive',{}),today,yesterday]);examplesCache=p;return p.examples;}
 }
 
 function rantRoom(latest: string, mentioned = '', answering = false): string {
@@ -7496,7 +7496,7 @@ async function directionsFor(latest: string, recentUser: string[] = []): Promise
 }
 
 function locationFacts(){
- const core=remainingStore(app.getPath('userData')),now=new Date(),config=core.get('config',{}),arrival=(config as any).where?.arrival;
+ const core=remainingStore(app.getPath('userData')),now=new Date(),config=core.docRef('config',{}),arrival=(config.body as any).where?.arrival;
  return {config,now:now.getTime(),at:now.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,weekday:new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(zonedNow(CHAT_TIMEZONE)).toLowerCase(),memories:getMemories(),mood:getMood(),arrivalClock:locationClock(arrival,clockAt)};
 }
 function locationAdapter(){return {core:remainingStore(app.getPath('userData')),facts:locationFacts,moodChanged:(mood:any)=>sendToWindows('mood:changed',mood)};}

@@ -1,7 +1,7 @@
 import {markTurn} from './turn-timing';
 import {corePolicySync} from './core-policy-sync';
 import { Worker } from 'node:worker_threads';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import { memorySourceRevision } from './memory-revision';
@@ -9,6 +9,13 @@ import { coreServiceOptions, type CoreServiceOptions } from './core-service-clie
 export type CoreStoreOptions={root:string;db:string;node:string;desktop?:string;service?:CoreServiceOptions;asyncTransactions?:boolean};
 type Snapshot={revision:number;userData:string;home:string;sourceRevision:string;documents:Record<string,any>};
 const registry=new Map<string,CoreStore>();
+// 3440: documents by digest. A policy call names a document by the digest of its JSON and the bridge sends the body only
+// for a version the Core has not seen; a plan's `expected` names the same digest and the committer checks it against the
+// document as it stands. Decisions and staleness checks are unchanged; the 362 KB config stops crossing on every call.
+export type DocRef={$doc:string;digest:string;body?:unknown};
+export function docDigest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)??'').digest('hex').slice(0,32);}
+export function isDigestRef(value:unknown):value is {$digest:string}{return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value as object).length===1&&typeof (value as {$digest?:unknown}).$digest==='string';}
+export function sameDocument(current:unknown,expected:unknown):boolean{return isDigestRef(expected)?docDigest(current)===expected.$digest:JSON.stringify(current)===JSON.stringify(expected);}
 export function coreStoreOptions(env:NodeJS.ProcessEnv=process.env):CoreStoreOptions|undefined{
  if(env.HARU_CORE_STORAGE!=='on')return;
  const root=env.HARU_CORE_ROOT??path.join(os.homedir(),'haru-core');
@@ -104,6 +111,8 @@ export class CoreStore {
   for(const part of parts){if(value==null||!Object.hasOwn(value,part))return fallback;value=value[part];}
   return value===undefined?fallback:structuredClone(value);
  }
+ docRef(name:string,fallback?:any):DocRef{const body=this.get(name,fallback);return {$doc:name,digest:docDigest(body),body};}
+ sameDoc(name:string,expected:unknown,fallback?:any):boolean{return sameDocument(this.get(name,fallback),expected);}
  has(name:string):boolean{this.refreshPending();return Object.hasOwn(this.staged??this.state.documents,name);}
  set(name:string,value:any):void{
   this.refreshPending();

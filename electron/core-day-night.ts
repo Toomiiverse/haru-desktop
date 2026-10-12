@@ -8,7 +8,7 @@ export function commitDayNightPlan(core:CoreStore,plan:any,assertCurrent:()=>voi
   if(!plan||!plan.expected||!plan.changes||Object.keys(plan.changes).some(k=>!Object.hasOwn(plan.expected,k)))throw Error('core_day_night_commit_protocol');
   core.transaction(()=>{
     assertCurrent();
-    for(const [name,value] of Object.entries(plan.expected))if(JSON.stringify(core.get(name,null))!==JSON.stringify(value))throw Error('core_day_night_stale_documents');
+    for(const [name,value] of Object.entries(plan.expected))if(!core.sameDoc(name,value,null))throw Error('core_day_night_stale_documents');
     for(const fence of plan.fences??[]){
       if(fence.document!=='archive'||typeof fence.key!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(fence.key))throw Error('core_day_night_fence_protocol');
       if(JSON.stringify(core.get('archive',{})[fence.key]??null)!==JSON.stringify(fence.expected))throw Error('core_day_night_stale_archive');

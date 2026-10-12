@@ -6,7 +6,7 @@ import type {CoreStore} from './core-store';
 export const screenPolicy=<T=any>(op:string,args:unknown[]):T=>corePolicySync<T>('screen.'+op,args);
 export function commitPerceptionPlan(core:CoreStore,plan:any){
  if(!plan)return;
- core.transaction(()=>{attachmentCurrent();for(const [key,expected] of Object.entries(plan.expected)){if(JSON.stringify(core.get(key,key==='activity'?{}:''))!==JSON.stringify(expected))throw Error('core_perception_document_stale');}for(const [key,value] of Object.entries(plan.changes))core.set(key,value);});
+ core.transaction(()=>{attachmentCurrent();for(const [key,expected] of Object.entries(plan.expected)){if(!core.sameDoc(key,expected,key==='activity'?{}:''))throw Error('core_perception_document_stale');}for(const [key,value] of Object.entries(plan.changes))core.set(key,value);});
 }
 const hash=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
 export type ScreenAdapter={core:CoreStore;facts:()=>any;update:(values:any)=>void;capture:(options:any)=>Promise<Buffer|null>;read:(file:string)=>Buffer;settle:(file:string)=>Promise<boolean>;look:(bytes:Buffer,request:any)=>Promise<{description:string}>;quip:(request:any)=>Promise<string>;publish:(line:string,options:any,provider:any)=>void;game:()=>any;gameUpdated:(text:string)=>void;deferred:(error:unknown)=>boolean;retry:(shot:any,delay:number)=>void;pending:()=>unknown};
