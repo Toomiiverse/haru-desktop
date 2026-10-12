@@ -1,4 +1,5 @@
 import {corePolicySync} from './core-policy-sync';
+import { docDigest } from './core-store';
 // Haru's memory. Pure logic — the store and the model calls live in main.ts, so
 // what gets remembered, what surfaces and what is forgotten can all be exercised
 // without either.
@@ -668,7 +669,22 @@ export function calibrateSimilarity(cosine: number): number {
 /** Precompute id → semantic similarity for every memory that has a vector:
  *  the cosine to the query's own embedding, calibrated so unrelated is zero. */
 export function semanticSimilarities(memories: MemoryRecord[], queryVector: number[], vectors: Map<string, number[]>): Map<string, number> {
-  return new Map(corePolicySync<[string, number][]>('memory-policy.semanticSimilarities', [memories, queryVector, [...vectors]]));
+  // 3490: the policy reads only each memory's id, and the vectors (≈325 KB as JSON) change only when a memory is embedded,
+  // so they cross as a document reference (sent once per version). Twice a turn this was ~55 ms.
+  const list = [...vectors];
+  return new Map(corePolicySync<[string, number][]>('memory-policy.semanticSimilarities', [memories.map(m => ({ id: m.id })), queryVector, { $doc: 'memory-vectors', digest: docDigest(list), body: list }]));
+}
+
+/** 3490: the migrated records for a saved memories document, recomputed only when that document changes. getMemories()
+ *  migrated on every read: eleven policy calls a turn carrying the 40 KB document each (~35 ms). Callers get a copy. */
+export function memoriesReader(read: () => unknown, migrate: (saved: unknown, now: string) => MemoryRecord[] = migrateMemories): () => MemoryRecord[] {
+  let held: { key: string; value: MemoryRecord[] } | null = null;
+  return () => {
+    const saved = read();
+    const key = docDigest(saved);
+    if (!held || held.key !== key) held = { key, value: migrate(saved, new Date().toISOString()) };
+    return structuredClone(held.value);
+  };
 }
 
 /** Cosine similarity between two memory vectors; undefined when either side

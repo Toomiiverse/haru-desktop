@@ -81,6 +81,9 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  if(!Object.hasOwn(value,'result'))throw Error('core_policy_protocol_error');
  if(acked.size>64)acked.clear();for(const digest of carry.sent)acked.add(digest);
  if(key)memo.set(key,JSON.stringify(value.result));
+ // 3490: a call the Core finished fast but this side waited long for (~1 turn in 20 shows one of 0.5-1 s) — queueing
+ // somewhere between the two; the journal gets both clocks so the cause can be found.
+ if(typeof value.policyMs==='number'){const nodeMs=performance.now()-started;if(nodeMs-value.policyMs>200)console.log('[policy-stall] '+JSON.stringify({operation,nodeMs:Math.round(nodeMs),coreMs:Math.round(value.policyMs),bytes:Buffer.byteLength(encoded)}));}
  status='ok';return value.result as T;
  }
  throw Error('core_policy_doc_unknown');

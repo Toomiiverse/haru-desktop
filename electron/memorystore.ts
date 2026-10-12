@@ -25,7 +25,7 @@ import {
   pruneMemories, rememberInto, retrieveMemories, vectorSimilarity,
   type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type MonthNote,
   type RetrievalFactors, type SessionSummary,
-} from './memory';
+, memoriesReader } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { mergeMemories, mergeDeletions, type MemoryDeletion, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock, type DerivedMemoryBlocks } from './blocks';
@@ -122,8 +122,9 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   let refreshAgain = false;
   let lastRetrieval: LastRetrieval | null = null;
 
+  const readMemories = memoriesReader(() => store.getMemories());
   function getMemories(): MemoryRecord[] {
-    return migrateMemories(store.getMemories(), new Date().toISOString());
+    return readMemories();
   }
 
   let fallbackDeletions: MemoryDeletion[] = [];
