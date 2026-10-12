@@ -153,3 +153,16 @@ export function earlierDaysContext(
   return corePolicySync<any>('conversation-policy.earlierDaysContext',[sessions,monthNotes,archive,todayKey,opts]);
 }
 
+
+/**
+ * The last `keep` messages, cut at a boundary that moves in steps of `step` and lands on one of theirs. A cut that slid by
+ * one exchange a turn made every hosted prompt's history new after the earlier days (2026-10-12, 250 messages in the day:
+ * cached 9.4k of 19k tokens, ~4k re-billed and ~0.3 s a turn); a stepped cut keeps the prefix for step/2 turns at a time.
+ */
+export function recentWindow<T extends { role: string }>(messages: T[], keep: number, step = 20): T[] {
+  const over = messages.length - keep;
+  if (over <= 0) return messages;
+  let cut = Math.ceil(over / step) * step;
+  while (cut < messages.length - 1 && messages[cut].role !== 'user') cut++;
+  return messages.slice(cut);
+}

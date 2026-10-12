@@ -180,7 +180,7 @@ import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, w
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
-import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
+import { markTimeGaps, sinceLast, earlierDaysContext, recentWindow, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_FLOOR, RECALL_LIMIT, type Exchange } from './recall';
 import { buildChatIndex, chatHitsNote, embedFormat, embedText, mentionsAny, rareTerms, searchChats, type ChatIndex } from './chatsearch';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
@@ -5504,7 +5504,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // the conversation as well as on the reply: a long day's thread is most of
   // the tokens the hosted model reads before its first word, and the reader
   // is watching a chat app. The recent thread stays, the desk sends everything.
-  if (away) messages = messages.slice(-awayTurns());
+  if (away) messages = recentWindow(messages, awayTurns());
   // A notification he answers is the conversation: her unprompted lines since her last reply go in
   // right before his message, for this turn only, instead of riding beside it as a quoted note —
   // quoted back at her, she said the line again word for word (asides.ts spliceRecentAsides).
