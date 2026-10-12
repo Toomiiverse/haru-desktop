@@ -29,7 +29,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    searchConfig:()=>readSearchConfig(deps.store.get('search')),anilistConfig:()=>readAniListConfig(deps.store.get('anilist')),
    systemConfig:()=>deps.readSystemConfig(),lastResults:()=>deps.lastResults(),lastSearchQuery:()=>deps.lastSearchQuery(),
    wardrobe:()=>deps.getWardrobeControls(),interests:()=>deps.getInterests(),config:()=>{if(!deps.policyConfig)throw Error('final_tool_config_required');return deps.policyConfig()},
-   clock:()=>{const now=zonedNow(deps.CHAT_TIMEZONE);return {day:localDateKey(now),iso:now.toISOString()}},uuid:()=>randomUUID(),
+   clock:()=>{const now=zonedNow(deps.CHAT_TIMEZONE);return {day:localDateKey(now),iso:now.toISOString(),epochMs:Date.now()}},uuid:()=>randomUUID(),
    capabilities:()=>Object.fromEntries(['makePicture','showWebPicture','claude','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
    vaultRoot:()=>deps.vault.root(),knowledgeConfig:()=>deps.getKnowledgeConfig()
   };

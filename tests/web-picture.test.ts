@@ -40,3 +40,11 @@ test('pictures attached during a turn ride on her saved reply, not his message',
   assert.deepEqual(history[1].attachments, [record]);
   assert.equal(createTurnContext().pictures().length, 0);
 });
+
+test('a retried reply carries her attachments too', () => {
+  const record = { id: 'p2', kind: 'image', name: 'a picture from imdb.com', saved: '/x/p2.jpg', bytes: 7, source: 'https://www.imdb.com/t/' };
+  const first = appendPhoneTurn([], { text: 'show me', reply: 'Here.', ignored: false }, 'id1', '2026-10-12T06:00:00.000Z');
+  const again = appendPhoneTurn(first, { text: 'show me', reply: 'Again.', ignored: false, retry: true, herAttachments: [record] }, 'id2', '2026-10-12T06:01:00.000Z');
+  assert.equal(again.length, 2);
+  assert.deepEqual(again[1].attachments, [record]);
+});

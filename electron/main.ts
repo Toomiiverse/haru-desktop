@@ -9424,7 +9424,7 @@ function webDeps(): WebDeps {
       // this is the reply's end, so what is left is hers to say.
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
@@ -9464,7 +9464,7 @@ function webDeps(): WebDeps {
       const reply = stripDelivery(answer.content ?? '');
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}) });
+      sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
       console.log(`[web] said it again in ${Date.now() - started}ms, ${reply.length} chars`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
@@ -10955,7 +10955,7 @@ function registerApplicationChannels() {
     // it up and coming back to the window does not mean finding half a
     // conversation missing. ollamaChat has already spoken it and pushed the
     // caption on its way through.
-    sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored) });
+    sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
     console.log(`[summon] answered ${said.length} chars with ${reply.length}${choices.length ? ` and ${choices.length} choices` : ''}`);
     return { reply, ignored: Boolean(answer.ignored), choices };
   });
