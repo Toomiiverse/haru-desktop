@@ -37,3 +37,34 @@ test('a reset takes the opening back and the next round may open again', () => {
   gate.commit('[neutral] Two things. [happy] The walrus.');
   assert.deepEqual(out, ['[smug] Odokawa.', '\uFFFD', '[neutral] Two things.', ' [happy] The walrus.']);
 });
+
+test('a hold shows while a tool runs and the opening takes it back first', () => {
+  const out: string[] = [];
+  const gate = new ReplyGate(t => out.push(t));
+  gate.hold('hang on, looking');
+  gate.hold('one sec');   // a later tool keeps the first line
+  gate.opening('[neutral] Twenty degrees.');
+  gate.commit('[neutral] Twenty degrees. [dry] Bring a jacket.');
+  assert.deepEqual(out, ['hang on, looking', '�', '[neutral] Twenty degrees.', ' [dry] Bring a jacket.']);
+});
+
+test('a hold with no opening is taken back by the commit, and by a reset', () => {
+  const out: string[] = [];
+  const gate = new ReplyGate(t => out.push(t));
+  gate.hold('one sec');
+  gate.reset();
+  gate.reset();   // nothing held any more
+  gate.hold('checking that now');
+  gate.commit('[neutral] Done.');
+  assert.deepEqual(out, ['one sec', '�', 'checking that now', '�', '[neutral] Done.']);
+});
+
+test('a hold after an opening or a commit shows nothing', () => {
+  const out: string[] = [];
+  const gate = new ReplyGate(t => out.push(t));
+  gate.opening('[neutral] Hi.');
+  gate.hold('one sec');
+  gate.commit('[neutral] Hi. There.');
+  gate.hold('one sec');
+  assert.deepEqual(out, ['[neutral] Hi.', ' There.']);
+});

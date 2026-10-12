@@ -6323,6 +6323,9 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
             narratedTools.push(packet.line);
             sendToWindows('chat:interject',packet.line);
             if(packet.speak)void speak(packet.line);
+            // 3320 speak-first: the phone's bubble shows the same line while the tool runs instead of a 6–15 s wait;
+            // a call speaks its own filler (localcall.ts), so its stream is left alone.
+            if(!call){replyGate.hold(packet.line);console.log('[reply-gate] '+JSON.stringify({hold:tool,chars:packet.line.length}));}
           }
         } catch(error) { console.warn('[ai] tool narration unavailable:',error instanceof Error?error.message:'transport'); }
       const result = await runChatTool(call, latest, toolDeps(turn));
@@ -9407,7 +9410,9 @@ function webDeps(): WebDeps {
         signal:options?.signal,
         onSending: () => trace.mark('sending'),
         traceId: trace.id,
-        onChunk: chunk => { if(chunk && chunk!=='\uFFFD')receivedReplyChunks=true; trace.mark('first'); showClean(chunk); voice.feed(chunk); },
+        // 3320: the gate's own reset marker (a hold or an opening taken back) is a reset here too \u2014 the first-word
+        // stamp and the voice buffer go with the words nobody kept, and a reply that then arrives whole is still shown.
+        onChunk: chunk => { if(chunk==='\uFFFD'){receivedReplyChunks=false; trace.unmark('first'); voice.reset(); showClean(chunk); return;} if(chunk)receivedReplyChunks=true; trace.mark('first'); showClean(chunk); voice.feed(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
         // call or a retry can leave a few streamed words behind it. Sink them
         // with nothing: the streamed text is replaced by the reply that counts.
