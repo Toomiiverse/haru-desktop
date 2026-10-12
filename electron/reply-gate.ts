@@ -37,9 +37,11 @@ export class ReplyGate {
     if (this.committed) throw new Error('reply_already_published');
     this.committed = true;
     this.release();
-    // 3340: whether the published opening survived, from the one place that knows (the Core's own record never printed).
-    if (this.prefix) this.log('[reply-gate] ' + JSON.stringify({ opening: content.startsWith(this.prefix) ? 'kept' : 'replaced', chars: this.prefix.length }));
-    if (this.prefix && !content.startsWith(this.prefix)) {
+    // 3340: the opening carries the space that ended it in the stream; a reply a later filter cut back to exactly that
+    // sentence (a dropped closing question) still keeps it. Logged from the one place that knows whether it survived.
+    const kept = content.startsWith(this.prefix) || content === this.prefix.trimEnd();
+    if (this.prefix) this.log('[reply-gate] ' + JSON.stringify({ opening: kept ? 'kept' : 'replaced', chars: this.prefix.length }));
+    if (this.prefix && !kept) {
       // 3240: a published opening the final text no longer starts with (a repair, an inspector edit, the publication
       // voice) is taken back the way a discarded round is — a reset marker, then the whole reply — not a failed turn.
       this.publish?.('\uFFFD');

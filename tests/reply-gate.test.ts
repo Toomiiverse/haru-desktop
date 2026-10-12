@@ -70,3 +70,20 @@ test('a hold after an opening or a commit shows nothing', () => {
   gate.hold('one sec');
   assert.deepEqual(out, ['[neutral] Hi.', ' There.']);
 });
+
+test('an opening sent with its space is kept when a filter cut the reply back to that one sentence', () => {
+  const out: string[] = [], logged: string[] = [];
+  const gate = new ReplyGate(t => out.push(t), l => logged.push(l));
+  gate.opening('[neutral] Morning. ');
+  gate.commit('[neutral] Morning.');
+  assert.deepEqual(out, ['[neutral] Morning. ', '']);
+  assert.deepEqual(logged, ['[reply-gate] {"opening":"kept","chars":19}']);
+});
+
+test('an opening sent with its space is followed by the rest without a doubled space', () => {
+  const out: string[] = [];
+  const gate = new ReplyGate(t => out.push(t));
+  gate.opening('[neutral] Morning. ');
+  gate.commit('[neutral] Morning. [curious] Sleep at all?');
+  assert.deepEqual(out, ['[neutral] Morning. ', '[curious] Sleep at all?']);
+});
