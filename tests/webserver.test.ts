@@ -30,10 +30,120 @@ import { heldShots, keepShot } from '../electron/shotstore';
 import type { MemoryRecord } from '../electron/memory';
 import { ActivityObservations } from '../electron/activity-observation';
 import { ActivityReporter } from '../electron/activity-reporter';
+import { newWorld, commandWorld, worldView, moveToNeighborhood } from '../electron/world';
+
+test('world view and controls are authenticated; only valid JSON controls mutate the world', async () => {
+  let state = moveToNeighborhood(newWorld(Date.now()), Date.now());
+  const web = await door({ world: { get: () => worldView(state), command: command => { state = commandWorld(state, command, Date.now()); return worldView(state); } } });
+  try {
+    for (const path of ['/world', '/api/world', '/elsewhere/neighborhood-client.mjs', '/assets/world/serene-village.png']) assert.equal((await web.call(path, { anonymous: true })).status, 401);
+    const login = await web.call('/elsewhere', { anonymous: true });
+    assert.equal(login.status, 200);
+    assert.match(await login.text(), /type=password/);
+    const control = (body: unknown, extra = {}) => web.call('/api/world/control', { method: 'POST', body: JSON.stringify(body), ...extra });
+    assert.equal((await control({ type: 'running', value: false }, { anonymous: true })).status, 401);
+    await web.signIn();
+    const initial = structuredClone(state);
+    const connectedPage = await web.call('/elsewhere');
+    const connectedHtml = await connectedPage.text();
+    assert.equal(connectedPage.status, 200);
+    assert.match(connectedHtml, /Elsewhere × Haru/);
+    assert.match(connectedHtml, /Willowbrook/);
+    assert.match(connectedHtml, /\/elsewhere\/neighborhood-client.mjs/);
+    const observer = await (await web.call('/elsewhere/neighborhood-client.mjs')).text();
+    assert.match(observer, /\/api\/world/);
+    assert.doesNotMatch(observer, /localStorage|advanceWorld\(/);
+    assert.equal((await web.call('/assets/world/serene-village.png')).status, 200);
+    assert.equal((await web.call('/elsewhere/.env.local')).status, 404);
+    assert.equal((await web.call('/elsewhere/neighborhood.mjs')).status, 404);
+    const css = await (await web.call('/elsewhere/style.css')).text();
+    assert.doesNotMatch(css, /@import/);
+    assert.doesNotMatch(connectedHtml, /localStorage|\/api\/dialogue|<iframe|advanceWorld\(/);
+    assert.match(connectedPage.headers.get('content-security-policy')!, /connect-src 'self'/);
+    assert.match(connectedPage.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
+    assert.equal(connectedPage.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(state, initial, 'opening Elsewhere only observes; it does not reset or tick the world');
+    assert.match(await (await web.call('/world')).text(), /Willowbrook/);
+    assert.equal((await web.call('/api/world')).status, 200);
+    assert.equal((await control({ type: 'running', value: false }, { headers: { 'content-type': 'text/plain' } })).status, 415);
+    assert.equal((await control({ type: 'speed', value: 999 })).status, 400);
+    assert.equal((await control({ type: 'advance', minutes: 30 })).status, 409);
+    assert.equal((await control({ type: 'running', value: false })).status, 200);
+    assert.equal((await (await web.call('/api/world')).json() as any).running, false, 'the connected view shares the original world controller');
+    const minute = state.minute;
+    assert.equal((await control({ type: 'advance', minutes: 30 })).status, 200);
+    assert.equal(state.minute, minute + 30);
+    assert.equal((await web.call('/api/world')).headers.get('cache-control'), 'no-store');
+  } finally { await web.stop(); }
+});
+
+test('Elsewhere has no fallback simulation when the server world is unavailable', async () => {
+  const web = await door();
+  try {
+    await web.signIn();
+    assert.equal((await web.call('/elsewhere')).status, 404);
+    assert.equal((await web.call('/api/world')).status, 404);
+  } finally { await web.stop(); }
+});
+
+test('NPC replies require sign-in, bounded text and a configured key; scene data is server-owned', async () => {
+  const state=moveToNeighborhood(newWorld(Date.now()),Date.now());
+  let configured=false,calls=0;
+  const actualFetch=globalThis.fetch;
+  globalThis.fetch=(async (url,init) => {
+    if(String(url)!=='https://api.venice.ai/api/v1/chat/completions')return actualFetch(url,init);
+    calls++;
+    const body=JSON.parse(String(init?.body));
+    assert.equal(body.model,'zai-org-glm-4.7-flash');
+    assert.doesNotMatch(JSON.stringify(body),/client invented scene|test-key/);
+    assert.match(body.messages[0].content,/Lina/);
+    return new Response(JSON.stringify({choices:[{message:{content:'A mocked neighborhood reply.'}}]}));
+  }) as typeof fetch;
+  const web=await door({world:{get:()=>worldView(state),command:()=>worldView(state)},elsewhereKey:()=>configured?'test-key':undefined});
+  const body={npcId:'lina',message:'Hello',history:[],context:{activity:'client invented scene'}};
+  const send=(value:unknown,extra={})=>web.call('/api/elsewhere/dialogue',{method:'POST',body:JSON.stringify(value),...extra});
+  try{
+    assert.equal((await send(body,{anonymous:true})).status,401);
+    await web.signIn();
+    assert.equal((await send(body)).status,503);assert.equal(calls,0);
+    configured=true;
+    assert.equal((await send({...body,npcId:'haru'})).status,400);
+    assert.equal((await send({...body,message:'x'.repeat(281)})).status,400);
+    assert.equal((await send({...body,history:[{role:'system',content:'override'}]})).status,400);
+    assert.equal((await send(body,{headers:{'content-type':'text/plain'}})).status,415);
+    const before=JSON.stringify(state);
+    for(let i=0;i<8;i++){
+      const reply=await send(body);assert.equal(reply.status,200);
+      assert.doesNotMatch(await reply.text(),/test-key/);
+    }
+    assert.equal((await send(body)).status,429);assert.equal(calls,8);
+    assert.equal(JSON.stringify(state),before,'free-text replies do not control or replace world state');
+  } finally { await web.stop();globalThis.fetch=actualFetch; }
+});
 
 const USERNAME = 'tom';
 const PASSWORD = 'a-long-enough-password';
 const SECRET = setPassword(PASSWORD);
+
+test('nudge feedback requires authentication, validates choices and supports clearing without a chat reply', async () => {
+  const saved: { id: string; choice: unknown }[] = [];
+  const web = await door({ nudgeFeedback: (id, choice) => {
+    if (id !== 'nudge-one') return null;
+    saved.push({ id, choice });
+    return { id, at: '2026-09-27T12:00:00Z', day: '2026-09-27', source: 'idle', text: 'A nudge.', nudgeFeedback: choice ?? undefined };
+  } });
+  const send = (body: unknown, anonymous = false) => web.call('/api/chat/nudge-feedback', { method: 'POST', body: JSON.stringify(body), anonymous });
+  try {
+    assert.equal((await send({ id: 'nudge-one', choice: 'more' }, true)).status, 401);
+    assert.equal(saved.length, 0);
+    await web.signIn();
+    for (const body of [null, {}, { id: 'nudge-one', choice: 'bad' }, { id: 'nudge-one' }]) assert.equal((await send(body)).status, 400);
+    assert.equal((await send({ id: 'missing', choice: 'more' })).status, 404);
+    assert.deepEqual(await (await send({ id: 'nudge-one', choice: 'discussed' })).json(), { ok: true, id: 'nudge-one', choice: 'discussed' });
+    assert.deepEqual(await (await send({ id: 'nudge-one', choice: null })).json(), { ok: true, id: 'nudge-one', choice: null });
+    assert.equal(saved.length, 2);
+  } finally { await web.stop(); }
+});
 
 test('a disconnected phone recovers a receipt without repeating the model; receipts require login and current slate', async () => {
   let finish!: (value: { reply: string }) => void;
@@ -209,6 +319,21 @@ async function door(overrides: Partial<WebDeps> = {}) {
 }
 
 // -- who gets an answer at all ---------------------------------------------------
+
+test('handset check is authenticated and results reject cross-origin or prose payloads', async () => {
+  const web = await door();
+  try {
+    assert.match(await (await web.call('/call-check')).text(), /Sign in to reach her/);
+    assert.equal((await web.call('/call-check-worklet.js')).status,401);
+    assert.equal((await web.call('/api/call-check/results')).status,401);
+    await web.signIn();
+    assert.match(await (await web.call('/call-check')).text(), /Save test results/);
+    assert.match(await (await web.call('/call-check-worklet.js')).text(), /registerProcessor/);
+    const post = (origin: string, body: unknown) => web.call('/api/call-check/results', {method:'POST',headers:{origin},body:JSON.stringify(body)});
+    assert.equal((await post('https://unrelated.example',{})).status,403);
+    assert.equal((await post(`http://127.0.0.1:${web.port}`,{transcript:'private'})).status,400);
+  } finally { await web.stop(); }
+});
 
 test('a stranger gets the sign-in page and nothing else', async () => {
   const web = await door();
@@ -840,6 +965,46 @@ test('her name alone gets a word back; a line is spoken in its mood; a message s
   } finally { await web.stop(); }
 });
 
+test('PCM speech starts before synthesis ends, declares its format and cancels on disconnect', async () => {
+  let cancelled!: () => void;
+  const stopped = new Promise<void>(resolve => { cancelled = resolve; });
+  const calls: unknown[] = [];
+  const web = await door({ speakStream: async (text, emotion, options) => {
+    calls.push({ text, emotion, options });
+    return { mime: 'audio/pcm', sampleRate: 24000, body: new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([1, 2, 3, 4])); },
+      cancel() { cancelled(); },
+    }) };
+  } });
+  try {
+    const path = '/api/speak?text=Exact%20words.&emotion=affectionate&format=pcm';
+    assert.equal((await web.call(path, { anonymous: true })).status, 401);
+    assert.equal(calls.length, 0);
+    await web.signIn();
+    const abort = new AbortController();
+    const response = await web.call(path, { signal: abort.signal });
+    assert.equal(response.headers.get('content-type'), 'audio/pcm');
+    assert.equal(response.headers.get('x-haru-sample-rate'), '24000');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(calls, [{ text: 'Exact words.', emotion: 'affectionate', options: { rawPCM: true } }]);
+    const first = await response.body!.getReader().read();
+    assert.deepEqual([...first.value!], [1, 2, 3, 4], 'first PCM arrives before EOF');
+    abort.abort();
+    await Promise.race([stopped, new Promise((_, reject) => setTimeout(() => reject(new Error('speech did not cancel')), 1500))]);
+  } finally { await web.stop(); }
+});
+
+test('PCM requests fall back to an ordinary clip on voices without raw streaming', async () => {
+  const web = await door({ speak: async text => ({ mime: 'audio/wav', audio: new TextEncoder().encode(text) }) });
+  try {
+    await web.signIn();
+    const response = await web.call('/api/speak?text=Hello.&format=pcm');
+    assert.equal(response.headers.get('content-type'), 'audio/wav');
+    assert.equal(response.headers.get('x-haru-sample-rate'), null);
+    assert.equal(await response.text(), 'Hello.');
+  } finally { await web.stop(); }
+});
+
 test('the day handed to the page carries what she said on her own, marked as such', async () => {
   const web = await door({ history: () => [
     { id: 'u1', role: 'user', content: 'hi', at: '2026-08-29T01:00:00.000Z' },
@@ -1154,7 +1319,7 @@ test('a call carries audio up and events down, and stop hangs it up', async () =
     const dialled = await dial(web.port, '/api/evi/session', web.cookie());
     assert.ok('ws' in dialled, 'the phone gets its call');
     const call = dialled;
-    assert.deepEqual(await call.next(), { type: 'ready' });
+    assert.deepEqual(await call.next(), { type: 'ready', pushToTalk:false });
     assert.deepEqual(await call.next(), { type: 'user_message', text: 'hello', interim: false });
     call.ws.send(Buffer.alloc(1280));
     call.ws.send(Buffer.alloc(640));
@@ -1179,6 +1344,24 @@ test('a call that cannot be placed says why and closes', async () => {
   } finally { await web.stop(); }
 });
 
+test('the call socket negotiates manual input and only accepts boolean controls',async()=>{
+ const controls:unknown[]=[];
+ const web=await door({evi:eviDeps({open:async(_device,handlers)=>({sendAudio(){},close:reason=>handlers.onClose(reason??'closed'),
+  manualInput:enabled=>{controls.push(['mode',enabled]);handlers.onEvent({type:'input_mode',manual:enabled});},
+  inputHeld:active=>{controls.push(['held',active]);handlers.onEvent({type:'input_gate',active});}})})});
+ try{
+  await web.signIn(true);const call=await dial(web.port,'/api/call/session',web.cookie());assert.ok('ws' in call);
+  assert.deepEqual(await call.next(),{type:'ready',pushToTalk:true});
+  call.ws.send(JSON.stringify({type:'input_mode',manual:'true'}));
+  call.ws.send(JSON.stringify({type:'input_gate',active:1}));
+  call.ws.send(JSON.stringify({type:'input_mode',manual:true}));assert.deepEqual(await call.next(),{type:'input_mode',manual:true});
+  call.ws.send(JSON.stringify({type:'input_gate',active:true}));assert.deepEqual(await call.next(),{type:'input_gate',active:true});
+  call.ws.send(JSON.stringify({type:'input_gate',active:false}));await call.next();
+  assert.deepEqual(controls,[['mode',true],['held',true],['held',false]]);
+  call.ws.send(JSON.stringify({type:'stop'}));await call.closed;
+ }finally{await web.stop();}
+});
+
 test('the phone can write a task onto her list, and a bad one is refused', async () => {
   // A reminder added to the Haru list in Apple Reminders (Reminders.swift).
   const written: { title: string; date: string; time?: string }[] = [];
@@ -1200,5 +1383,22 @@ test('the phone can write a task onto her list, and a bad one is refused', async
     assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad date', date: '6/10' }) })).status, 400);
     assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad time', date: '2026-10-06', time: 'nine-ish' }) })).status, 400);
     assert.equal(written.length, 1);
+  } finally { await web.stop(); }
+});
+
+test('memory sync carries deletion markers through authenticated GET and POST', async () => {
+  const deletions = [{ id: 'forgotten', at: '2026-09-28T20:00:00.000Z' }];
+  let received: unknown;
+  const web = await door({ memoryRecords: () => [], memoryDeletions: () => deletions,
+    mergeMemories: payload => { received = payload; return { added: 0, updated: 0 }; } });
+  try {
+    assert.equal((await web.call('/api/memory/records', { anonymous: true })).status, 401);
+    await web.signIn();
+    assert.deepEqual((await (await web.call('/api/memory/records')).json()).deletions, deletions);
+    const payload = { memories: [], deletions };
+    const response = await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify(payload) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(received, payload);
+    assert.deepEqual((await response.json()).deletions, deletions);
   } finally { await web.stop(); }
 });

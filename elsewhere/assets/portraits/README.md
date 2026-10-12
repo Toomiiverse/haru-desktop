@@ -1,0 +1,80 @@
+# Illustrated character assets
+
+Generated with the built-in image-generation tool for Elsewhere, using the user's clothed Akeno sprite sheet as a drawing-style reference. The reference files remain unchanged in Downloads and are not bundled with the game. The resulting cast retains its existing identities.
+
+Each `*-v2.png` is an expression atlas: neutral, warm, guarded, left to right. The UI crops the atlas with SVG viewports; there is no image-processing runtime or inference service. These assets now provide compact resident thumbnails and roster/top-bar icons. Large dialogue and profile views use the new head-to-toe atlases in [../fullbody/README.md](../fullbody/README.md), generated using these portraits as identity references. Tiny walking actors stay lightweight animated vectors.
+
+Final PNGs use transparent cutouts. The generated alpha channel and embedded metadata are preserved; the browser handles cropping without editing the images.
+
+## Generation prompts
+
+Built-in image-generation mode; no CLI or API key. The common reference is `Downloads/3DS - High School DxD (JPN) - Characters - Akeno Himejima/akeno 1.png`. Other files in that folder are not imported into the project.
+
+### Lina · original generation
+
+Use case: stylized-concept.
+Asset type: one production-ready visual-novel character expression sprite sheet for the browser game Elsewhere.
+Image 1 is STYLE REFERENCE ONLY: match its polished early-2010s Japanese visual-novel cel animation drawing, delicate tapered ink lines, layered glossy hair locks, nuanced violet-gray shadow planes, fine eyelash detail, reflective irises, restrained skin shading and natural non-chibi anatomy. Do not copy the character, sprite-rip layout, missing face pieces, text, or credits.
+Subject: Lina Park, an ORIGINAL adult woman aged 26, an illustrator. Long flowing wine-red hair with subtle plum shadows, side-swept layered bangs and a small white geometric hair clip, light warm skin, expressive ice-blue eyes. Opaque charcoal academy-inspired tailored jacket with white piping, a fully buttoned white high-collared blouse and a small crimson ribbon. Natural everyday proportions and fully clothed, relaxed conversational pose. Preserve the sophisticated hand-drawn finish of Image 1, NOT flat geometric SVG shapes, not chibi, not 3D.
+Composition: a single wide PNG sprite atlas with EXACTLY THREE evenly spaced equal-width portrait columns in one horizontal row. Left: neutral attentive expression. Middle: warm friendly smile. Right: mildly hurt/guarded expression. Same character, identical outfit, same scale and registered head position in every column; ONLY facial expression changes. Draw each figure completely from the top of the hair to the hips, facing the viewer with a slight three-quarter turn. All heads fully inside their own cells with small equal top margins, clear empty gutters, no overlapping cells. The figures should occupy most of each column's height.
+Background: genuinely transparent alpha everywhere outside the three character cutouts. No checkerboard painted into the image, no ground, no scenery, no panel dividers, no text, labels, logos or watermark. Clean complete faces, not modular face holes.
+
+### theo · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Theo Brooks, an original adult MAN aged 32, a friendly café owner. Warm medium-brown skin, short tousled blue-black hair with layered navy highlights, amber-brown eyes, masculine facial structure. Charcoal tailored academy-inspired jacket with crisp white piping, white buttoned shirt and a burgundy necktie. Relaxed upright posture.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### maya · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Maya Reed, an original adult WOMAN aged 29, a thoughtful gardener. Warm light-brown skin, long deep-indigo hair half tied back with loose side bangs and a small white flower hairpin, green eyes. Charcoal tailored academy-inspired jacket with white piping, fully buttoned white high-collared blouse and a small forest-green neck ribbon. Relaxed upright posture, natural everyday body proportions.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### felix · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Felix Chen, an original adult MAN aged 30, a reserved librarian. Light warm skin, short silver-blue layered hair with a soft side part, narrow rectangular dark glasses, blue-gray eyes. Masculine facial structure. Charcoal tailored academy-inspired jacket with white piping, white shirt and a muted violet necktie. Relaxed upright posture.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### jules · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Jules Rivera, an original androgynous NONBINARY adult aged 27, a confident artisan. Warm tan skin, short asymmetrical violet hair swept to one side with a subtle undercut, amber eyes, single small geometric gold earring. Androgynous sharp features and slender shoulders. Charcoal tailored academy-inspired jacket with white piping, fully buttoned white shirt and a narrow burgundy ribbon tie. Relaxed upright posture.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### bea · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Bea Williams, an original older adult WOMAN aged 64, a retired teacher. Medium-brown skin, silver-gray hair in a tidy low bun with loose wisps, fine reading glasses, gentle violet-brown eyes. Clearly older appearance, visible smile lines and fine wrinkles, mature face and soft cheeks, NOT a teenager or a young woman. Charcoal tailored academy-inspired jacket with white piping over a fully buttoned ivory high-collared blouse, a small muted-plum silk scarf tied neatly at the neck. Natural everyday body proportions, relaxed upright posture.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### player · original generation
+
+Use case: stylized-concept. Asset type: ONE game-ready visual-novel expression sprite atlas for Elsewhere.
+Image 1 is the user's drawing STYLE reference only. Image 2 is our existing Lina atlas: match its level of hand-drawn polish, framing, scale, three-column composition, garment shading and render finish, but draw the different original character below. Do not copy either reference identity.
+Subject: Alex Morgan, an original androgynous adult aged 22, the player character. Light warm skin, short tousled dark slate-blue hair, teal eyes, approachable androgynous facial features. Charcoal tailored academy-inspired jacket with white piping, white shirt, and slim crimson tie. Relaxed upright posture.
+Style: polished early-2010s Japanese visual-novel character art as in reference 1, fine tapered linework, glossy individual hair strands, crisp restrained cel-shading, subtle violet-gray shadows in white cloth, delicate reflective irises and natural non-chibi anatomy. NOT geometric SVG/vector shapes, not 3D, not painterly realism. All clothing fully opaque and comfortable.
+Composition: a WIDE 1536x1024 PNG atlas, exactly THREE equal 512-pixel-wide portrait cells in a single horizontal row. Repeat the SAME character at the SAME scale, outfit and registered head position. Left expression neutral/attentive; middle warm friendly smile; right mildly hurt/guarded. Only face changes; identical relaxed head-to-hips pose in all three cells, slight three-quarter turn facing the viewer. Hair top near y=20, chin near y=345, hips near image bottom. Whole head in each cell, clean margins, no overlap. These three cells will be cropped individually in the game.
+Background: simple dark desaturated charcoal-plum backdrop, darkest at cell edges, no scenery. Clean complete faces, no modular face holes. No text, labels, panel lines, extra characters, logos or watermark.
+
+### Transparent finalization (all except Lina)
+
+Use case: background-extraction. Image 1 is the edit target: a finished 1536x1024 character expression atlas. Remove ONLY the dark plum background around and between the three figures, replacing it with genuinely transparent alpha (NOT black, white, a colored background, or a painted checkerboard). Preserve all three character drawings exactly: facial identity, expressions, thin linework, hair strands, colors, garment details, pose, scale, registration and three equal 512-pixel-wide cells. Keep every opaque character pixel, fully opaque except antialiased edges. Do not redesign, relight, recolor, crop, resize, move the figures, or add anything. Output one transparent PNG atlas at the same 1536x1024 dimensions.
+
+Final outputs are `lina-v2.png`, `theo-v2.png`, `maya-v2.png`, `felix-v2.png`, `jules-v2.png`, `bea-v2.png`, and `player-v2.png` in this directory.

@@ -29,5 +29,12 @@ test('her word back is one of hers, in a mood the voice has a clip for', () => {
   }
   assert.equal(wakeAck(() => 0).line, WAKE_ACKS[0].line);
   assert.equal(wakeAck(() => 0.999).line, WAKE_ACKS[WAKE_ACKS.length - 1].line);
-  assert.match(INTERRUPTED_ASIDE, /cut you off/);
+});
+
+test('ordinary interruption keeps conversational continuity without inferring rejection', () => {
+  assert.match(INTERRUPTED_ASIDE, /ordinary conversational turn-taking/);
+  assert.match(INTERRUPTED_ASIDE, /same warmth, mood and speaking style/);
+  assert.match(INTERRUPTED_ASIDE, /actual words call for a change/);
+  assert.match(INTERRUPTED_ASIDE, /Do not assume they heard the unfinished part/);
+  assert.doesNotMatch(INTERRUPTED_ASIDE, /React to that as you would/);
 });

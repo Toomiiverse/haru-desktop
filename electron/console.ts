@@ -26,7 +26,18 @@ type Handler = (event: IpcMainInvokeEvent | null, ...args: unknown[]) => unknown
 export const consoleHandlers = new Map<string, Handler>();
 
 const listeners = new Set<(channel: string, args: unknown[]) => void>();
-const configFile = path.join(os.homedir(), '.config', 'haru-desktop', 'console.json');
+const configFile = process.env.HARU_CONSOLE_CONFIG_FILE || path.join(os.homedir(), '.config', 'haru-desktop', 'console.json');
+let boundPort: number | null = null;
+export function consolePort(): number | null { return boundPort; }
+export function broadcastConsole(channel: string, args: unknown[]): void {
+  for (const listener of listeners) listener(channel, args);
+}
+const deviceChannels = new Set(['live2d:import','voice:pickClip','companion:moveBy','companion:resizeBy',
+  'companion:poke','companion:open','companion:close','companion:ask','companion:showMenu']);
+function channelHandler(channel:string,handler:Handler):Handler {
+  return process.env.HARU_CORE_BRAIN_WORKER==='on'&&deviceChannels.has(channel)
+    ? ()=>{throw Error('desktop_device_unavailable');}:handler;
+}
 
 function token(): string {
   try {
@@ -55,18 +66,18 @@ export function installConsole(port = Number(process.env.HARU_CONSOLE_PORT || 87
   const on = ipcMain.on.bind(ipcMain);
   const once = ipcMain.once.bind(ipcMain);
   const api = ipcMain as unknown as Record<string, unknown>;
-  api.handle = (channel: string, handler: Handler) => { consoleHandlers.set(channel, handler); return handle(channel, handler); };
-  api.handleOnce = (channel: string, handler: Handler) => { consoleHandlers.set(channel, handler); return handleOnce(channel, handler); };
+  api.handle = (channel: string, handler: Handler) => { handler=channelHandler(channel,handler);consoleHandlers.set(channel, handler); return handle(channel, handler); };
+  api.handleOnce = (channel: string, handler: Handler) => { handler=channelHandler(channel,handler);consoleHandlers.set(channel, handler); return handleOnce(channel, handler); };
   api.removeHandler = (channel: string) => { consoleHandlers.delete(channel); return removeHandler(channel); };
-  api.on = (channel: string, handler: Handler) => { consoleHandlers.set(channel, handler); return on(channel, handler); };
-  api.once = (channel: string, handler: Handler) => { consoleHandlers.set(channel, handler); return once(channel, handler); };
+  api.on = (channel: string, handler: Handler) => { handler=channelHandler(channel,handler);consoleHandlers.set(channel, handler); return on(channel, handler); };
+  api.once = (channel: string, handler: Handler) => { handler=channelHandler(channel,handler);consoleHandlers.set(channel, handler); return once(channel, handler); };
 
   // 2. Forward every broadcast, exactly as the window receives it. Wrapping the
   //    instance shadows the method for this webContents only.
   app.on('web-contents-created', (_event, contents: WebContents) => {
     const send = contents.send.bind(contents);
     (contents as unknown as Record<string, unknown>).send = (channel: string, ...args: unknown[]) => {
-      for (const listener of listeners) listener(channel, args);
+      broadcastConsole(channel, args);
       return send(channel, ...args);
     };
   });
@@ -94,6 +105,7 @@ export function installConsole(port = Number(process.env.HARU_CONSOLE_PORT || 87
   });
 
   server.listen(port, '127.0.0.1', () => {
+    const address=server.address();boundPort=address&&typeof address==='object'?address.port:null;
     console.log(`[console] channel bus on 127.0.0.1:${port} (${consoleHandlers.size} channels so far)`);
   });
 }

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // One memory, two machines.
 //
 // The desk and the server are the same Haru running in two places, and both of
@@ -26,6 +27,7 @@ export type MergeReport = {
   memories: MemoryRecord[];
   added: number;
   updated: number;
+  deleted?: number;
 };
 
 /** One observed moment, identified by when and what it was, so the same moment
@@ -37,7 +39,7 @@ function evidenceKey(entry: EvidenceEntry): string {
 function mergeEvidence(mine: EvidenceEntry[] = [], theirs: EvidenceEntry[] = []): EvidenceEntry[] {
   const byKey = new Map<string, EvidenceEntry>();
   for (const entry of [...mine, ...theirs]) byKey.set(evidenceKey(entry), entry);
-  return [...byKey.values()].sort((a, b) => a.at.localeCompare(b.at));
+  return [...byKey.values()].sort((a, b) => a.at.localeCompare(b.at) || evidenceKey(a).localeCompare(evidenceKey(b)));
 }
 
 function sortingOf(newer: MemoryRecord, older: MemoryRecord): Pick<MemoryRecord, 'category' | 'when'> {
@@ -56,7 +58,9 @@ function sortingOf(newer: MemoryRecord, older: MemoryRecord): Pick<MemoryRecord,
 function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
   // The newer sighting wins the fields a conversation moves: the text as it was
   // last phrased, confidence, importance, and the decay status.
-  const newer = theirs.lastSeenAt > mine.lastSeenAt ? theirs : mine;
+  const revision = (m: MemoryRecord) => m.updatedAt ?? m.lastSeenAt;
+  const order = revision(theirs).localeCompare(revision(mine)) || stable(theirs).localeCompare(stable(mine));
+  const newer = order > 0 ? theirs : mine;
   const older = newer === mine ? theirs : mine;
   return {
     ...newer,
@@ -69,9 +73,9 @@ function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
     // change on every pull.
     evidence: tidyEvidence(mergeEvidence(mine.evidence, theirs.evidence)),
     // Consolidation's work, carried rather than overwritten — see the header.
-    supersededBy: mine.supersededBy ?? theirs.supersededBy,
-    mergedFrom: mine.mergedFrom ?? theirs.mergedFrom,
-    conflictsWith: mine.conflictsWith ?? theirs.conflictsWith,
+    supersededBy: newer.supersededBy ?? older.supersededBy,
+    mergedFrom: union(mine.mergedFrom, theirs.mergedFrom),
+    conflictsWith: union(mine.conflictsWith, theirs.conflictsWith),
     // The sorting, from the newer copy that has one. The desk's older code
     // drops both fields on read, so its copy of a record arrives without them
     // however recently it was seen, and must not unsort what was sorted here.
@@ -87,6 +91,7 @@ function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
  * that fails it reaches the store.
  */
 export function mergeMemories(mine: MemoryRecord[], theirs: unknown, now: string): MergeReport {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<MergeReport>('memory-maintenance.mergeMemories', [mine, theirs, now, mine.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`), Array.isArray(theirs) ? theirs.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
   // Both sides, not just the one off the wire. getMemories already migrates
   // what it reads, so in the app this changes nothing — but reconcile compares
   // the two records field by field, and a local copy that had not been through
@@ -112,13 +117,41 @@ export function mergeMemories(mine: MemoryRecord[], theirs: unknown, now: string
       updated += 1;
     }
   }
-  return { memories: [...byId.values()], added, updated };
+  return { memories: [...byId.values()].sort((a, b) => a.id.localeCompare(b.id)), added, updated };
 }
 
 /** Whether a sync actually brought anything back, for a log worth reading. */
 export function describeMerge(report: MergeReport): string {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<string>('memory-maintenance.describeMerge', [report]);
   const parts: string[] = [];
   if (report.added) parts.push(`${report.added} new memor${report.added === 1 ? 'y' : 'ies'}`);
   if (report.updated) parts.push(`${report.updated} updated`);
   return parts.join(', ');
+}
+
+/** Persistent, text-free deletion markers. No log rotation: an old device may
+ * reconnect years later. A deliberate new fact gets a new record ID. */
+export type MemoryDeletion = { id: string; at: string };
+export function mergeDeletions(...inputs: unknown[]): MemoryDeletion[] {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<MemoryDeletion[]>('memory-maintenance.mergeDeletions', [inputs, inputs.map(input => Array.isArray(input) ? input.map(item => typeof item?.at === 'string' ? Date.parse(item.at) : null) : [])]);
+  const held = new Map<string, MemoryDeletion>();
+  for (const input of inputs) {
+    if (!Array.isArray(input)) continue;
+    for (const item of input) {
+      if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 256
+        || typeof item.at !== 'string' || !Number.isFinite(Date.parse(item.at))) continue;
+      const at = new Date(item.at).toISOString();
+      if (!held.has(item.id) || held.get(item.id)!.at < at) held.set(item.id, { id: item.id, at });
+    }
+  }
+  return [...held.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+function union(a?: string[], b?: string[]): string[] | undefined {
+  return a || b ? [...new Set([...(a ?? []), ...(b ?? [])])].sort() : undefined;
+}
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => JSON.stringify(k) + ':' + stable(v)).join(',') + '}';
+  return JSON.stringify(value);
 }

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // When she puts words in your mouth.
 //
 // A dialogue box with numbered replies is the oldest trick in the genre, and it
@@ -59,6 +60,7 @@ export const CHOICES_TOOL: ChatTool = {
  * than like she said too much.
  */
 export function readChoices(raw: unknown): string[] {
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.choices',[raw]);
   const list = Array.isArray(raw) ? raw : [];
   const seen = new Set<string>();
   const kept: string[] = [];

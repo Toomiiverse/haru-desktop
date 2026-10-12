@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Noticing where you went.
 //
 // Open the journal with nothing written and she says so. Open the profile when
@@ -42,6 +43,8 @@ export const NOTICES_PER_DAY = 2;
 export const NOTICE_GAP_MS = 12 * 60_000;
 
 export function readNotices(saved: unknown, today: string): NoticeRecord {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on')return corePolicySync<any>('context-preparation.readNotices',[saved,today]);
+
   if (!saved || typeof saved !== 'object') return { ...DEFAULT_NOTICES, day: today };
   const record = saved as Partial<NoticeRecord>;
   if (record.day !== today) return { ...DEFAULT_NOTICES, day: today };
@@ -61,6 +64,8 @@ export function readNotices(saved: unknown, today: string): NoticeRecord {
  * "you have already done this" is not a companion noticing, it is a receipt.
  */
 export function angleFor(page: Page, state: PageState): string | null {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on')return corePolicySync<any>('context-preparation.angleFor',[page,state]);
+
   switch (page) {
     case 'journal':
       if (state.journalWrittenToday) return null;
@@ -89,6 +94,8 @@ export function angleFor(page: Page, state: PageState): string | null {
  * almost nothing.
  */
 export function mayNotice(page: Page, state: PageState, notices: NoticeRecord, sinceLastMs: number): boolean {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on')return corePolicySync<any>('context-preparation.mayNotice',[page,state,notices,sinceLastMs]);
+
   if (notices.count >= NOTICES_PER_DAY) return false;
   if (notices.pages.includes(page)) return false;
   if (sinceLastMs < NOTICE_GAP_MS) return false;
@@ -97,5 +104,7 @@ export function mayNotice(page: Page, state: PageState, notices: NoticeRecord, s
 
 /** Records that she spoke, so the budget means something. */
 export function noteNoticed(notices: NoticeRecord, page: Page): NoticeRecord {
+  if(process.env.HARU_CORE_CONTEXT_PREPARATION==='on')return corePolicySync<any>('context-preparation.noteNoticed',[notices,page]);
+
   return { day: notices.day, count: notices.count + 1, pages: [...notices.pages, page] };
 }

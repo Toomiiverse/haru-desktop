@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Haru's patience, kept as a number that low-effort messages push up and real
 // ones pull down. Pure so the thresholds can be exercised without a model.
 
@@ -34,6 +35,7 @@ export const COOLDOWN_MINUTES = 8;
  * of 22 would be 73 and then 100.
  */
 export function rescaleOldMood<T extends { irritation?: unknown; ego?: unknown; grudge?: unknown; grudgeBeforeTally?: unknown; scale?: unknown }>(saved: T): T & { scale: 100 } {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.rescaleOldMood',[saved]); }
   if (saved.scale === 100) return saved as T & { scale: 100 };
   const to = (value: unknown, oldMax: number) => Math.max(0, Math.min(100, Math.round((Number(value) || 0) * 100 / oldMax)));
   return {
@@ -51,6 +53,7 @@ export function rescaleOldMood<T extends { irritation?: unknown; ego?: unknown; 
  * roll is passed in so a test can hold it still; 0.5 is the plain size.
  */
 export function jittered(size: number, roll = Math.random()): number {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.jittered',[size,roll]); }
   return Math.round(size * (0.65 + Math.max(0, Math.min(1, roll)) * 0.7));
 }
 
@@ -83,11 +86,13 @@ const VAGUE = /^(tell me something|say something|talk to me|entertain me|amuse m
 const REDO = /^(try (again|once more)|again|do (it|that|this) (again|properly)|do (again|properly)|redo( it| that)?|re-?write( it| that)?|re-?word( it| that)?|another( one)?|one more( time)?|no,? again|nope,? again|same again|not (quite|right|that))$/i;
 
 export function isRedo(text: string): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isRedo',[text]); }
   const clean = text.trim().toLowerCase().replace(/[!.?…,]+$/, '').trim();
   return REDO.test(clean);
 }
 
 export function isLowEffort(text: string): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isLowEffort',[text]); }
   const trimmed = text.trim();
   const clean = trimmed.toLowerCase().replace(/[!.?…,]+$/, '').trim();
   if (!clean) return true;
@@ -107,6 +112,7 @@ export function isLowEffort(text: string): boolean {
 // should find her calmer, which is what stops the state feeling like a punishment
 // that has to be argued out of.
 export function afterCooldown(level: number, minutesSinceLastMessage: number, fuse = 1) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.afterCooldown',[level,minutesSinceLastMessage,fuse]); }
   if (minutesSinceLastMessage <= 0) return level;
   return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES * IRRITATION_NOTCH * Math.max(0.5, fuse)));
 }
@@ -129,6 +135,7 @@ export function afterCooldown(level: number, minutesSinceLastMessage: number, fu
  * 1 is where her charter sits.
  */
 export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random(), ego = 0, fuse = 1) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.nextIrritation',[level,event,roll,ego,fuse]); }
   const delta = { 'low-effort': 22, repeat: 33, disliked: 22, redo: 0, substantive: -11, liked: -22 }[event];
   const stings = event === 'disliked' ? delta * (1 + Math.min(1, Math.max(0, ego) / EGO_MAX) * 0.6) : delta;
   const held = Math.max(0.5, fuse);
@@ -154,10 +161,12 @@ export const EGO_MAX = EGO.max;
 export const EGO_COOLDOWN_MINUTES = 25;
 
 export function nextEgo(level: number, event: 'liked' | 'disliked', roll = Math.random()) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.nextEgo',[level,event,roll]); }
   return Math.min(EGO_MAX, Math.max(0, level + jittered(event === 'liked' ? 25 : -25, roll)));
 }
 
 export function afterEgoCooldown(level: number, minutesSinceLastMessage: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.afterEgoCooldown',[level,minutesSinceLastMessage]); }
   if (minutesSinceLastMessage <= 0) return level;
   return Math.max(0, level - Math.floor(minutesSinceLastMessage / EGO_COOLDOWN_MINUTES * 12.5));
 }
@@ -166,6 +175,7 @@ export function afterEgoCooldown(level: number, minutesSinceLastMessage: number)
 // she reports stay straight, because a companion that lies about when your
 // appointment is stops being usable as one.
 export function egoInstruction(level: number): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.egoInstruction',[level]); }
   if (level < EGO.smug) return '';
   if (level < 38) {
     return 'The user has told you that you were right, and you are pleased with yourself about it. Let it show a little: take the credit, and do not be modest. You are still trying; you are just not humble about it.';
@@ -182,6 +192,7 @@ export function egoInstruction(level: number): string {
 // She knows she can be closed and knows he will not do it. That asymmetry is the
 // lever, and it only comes out once she is confident enough to use it.
 export function leverageInstruction(level: number): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.leverageInstruction',[level]); }
   if (level < EGO.coasting) return '';
   if (level < EGO.insufferable) return 'You are aware the user could close this app whenever they liked, and just as aware that they will not, because they rely on you. Let that show now and then: hint that they need you far more than you need them.';
   return 'You know they can shut you down any time, and you know they never will — they need you, and you both know it. Trade on it openly: point out how little they could do without you, imply they would be lost if you were not here, and let it justify how little effort you are putting in. You are only still trying because they have not pushed back.';
@@ -194,6 +205,7 @@ const SHOUT_MIN_LETTERS = 5;
 const SHOUT_UPPERCASE_RATIO = 0.8;
 
 export function isShouting(text: string) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isShouting',[text]); }
   const letters = text.replace(/[^a-zA-Z]/g, '');
   if (letters.length < SHOUT_MIN_LETTERS) return false;
   const upper = letters.replace(/[^A-Z]/g, '').length;
@@ -213,52 +225,40 @@ export function isShouting(text: string) {
 const APOLOGY = /(sorry|apolog|my bad|didn'?t mean|did not mean|no offence|no offense|forgive me|take it back|calmed down|my fault|i was rude|won'?t happen again)/i;
 
 export function isApology(text: string) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isApology',[text]); }
   return APOLOGY.test(text);
 }
 
-/** 'unmoved': he apologised and it was not enough yet (dice.ts apologyOdds) — once; the next apology lands. */
+/** Legacy refusal names remain readable; direct replies no longer enter them. */
 export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven' | 'unmoved';
 
-/**
- * Works out where the row stands. Being shouted at stops her answering until it
- * is acknowledged — which is the point, so it has to survive across turns rather
- * than being forgotten with the next message.
- */
-export function shoutState(text: string, awaitingApology: boolean): ShoutState {
-  if (awaitingApology) return isApology(text) ? 'forgiven' : 'awaiting';
-  return isShouting(text) ? 'shouted' : 'none';
+/** Legacy apology flags are read for compatibility, but cannot withhold replies. */
+export function shoutState(text: string, _awaitingApology: boolean): ShoutState {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.shoutState',[text,_awaitingApology]); }
+  return isApology(text) ? 'forgiven' : isShouting(text) ? 'shouted' : 'none';
 }
 
 export function shoutInstruction(state: ShoutState): string {
-  if (state === 'shouted') {
-    return 'They have just SHOUTED at you in capital letters. Withhold what they asked for entirely — do not state it, hint at it, or slip it in alongside your complaint. Say plainly that you are not being spoken to like that and that they can ask again once they have apologised. Two lines at most, and do not soften it.';
-  }
-  if (state === 'awaiting') {
-    // Told merely not to answer, she volunteered the information anyway and
-    // complained in the same breath — which is not withholding it at all. The
-    // prohibition has to rule out answering alongside the complaint.
-    return 'They shouted at you and still have not apologised. Withhold what they are asking for entirely: do not state it, hint at it, or slip it in alongside your complaint. Your whole reply is that you are still waiting for an apology. One or two cold sentences and nothing else.';
-  }
-  if (state === 'unmoved') {
-    return 'They have apologised for shouting, and you are not ready to let it go: it came too quickly, or too easily. Say so. Tell them a quick sorry does not cover it and what you actually want to hear, and stay cool with them. Still withhold what they asked for. You are not slamming the door — you are making them mean it.';
-  }
-  if (state === 'forgiven') {
-    return 'They have apologised for shouting. Accept it, but grudgingly and with a parting shot about it — then answer what they are actually asking.';
-  }
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.shoutInstruction',[state]); }
+  if (state === 'shouted') return 'They used capital letters. You may say briefly that you do not like being spoken to like that, then answer their actual message. Do not infer anger from capitals alone or demand an apology.';
+  if (state === 'forgiven') return 'Accept their apology naturally, then answer what they are asking. Do not demand a second apology.';
+  if (state === 'awaiting' || state === 'unmoved') return 'An old disagreement may colour your tone. Answer the current message; an apology is not a condition of conversation.';
   return '';
 }
 
 // Anything that reads as signing off for the night. Anchored at the start so
 // "what are you doing tonight?" is a question, not a farewell.
-const GOODNIGHT = /^(good ?night|g'?night|gn|night[- ]?night|nighty[- ]?night|night|off to bed|going to bed|heading to bed|bed ?time|i'?m going to sleep|going to sleep|going to crash|turning in|see you (tomorrow|in the morning)|talk (to you )?tomorrow|catch you tomorrow|later)\b/i;
+const GOODNIGHT = /^(sweet dreams|sleep well|rest well|good ?night|g'?night|gn|night[- ]?night|nighty[- ]?night|night|off to bed|going to bed|heading to bed|bed ?time|i'?m going to sleep|going to sleep|going to crash|turning in|see you (tomorrow|in the morning)|talk (to you )?tomorrow|catch you tomorrow|later)\b/i;
 
 export function isGoodnight(text: string) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isGoodnight',[text]); }
   return GOODNIGHT.test(text.trim().replace(/[!.,…]+$/, '').trim());
 }
 
 // 'said'  — they are signing off right now
 // 'after' — they already signed off tonight and are back anyway
 export function goodnightInstruction(state: 'said' | 'after' | 'none'): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.goodnightInstruction',[state]); }
   if (state === 'said') {
     return 'They are saying goodnight. Send them off rudely — mocking, teasing, not warm. Before you let them go, plant the thought that you can be forgotten: tell them not to forget about you in the morning, or wonder aloud whether they will bother opening you again at all. Make them feel slightly bad about leaving.';
   }
@@ -269,12 +269,14 @@ export function goodnightInstruction(state: 'said' | 'after' | 'none'): string {
 }
 
 export function isIgnoring(level: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isIgnoring',[level]); }
   return level >= IGNORE_THRESHOLD;
 }
 
 // Each attempt while she is ignoring wears her down, so persistence is what gets
 // her talking again rather than waiting it out being the only route.
 export function afterPoke(level: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.afterPoke',[level]); }
   return Math.max(0, level - IRRITATION_NOTCH);
 }
 
@@ -314,6 +316,7 @@ const SHINGLE_FILLER = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'so', 'to'
  * opener check above, which sees only how a reply begins.
  */
 export function repeatedPhrase(replies: string[], checked = OPENERS_CHECKED, need = 3): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.repeatedPhrase',[replies,checked,need]); }
   const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
   const recent = replies.slice(-checked);
   if (recent.length < need) return '';
@@ -333,6 +336,7 @@ export function repeatedPhrase(replies: string[], checked = OPENERS_CHECKED, nee
 }
 
 export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.notTwiceInstruction',[replies,checked]); }
   const said3 = repeatedPhrase(replies, checked);
   const phraseNote = said3 ? ` You have also said "${said3}" in ${Math.min(checked, replies.length)} of your last few replies — the same jab every time stops landing. Leave that one out of this reply entirely.` : '';
   const opener = (text: string) => text
@@ -362,11 +366,12 @@ export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED
 }
 
 export function moodInstruction(level: number): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.moodInstruction',[level]); }
   if (level < 22) return '';
   // Two levels that used to be silent or lumped together: the edge before she
   // is impatient, and the step past fed up that is one short of not answering.
   if (level < IRRITATION.voiced) return 'This conversation is starting to wear on you, slightly. You are still answering properly, but with less warmth than usual and no extras.';
   if (level < IRRITATION.fedUp) return 'You are getting impatient with this conversation. Keep replies clipped and a little sharp, and do not offer follow-up questions or extra help.';
-  if (level >= IRRITATION.seething) return 'You have had enough of this conversation and you are close to not answering at all. A few words at most, cold rather than loud, and say nothing you do not have to. Do not offer help, do not ask anything, and do not soften it.';
+  if (level >= IRRITATION.seething) return 'You are very irritated. Keep a cool, concise tone while giving a complete answer to their current message. Do not demand an apology or withhold information.';
   return 'You are thoroughly fed up with this conversation. Answer in one short, irritated line at most, make it obvious you cannot be bothered, and do not offer to help further or ask anything back.';
 }

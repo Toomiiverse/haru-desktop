@@ -48,7 +48,10 @@
 const fs = require('fs');
 const { readSelfSnapshot, describeMyself, SETTINGS } = require('../dist-electron/self.js');
 
-const live = JSON.parse(fs.readFileSync('/home/toomii/.config/haru-desktop/config.json', 'utf8'));
+const currentDb = new (require('/home/toomii/haru-core/node_modules/better-sqlite3'))('/home/toomii/haru-core/data/haru-core.db', { readonly: true, fileMustExist: true });
+const primary = currentDb.prepare("SELECT 1 FROM sqlite_master WHERE name='authority_head'").get() && currentDb.prepare('SELECT 1 FROM authority_head').get();
+const live = primary ? JSON.parse(currentDb.prepare("SELECT body FROM authority_documents WHERE name='config'").get().body) : JSON.parse(fs.readFileSync('/home/toomii/.config/haru-desktop/config.json', 'utf8'));
+currentDb.close();
 const ai = live.ai.config, character = live.character;
 const clone = o => JSON.parse(JSON.stringify(o));
 const gp = (o, p) => p.split('.').reduce((v, k) => (v == null ? undefined : v[k]), o);

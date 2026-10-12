@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Her name, said to get her attention — and what she says back.
 //
 // The phone's ears are Whisper on this machine, so the wake phrase is checked
@@ -11,6 +12,7 @@ import type { EmotionName } from './emotion';
 export const WAKE_PATTERN = /^[\s"'“”.,!?-]*(?:(?:hey|hi|hay|ok|okay|yo|oi|hello|hiya)[,\s]+)?(?:haru|haroo|harew|harue|halu|hallu|hulu|harry|hara)\b[\s,.!?:;"'“”-]*([\s\S]*)$/i;
 
 export function wakePhraseIn(text: string): { woke: boolean; rest: string } {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('wake.wakePhraseIn',[text]);}
   const said = (text ?? '').trim();
   const m = said.match(WAKE_PATTERN);
   return m ? { woke: true, rest: (m[1] ?? '').trim() } : { woke: false, rest: said };
@@ -34,8 +36,9 @@ export const WAKE_ACKS: { line: string; emotion: EmotionName }[] = [
 ];
 
 export function wakeAck(random: () => number = Math.random): { line: string; emotion: EmotionName } {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('wake.wakeAck',[random()]);}
   return WAKE_ACKS[Math.min(WAKE_ACKS.length - 1, Math.floor(random() * WAKE_ACKS.length))];
 }
 
-/** Read just before their message when they spoke over her: she was cut off, and knows it. */
-export const INTERRUPTED_ASIDE = 'They cut you off: you were still speaking when they said this, and you did not get to finish. React to that as you would, then deal with what they said.';
+/** An audio interruption is a turn boundary, not evidence of disrespect. */
+export const INTERRUPTED_ASIDE = 'They started speaking during your reply. Treat this as ordinary conversational turn-taking. Keep the same warmth, mood and speaking style unless their actual words call for a change. Requests to wait or finish speaking, clarifications and corrections are normal; acknowledge them plainly without a defensive preface or a new irritated delivery. Answer what they just said directly, continuing the topic when appropriate. Do not scold, guilt them, become curt, or comment on being interrupted. A report that you sounded annoyed is feedback on delivery, not a claim about your feelings. Acknowledge how it sounded to them; never deny annoyance or dismiss it as your normal voice. Do not assume they heard the unfinished part of your reply.';

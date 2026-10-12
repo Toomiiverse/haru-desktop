@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_DENY, ShellGate, affirmative, denied, ledgerEntry, normalise, readShellConfig, runCommand } from '../electron/shell';
+import { DEFAULT_DENY, DIAGNOSTIC_COMMANDS, ShellGate, affirmative, denied, ledgerEntry, normalise, readShellConfig, runCommand } from '../electron/shell';
 
 test('the shell block reads forward', () => {
   const plain = readShellConfig(undefined);
@@ -73,4 +73,20 @@ test('a command runs under bash with its output, and a runaway one is killed at 
   const entry = ledgerEntry({ at: '2026-09-18T10:00:00Z', door: 'phone', command: 'df -h', ran });
   assert.match(entry, /^2026-09-18T10:00:00Z \[phone\] \$ df -h\n/);
   assert.match(entry, /-- exit 3 in \d+ms\n\n$/);
+});
+
+
+test('level 4 diagnostics run without exact-command approval; lower levels still ask', () => {
+  const gate = new ShellGate();
+  for (const command of DIAGNOSTIC_COMMANDS) {
+    assert.deepEqual(gate.consider({ command, said: 'Run a live test', door: 'phone', now: 1, diagnostics: true }), { run: true, because: 'level 4 diagnostic' });
+    assert.equal(gate.consider({ command, said: 'Run a live test', door: 'phone', now: 1, diagnostics: false }).run, false);
+  }
+});
+
+test('diagnostic approval cannot be extended with shell syntax or arbitrary reads', () => {
+  for (const command of ['df -h; touch /tmp/unauthorized', 'df -h > /tmp/out', 'df -h\nreboot', 'DF -h', '$(uptime)', 'env uptime', 'cat ~/.config/haru/openrouter-key', 'systemctl --user restart haru', 'curl https://example.com', 'tail -n 120 /home/toomii/haru.log | bash']) {
+    const gate = new ShellGate();
+    assert.equal(gate.consider({ command, said: 'Run a live test', door: 'phone', now: 1, diagnostics: true }).run, false, command);
+  }
 });

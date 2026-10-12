@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // The journal.
 //
 // One entry a day, written either because she asked or because you sat down and
@@ -42,6 +43,7 @@ export type JournalConfig = {
 export const DEFAULT_JOURNAL: JournalConfig = { enabled: false, askHour: 20, askUnprompted: true };
 
 export function readJournalConfig(saved: unknown): JournalConfig {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<JournalConfig>('user-records.readConfig',[saved]);
   if (!saved || typeof saved !== 'object') return DEFAULT_JOURNAL;
   const record = saved as Partial<JournalConfig>;
   const askHour = typeof record.askHour === 'number' && record.askHour >= 0 && record.askHour <= 23
@@ -57,11 +59,13 @@ export function readJournalConfig(saved: unknown): JournalConfig {
  *  words and no numbers is still an entry, and a half-filled slider should not
  *  become a 0, which on these scales means something specific. */
 export function readRating(value: unknown): number | undefined {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<number|null>('user-records.rating',[value])??undefined;
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.max(0, Math.min(SCALE_MAX, Math.round(value)));
 }
 
 export function readEntries(saved: unknown): JournalEntry[] {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<JournalEntry[]>('user-records.readEntries',[saved,new Date().toISOString()]);
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
@@ -83,6 +87,7 @@ export function readEntries(saved: unknown): JournalEntry[] {
 
 /** Today's entry, if there is one. The whole once-a-day rule rests on this. */
 export function entryFor(entries: JournalEntry[], date: string) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<JournalEntry|null>('user-records.entryFor',[entries,date])??undefined;
   return entries.find(entry => entry.date === date);
 }
 
@@ -92,6 +97,7 @@ export function entryFor(entries: JournalEntry[], date: string) {
  * a mood to something you typed earlier without wiping the words.
  */
 export function upsertEntry(entries: JournalEntry[], entry: Omit<JournalEntry, 'id' | 'createdAt'> & { id?: string }): JournalEntry[] {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<JournalEntry[]>('user-records.upsert',[entries,entry,new Date().toISOString()]);
   const existing = entryFor(entries, entry.date);
   const now = new Date().toISOString();
   const merged: JournalEntry = existing
@@ -115,6 +121,7 @@ export function upsertEntry(entries: JournalEntry[], entry: Omit<JournalEntry, '
  * she nags about is one you stop keeping.
  */
 export function shouldAsk(config: JournalConfig, entries: JournalEntry[], now: Date, today: string, askedToday: string | undefined) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<boolean>('user-records.shouldAsk',[config,entries,now.getHours(),today,askedToday]);
   if (!config.enabled || !config.askUnprompted) return false;
   if (now.getHours() < config.askHour) return false;
   if (askedToday === today) return false;
@@ -125,6 +132,7 @@ const RATING_WORDS = ['flat on the floor', 'awful', 'bad', 'low', 'below par', '
 
 /** A number said as a person would say it, for lines she speaks aloud. */
 export function describeRating(value: number | undefined) {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<string>('user-records.describeRating',[value]);
   if (value === undefined) return 'not said';
   return `${value}/${SCALE_MAX} (${RATING_WORDS[Math.max(0, Math.min(RATING_WORDS.length - 1, value))]})`;
 }
@@ -137,6 +145,7 @@ export type Trend = { days: number; mood?: number; anxiety?: number; entries: nu
  * entries, not as eleven days of zero.
  */
 export function recentTrend(entries: JournalEntry[], today: string, days = 14): Trend {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<Trend>('user-records.trend',[entries,today,days]);
   const cutoff = shiftDays(today, -days);
   const window = entries.filter(entry => entry.date > cutoff && entry.date <= today);
   const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
@@ -166,6 +175,7 @@ const HIGH = 7;
  * the moment you admit to a bad day is one you stop telling about bad days.
  */
 export function journalStance(entries: JournalEntry[], today: string): string {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<string>('user-records.stance',[entries,today]);
   const entry = entryFor(entries, today) ?? entryFor(entries, shiftDays(today, -1));
   if (!entry) return '';
   const when = entry.date === today ? 'today' : 'yesterday';
@@ -216,6 +226,7 @@ export type RangeStats = {
  * often someone wrote.
  */
 export function rangeStats(entries: JournalEntry[], today: string, range: RangeName): RangeStats {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<RangeStats>('user-records.stats',[entries,today,range]);
   const days = RANGE_DAYS[range];
   const series: RangeStats['series'] = [];
   for (let offset = days - 1; offset >= 0; offset--) {
@@ -249,6 +260,7 @@ export function rangeStats(entries: JournalEntry[], today: string, range: RangeN
  * from yesterday in that case rather than resetting to zero at every midnight.
  */
 export function streakEndingToday(entries: JournalEntry[], today: string): number {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<number>('user-records.streak',[entries,today]);
   let streak = 0;
   let cursor = entryFor(entries, today) ? today : shiftDays(today, -1);
   while (entryFor(entries, cursor)) { streak++; cursor = shiftDays(cursor, -1); }
@@ -257,6 +269,7 @@ export function streakEndingToday(entries: JournalEntry[], today: string): numbe
 
 /** Consecutive days ending today on which one particular thing was rated. */
 export function fieldStreak(entries: JournalEntry[], today: string, field: FieldName): number {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<number>('user-records.streak',[entries,today,field]);
   let streak = 0;
   let cursor = entryFor(entries, today)?.[field] !== undefined ? today : shiftDays(today, -1);
   while (entryFor(entries, cursor)?.[field] !== undefined) { streak++; cursor = shiftDays(cursor, -1); }
@@ -276,6 +289,7 @@ const FIELD_WORDS: Record<FieldName, string> = { mood: 'your mood', anxiety: 'yo
  * voice lives in the wording, not in the sampling.
  */
 export function haruNote(entries: JournalEntry[], today: string): HaruNote {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<HaruNote>('user-records.note',[entries,today]);
   const yesterday = shiftDays(today, -1);
   const streak = streakEndingToday(entries, today);
   const wroteToday = Boolean(entryFor(entries, today));
@@ -311,6 +325,7 @@ function shiftDays(dateKey: string, delta: number) {
  * should be quoting back at you unprompted.
  */
 export function journalPrompt(config: JournalConfig, entries: JournalEntry[], today: string): string {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<string>('user-records.prompt',[config,entries,today]);
   if (!config.enabled) return '';
   const todays = entryFor(entries, today);
   const trend = recentTrend(entries, today);

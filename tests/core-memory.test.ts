@@ -3,18 +3,20 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { captureCorePromptComparison, parseCoreMemoryResponse, readCoreMemory, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims, type CoreMemoryResponse } from '../electron/core-memory';
+import { captureCorePromptComparison, parseCoreMemoryResponse, prepareCoreMemory, readCoreMemory, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims, type CoreMemoryResponse } from '../electron/core-memory';
 import { defaultMemoryBlocks as defaultBlocks, formatMemoryBlocks, type BlockSources, type DerivedMemoryBlocks } from '../electron/blocks';
 import { chatDynamicContext, chatSystemPrompt, type PromptState } from '../electron/prompt';
 import { readSearchConfig } from '../electron/search';
 import { emptyGraph, linkedFacts, linkedNote } from '../electron/factgraph';
 
+const revision = 'a'.repeat(64);
+const sourceRevision = () => revision;
 const slate = '2026-09-21T00:00:00.000Z';
 const derived: DerivedMemoryBlocks = {
   human: { value: '- CORE HUMAN', memoryIds: ['plan'] }, preferences: { value: '- CORE TEA', memoryIds: [] },
   relationship: { value: '- CORE EMMA', memoryIds: [] }, shared_history: { value: '- CORE JOKE', memoryIds: [] },
 };
-const response: CoreMemoryResponse = { protocol: 1, epochId: 'epoch', slateAt: slate, retrieval: 'semantic', blocks: derived };
+const response: CoreMemoryResponse = { protocol: 1, epochId: 'epoch', slateAt: slate, retrieval: 'semantic', sourceRevision: revision, blocks: derived };
 const sources: BlockSources = {
   character: { identity: 'IDENTITY', style: 'STYLE' }, profile: { nickname: 'OLD HUMAN', occupation: '', about: '' },
   memories: [], sessions: [{ day: '2026-09-20', summary: 'UNCHANGED WORKING STATE', createdAt: slate }],
@@ -23,11 +25,21 @@ const sources: BlockSources = {
 const render = (replacement?: DerivedMemoryBlocks) => formatMemoryBlocks(defaultBlocks(), sources, { compact: true, omit: ['persona'], derived: replacement }).text;
 const config = readCoreMemoryConfig({ HARU_CORE_MEMORY: 'shadow' });
 
+test('service preparation validates memory revision and auxiliary vector payloads', async () => {
+  const request = { protocol: 1 as const, query: 'tea', now: slate, expectedSlateAt: slate, expectedSourceRevision: revision };
+  const send = async () => ({ memory: response, auxiliaryVectors: { raw: [1, 0] }, metrics: { cacheHits: 0 } });
+  const prepared = await prepareCoreMemory(config, request, [{ id: 'raw', text: 'tea' }], 'nomic-embed-text', send);
+  assert.deepEqual(prepared.memory, response); assert.deepEqual(prepared.vectors.raw, [1, 0]);
+  await assert.rejects(prepareCoreMemory(config, {...request, expectedSourceRevision: 'b'.repeat(64)}, [], 'nomic-embed-text', send), /invalid_response/);
+  await assert.rejects(prepareCoreMemory(config, request, [{id:'missing',text:'tea'}], 'nomic-embed-text', send), /invalid_response/);
+  await assert.rejects(prepareCoreMemory(config, request, [{id:'raw',text:'tea'}], 'nomic-embed-text', async()=>({memory:response,auxiliaryVectors:{raw:[NaN]}})), /invalid_response/);
+});
+
 test('background shadow never waits for Core, bounds concurrency and cannot select its result', async () => {
   let release!: (value: CoreMemoryResponse) => void;
   let reads = 0;
   const waiting = new Promise<CoreMemoryResponse>(resolve => { release = resolve; });
-  const options = { config, query: 'tea', slateAt: () => slate, render, background: true,
+  const options = { config, query: 'tea', sourceRevision, slateAt: () => slate, render, background: true,
     read: () => { reads++; return waiting; } };
   const selected = await selectCoreMemory(options);
   assert.equal(selected.profile, render());
@@ -44,7 +56,7 @@ test('background shadow never waits for Core, bounds concurrency and cannot sele
 test('off never starts the bridge; shadow compares and on selects Core', async () => {
   let reads = 0;
   const read = async () => { reads++; return response; };
-  const run = (mode: 'off' | 'shadow' | 'on') => selectCoreMemory({ config: { ...config, mode }, query: 'tea', slateAt: () => slate, render, read });
+  const run = (mode: 'off' | 'shadow' | 'on') => selectCoreMemory({ config: { ...config, mode }, query: 'tea', sourceRevision, slateAt: () => slate, render, read });
   const off = await run('off');
   assert.equal(reads, 0); assert.equal(off.profile, render());
   const shadow = await run('shadow');
@@ -59,7 +71,7 @@ test('process errors and resets fall back; diagnostics contain no raw memories',
     read: async () => { throw new Error('PRIVATE ERROR'); }, log: entry => entries.push(entry) });
   assert.equal(fallback.status, 'fallback'); assert.equal(fallback.profile, render());
   let current = slate;
-  const reset = await selectCoreMemory({ config: { ...config, mode: 'on' }, query: '', slateAt: () => current, render,
+  const reset = await selectCoreMemory({ config: { ...config, mode: 'on' }, query: '', sourceRevision, slateAt: () => current, render,
     fallbackRender: () => 'FRESH AFTER RESET', read: async () => { current = '2026-09-22T00:00:00Z'; return response; } });
   assert.equal(reset.profile, 'FRESH AFTER RESET'); assert.equal(reset.status, 'fallback');
   await selectCoreMemory({ config, query: 'PRIVATE QUERY', slateAt: () => slate, render, read: async () => response, log: entry => entries.push(entry) });
@@ -162,6 +174,50 @@ test('a full Emma prompt suppresses covered graph facts only after her complete 
 test('custom block reordering fails back instead of duplicating a plan', async () => {
   const reordered = defaultBlocks().sort((a, b) => Number(b.label === 'current_project') - Number(a.label === 'current_project'));
   const renderReordered = (replacement?: DerivedMemoryBlocks) => formatMemoryBlocks(reordered, sources, { compact: true, derived: replacement }).text;
-  const result = await selectCoreMemory({ config: { ...config, mode: 'on' }, query: 'plan', slateAt: () => slate, render: renderReordered, read: async () => response });
+  const result = await selectCoreMemory({ config: { ...config, mode: 'on' }, query: 'plan', sourceRevision, slateAt: () => slate, render: renderReordered, read: async () => response });
   assert.equal(result.status, 'fallback'); assert.equal(result.profile, renderReordered());
+});
+
+test('active selection requires a matching source revision and forwards the newest message', async () => {
+  let reads = 0;
+  const on = { ...config, mode: 'on' as const };
+  const common = { config: on, query: 'old topic and new topic', latest: 'new topic', slateAt: () => slate, render,
+    read: async (_cfg: unknown, request: { latest?: string; expectedSourceRevision?: string }) => {
+      reads++; assert.equal(request.latest, 'new topic'); assert.equal(request.expectedSourceRevision, revision); return response;
+    } };
+  assert.equal((await selectCoreMemory(common)).status, 'fallback'); assert.equal(reads, 0);
+  assert.equal((await selectCoreMemory({ ...common, sourceRevision })).status, 'on');
+  assert.equal((await selectCoreMemory({ ...common, sourceRevision, read: async () => ({ ...response, sourceRevision: 'b'.repeat(64) }) })).status, 'fallback');
+});
+
+test('source edit while awaiting Core uses a newly rendered desktop fallback', async () => {
+  let current = revision;
+  const entries: object[] = [];
+  const selected = await selectCoreMemory({ config: { ...config, mode: 'on' }, query: 'cat', slateAt: () => slate,
+    sourceRevision: () => current, render, fallbackRender: () => 'FRESH CORRECTED MEMORY',
+    read: async () => { current = 'b'.repeat(64); return response; }, log: value => entries.push(value) });
+  assert.equal(selected.status, 'fallback'); assert.equal(selected.profile, 'FRESH CORRECTED MEMORY');
+  assert.match(JSON.stringify(entries), /desktop_source_changed/); assert.doesNotMatch(JSON.stringify(entries), /CORRECTED|CORE HUMAN/);
+});
+
+test('response parsing rejects a missing or mismatching source revision', () => {
+  const request = { protocol: 1 as const, expectedSlateAt: slate, expectedSourceRevision: revision, query: '', now: slate };
+  for (const value of [undefined, 'b'.repeat(64)]) assert.throws(() => parseCoreMemoryResponse(JSON.stringify({ ...response, sourceRevision: value }), request), /invalid_response/);
+  assert.deepEqual(parseCoreMemoryResponse(JSON.stringify(response), request), response);
+});
+
+test('bridge diagnostics expose fixed stages and failure codes without child contents', async () => {
+  const { coreBridgeDiagnostics } = await import('../electron/core-memory');
+  const diagnostic = coreBridgeDiagnostics([
+    'private path and conversation',
+    JSON.stringify({coreTiming:{stage:'opened',elapsedMs:12,query:'private query'}}),
+    JSON.stringify({coreTiming:{stage:'private stage',elapsedMs:13}}),
+    JSON.stringify({coreTiming:{stage:'rendered',elapsedMs:'private'}}),
+    JSON.stringify({error:'private error'}),
+    JSON.stringify({error:'source_revision_mismatch'}),
+  ].join('\n'));
+  assert.deepEqual(diagnostic,{reason:'source_revision_mismatch',stages:[{stage:'opened',elapsedMs:12}]});
+  assert.doesNotMatch(JSON.stringify(diagnostic),/private/);
+  assert.equal(coreBridgeDiagnostics('',true).reason,'bridge_timeout');
+  assert.equal(coreBridgeDiagnostics('',false).reason,'bridge_failed');
 });

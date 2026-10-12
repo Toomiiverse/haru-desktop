@@ -155,6 +155,10 @@ export function deviceFor(access: WebAccess, token: string, now: Date): Device |
 
 /** Pushes the expiry back, so a phone in daily use is never logged out. */
 export function touchDevice(access: WebAccess, id: string, now: Date): WebAccess {
+  const device = access.devices.find(d => d.id === id);
+  if (!device) return access;
+  const seen = Date.parse(device.lastSeen || device.added);
+  if (Number.isFinite(seen) && now.getTime() >= seen && now.getTime() - seen < 60_000) return access;
   return { ...access, devices: access.devices.map(d => (d.id === id ? { ...d, lastSeen: now.toISOString() } : d)) };
 }
 

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // A call: the phone's microphone up, her voice down, for as long as the mic
 // is on. This file is the part every engine shares — which engine is on, and
 // the lines she says while a tool runs. The engines are evibridge.ts (Hume
@@ -7,20 +8,29 @@
 export type CallEngine = 'hume' | 'local';
 
 export type CallConfig = {
+  inputMode?: 'open' | 'addressed';
   engine: CallEngine;
   /** How much quiet ends what they said, on the local engine. Shorter is snappier and cuts pauses. */
   endAfterMs: number;
+  /** Opt-in read-only recognition during endpoint quiet; zero disables it. */
+  prepareAfterMs?: number;
+  /** Opt-in unfinished hold measured from received speech end, not ASR completion. */
+  unfinishedQuietMs?: number;
 };
 
 export const DEFAULT_CALL: CallConfig = { engine: 'hume', endAfterMs: 550 };
 
 export function readCallConfig(saved: unknown): CallConfig {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.readCallConfig',[saved??null]);
   if (!saved || typeof saved !== 'object') return DEFAULT_CALL;
   const record = saved as Partial<CallConfig>;
   const engines: CallEngine[] = ['hume', 'local'];
   return {
     engine: engines.includes(record.engine as CallEngine) ? record.engine as CallEngine : DEFAULT_CALL.engine,
+    ...(record.inputMode === 'addressed' || record.inputMode === 'open' ? {inputMode:record.inputMode} : {}),
     endAfterMs: typeof record.endAfterMs === 'number' && Number.isFinite(record.endAfterMs) ? Math.max(200, Math.min(2000, Math.round(record.endAfterMs))) : DEFAULT_CALL.endAfterMs,
+    ...(typeof record.prepareAfterMs === 'number' && Number.isFinite(record.prepareAfterMs) && record.prepareAfterMs >= 100 ? {prepareAfterMs:Math.min(1000,Math.round(record.prepareAfterMs))} : {}),
+    ...(typeof record.unfinishedQuietMs === 'number' && Number.isFinite(record.unfinishedQuietMs) && record.unfinishedQuietMs >= 700 ? {unfinishedQuietMs:Math.min(2000,Math.round(record.unfinishedQuietMs))} : {}),
   };
 }
 
@@ -36,6 +46,7 @@ export function readCallConfig(saved: unknown): CallConfig {
 const DANGLING = new Set(['and', 'but', 'or', 'so', 'because', 'the', 'a', 'an', 'to', 'in', 'of', 'on', 'at', 'for', 'with', 'about', 'like', 'um', 'uh', 'er', 'if', 'when', 'my', 'your']);
 
 export function looksUnfinished(text: string): boolean {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.looksUnfinished',[text]);
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (/[-–—…,:;]$/.test(trimmed)) return true;
@@ -65,6 +76,7 @@ export const FILLERS = [
 
 /** One of the fillers, not the one said last time. `pick` is 0..1, the caller's randomness. */
 export function pickFiller(pick: number, notThis = ''): string {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.pickFiller',[pick,notThis]);
   const pool = FILLERS.filter(line => line !== notThis);
   const at = Math.min(pool.length - 1, Math.max(0, Math.floor(pick * pool.length)));
   return pool[at];

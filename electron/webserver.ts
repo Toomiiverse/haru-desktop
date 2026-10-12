@@ -1,3 +1,7 @@
+import { CoreServiceClient, coreServiceOptions } from './core-service-client';
+import { assertOutboundSafe } from './outbound';
+import { timingFor } from './turn-timing';
+import {callTelemetry} from './call-telemetry';
 // The door itself: an HTTP server that lets one phone reach one Haru.
 //
 // It runs inside the desktop app rather than beside it. Her memory, her journal
@@ -14,8 +18,9 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import { ChatReceipts, type ChatReceipt } from './chat-receipts';
+import { ChatIntake, intakeFromEnvironment, IntakeFailure, type IntakeTransport, type ChatInput } from './chat-intake';
 import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
@@ -29,14 +34,23 @@ import {
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
 } from './web';
 import { loginPage, appPage, serviceWorker } from './webpage';
+import { callCheckPage, callCheckWorklet, callCheckResults, readCallCheck, saveCallCheck } from './call-check';
+import { ELSEWHERE_FILES } from './elsewhere';
+import { readWorldCommand } from './world';
 import { readPushPrefs, type PushPrefs } from './push';
 import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
 import { readActivityReport, type ActivityReport } from './activity-observation';
+import { validNudgePreference } from './nudge-learning';
+import type { Aside, NudgePreference } from './asides';
 
 export type WebDeps = {
+  durableChat?: IntakeTransport;
+  world?: { get(): unknown; command(command: unknown): unknown };
+  worldWork?: { get(): Promise<unknown>; detail(id:string,before?:number): Promise<unknown> };
+  elsewhereKey?(): string | undefined;
   /** Diagnostic input only; must not reset chat silence or trigger a nudge. */
   attentionInput?(source: string, report: ActivityReport): void;
   readAccess(): WebAccess;
@@ -62,7 +76,7 @@ export type WebDeps = {
    * before the stream ends. The same U+FFFD that clears the text clears the
    * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean; replyTo?: string; quoted?: string; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { signal?:AbortSignal; interrupted?: boolean; call?: boolean; callTrace?:{id:string;turn:number}; replyTo?: string; quoted?: string; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
@@ -88,7 +102,8 @@ export type WebDeps = {
   expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
   /** The day so far, with ids so a reply can be rated, and any rating it already has. */
   /** The day as heard; `poll` marks a page refreshing itself, which is not the page being opened. */
-  history(poll?: boolean): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
+  history(poll?: boolean): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string; nudge?: boolean; nudgeFeedback?: NudgePreference }[];
+  nudgeFeedback?(id: string, choice: NudgePreference | null): Aside | null | Promise<Aside | null>;
   /**
    * What they thought of a reply of hers. A thumb lands on the message the
    * same way the desktop's does — into her prompt, onto her mood — and she
@@ -119,6 +134,7 @@ export type WebDeps = {
   /** The whole records, for the other Haru of hers to merge against. The page
    *  never asks for these — it shows the text and nothing else. */
   memoryRecords(): unknown[];
+  memoryDeletions?(): unknown[];
   /** The last reset, if there was one — carried out to the bodies (blankslate.ts). */
   slate(): { at: string } | null;
   /** Fold that machine's memories into this one's. Vetted on the way in, so
@@ -193,6 +209,10 @@ export type WebDeps = {
   };
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
+  /** Keep a picture on her server, or forget it (main.ts). */
+  keepPicture?(id: string, keep: boolean): boolean;
+  /** A picture she made, if the signature on the link is hers (venice-image.ts). */
+  picture?(id: string, signature: string): { body: Buffer; type: string } | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
   model(): { root: string; entry: string } | null;
   /** How she has been set up on the desktop — her pose, and what she is wearing. */
@@ -205,7 +225,7 @@ export type WebDeps = {
   speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** The same line as a stream the page can play as it arrives — the Hume path,
    *  which generates audio progressively. Null when the engine does not stream. */
-  speakStream?(text: string, emotion?: string | null, options?: { seed?: number }): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
+  speakStream?(text: string, emotion?: string | null, options?: { seed?: number; rawPCM?: boolean; signal?: AbortSignal }): Promise<{ mime: string; body: ReadableStream<Uint8Array>; sampleRate?: number } | null>;
   /** Whether she has agreed to go quiet on the phone (mute.ts). Calls are not
    *  asked: they reach speak() without coming through these routes. */
   quiet?(): boolean;
@@ -250,7 +270,7 @@ export type WebDeps = {
      * voice as raw PCM between an audio_start and its audio_end (the local
      * engine); the Hume engine sends whole sentences as audio_output events.
      */
-    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onAudio(pcm: Uint8Array): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void; herSpeaking?(on: boolean): void }>;
+    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onAudio(pcm: Uint8Array): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void; herSpeaking?(on: boolean): void; manualInput?(enabled:boolean):void; inputHeld?(active:boolean):void }>;
     /**
      * One turn of a call: what Hume heard and how it sounded, answered in her
      * words, streamed. Null when the session is not a call of ours.
@@ -361,6 +381,7 @@ const MAX_FILES = 6;
 
 /** Logins that were not asked to be remembered. Gone when the app closes, deliberately. */
 const sessions = new Map<string, number>();
+const elsewhereRequests = new WeakMap<WebDeps,{busy:boolean;recent:number[]}>();
 const SESSION_MS = 12 * 60 * 60_000;
 
 /** Wrong guesses, kept per address. In memory: a restart is not a reward worth farming. */
@@ -408,7 +429,7 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
     // hostile string that reaches this page has nowhere to send what it finds.
     'Content-Security-Policy': [
       "default-src 'none'",
-      "style-src 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "media-src 'self' blob:",
@@ -490,6 +511,14 @@ function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
 }
 
 export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
+  const transport = deps.durableChat ?? intakeFromEnvironment();
+  const intake = transport ? new ChatIntake(transport, {
+    scope: () => deps.slate()?.at ?? 'none',
+    enabled: () => { const access = deps.readAccess(); return Boolean(access.enabled && access.hash); },
+    say: (text, files) => deps.say(text, files),
+    sayStream: (text, chunk, files, options, sentence) => deps.sayStream(text, chunk, files, options, sentence),
+  }) : undefined;
+  if (intake) durableIntakes.set(deps, intake);
   const server: Server = createServer((req, res) => { void handle(req, res, deps).catch(error => {
     // Named by route, size and caller: "too much" forty-six times in a day
     // said nothing about who was sending what (2026-09-06).
@@ -514,16 +543,22 @@ export function startWebServer(port: number, deps: WebDeps): Promise<{ port: num
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     // Loopback only. This is the line that keeps her off the network.
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', async () => {
       const actual = (server.address() as { port: number }).port;
+      try { await intake?.start(); }
+      catch (error) { durableIntakes.delete(deps); calls.close(); server.close(); reject(error); return; }
       console.log(`[web] listening on 127.0.0.1:${actual} — reachable only through a tunnel`);
       resolve({
         port: actual,
-        stop: () => new Promise<void>(done => {
+        stop: async () => {
           for (const client of calls.clients) client.terminate();
           calls.close();
-          server.close(() => { sessions.clear(); done(); });
-        }),
+          try { await intake?.stop(); }
+          finally {
+            durableIntakes.delete(deps);
+            await new Promise<void>(done => server.close(() => { sessions.clear(); done(); }));
+          }
+        },
       });
     });
   });
@@ -571,6 +606,8 @@ async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer,
  * last, `refused` instead of either when the call could not be placed.
  */
 async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDeps['evi']>) {
+  let callId:string=randomUUID();
+  const telemetry=callTelemetry(value=>console.log('[phone-playback-timing] '+JSON.stringify({callId,...value})));
   const tell = (event: Record<string, unknown>) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event)); };
   let call: Awaited<ReturnType<typeof evi.open>> | null = null;
   let ended = false;
@@ -592,7 +629,7 @@ async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDep
   };
   try {
     call = await evi.open(deviceId, {
-      onEvent: event => { if (!asWholeWav(event)) tell(event); },
+      onEvent: event => { if(typeof event.callId==='string' && /^[a-f0-9-]{36}$/.test(event.callId))callId=event.callId; telemetry.event(event); if (!asWholeWav(event)) tell(event); },
       onAudio: pcm => {
         if (pcmPhone) { if (ws.readyState === ws.OPEN) ws.send(pcm, { binary: true }); }
         else held.push(pcm);
@@ -612,18 +649,21 @@ async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDep
     return;
   }
   const placed = call;
-  tell({ type: 'ready' });
+  tell({ type: 'ready', pushToTalk:!!placed.manualInput && !!placed.inputHeld });
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
       const frame = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
       placed.sendAudio(frame);
       return;
     }
-    let request: { type?: unknown; pcm?: unknown; speaking?: unknown } = {};
+    let request: Record<string,unknown> = {};
     try { request = JSON.parse(String(data)) as typeof request; } catch { return; }
     if (request.type === 'stop') placed.close('the phone hung up');
     else if (request.type === 'hello') pcmPhone = request.pcm === true;
+    else if (request.type === 'input_mode' && typeof request.manual==='boolean') placed.manualInput?.(request.manual);
+    else if (request.type === 'input_gate' && typeof request.active==='boolean') placed.inputHeld?.(request.active);
     else if (request.type === 'her') placed.herSpeaking?.(request.speaking === true);
+    else if (request.type === 'playback_timing') telemetry.receive(request);
   });
   ws.on('close', () => { ended = true; placed.close('the phone went away'); });
   ws.on('error', () => { ended = true; placed.close('the phone\'s socket failed'); });
@@ -710,6 +750,7 @@ function sameSecret(given: string, expected: string): boolean {
 }
 
 const chatReceipts = new WeakMap<WebDeps, ChatReceipts>();
+const durableIntakes = new WeakMap<WebDeps, ChatIntake>();
 function receiptsFor(deps: WebDeps): ChatReceipts {
   let receipts = chatReceipts.get(deps);
   if (!receipts) { receipts = new ChatReceipts(); chatReceipts.set(deps, receipts); }
@@ -717,7 +758,46 @@ function receiptsFor(deps: WebDeps): ChatReceipts {
 }
 const publicReceipt = (entry: ChatReceipt) => ({ state: entry.state, reply: entry.reply, ignored: entry.ignored, error: entry.error });
 
+async function durableChat(req: IncomingMessage, res: ServerResponse, deps: WebDeps, input: ChatInput, requestedId: unknown) {
+  const id = typeof requestedId === 'string' ? requestedId : randomUUID();
+  if (requestedId !== undefined && (typeof requestedId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(id))) return json(res,400,{error:'Invalid request ID.'});
+  const mark = timingFor(id);
+  mark('received',{mode:input.mode});
+  // finish means bytes handed to the server transport, not phone receipt/playback.
+  res.once('finish',() => mark('response_finish',{connected:!res.destroyed}));
+  res.once('close',() => mark('response_close',{connected:res.writableFinished}));
+  const intake = durableIntakes.get(deps)!;
+  const scope = deps.slate()?.at ?? 'none';
+  let admitted;
+  try { admitted = await intake.admit(id,scope,input); mark('admitted',{fresh:admitted.fresh,status:admitted.receipt.state === 'pending' ? 'pending' : admitted.receipt.state === 'done' ? 'ok' : 'error'}); }
+  catch (error) { mark('admission_failed',{status:'error'}); return json(res,error instanceof IntakeFailure ? error.status : 503,{error:'That request could not be confirmed. Keep its request ID when checking delivery.',requestId:id}); }
+  if (input.mode === 'plain') {
+    const receipt = admitted.receipt.state !== 'pending' ? admitted.receipt
+      : admitted.fresh && !admitted.paused ? await intake.wait(id,scope) : null;
+    return json(res,receipt?.state === 'done' ? 200 : receipt?.state === 'error' ? 409 : 202,
+      receipt?.state === 'done' ? {reply:receipt.reply,ignored:receipt.ignored,expression:receipt.expression,emotion:receipt.emotion,requestId:id}
+      : receipt?.state === 'error' ? {error:receipt.error,requestId:id} : {accepted:true,pending:true,requestId:id});
+  }
+  res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive'});
+  let firstText = false;
+  const emit = (value: unknown) => { if (!res.destroyed) {
+    res.write(`data: ${JSON.stringify(value)}\n\n`);
+    if (!firstText && value && typeof value === 'object' && 'text' in value && value.text) { firstText = true; mark('first_text_write',{connected:true}); }
+  } };
+  emit({accepted:true,requestId:id}); res.flushHeaders();
+  const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': waiting\n\n'); },10000); heartbeat.unref();
+  res.once('close',() => clearInterval(heartbeat));
+  try {
+    const receipt = admitted.receipt.state !== 'pending' ? admitted.receipt
+      : admitted.fresh && !admitted.paused ? await intake.wait(id,scope,emit) : null;
+    if (receipt?.state === 'done') emit({done:true,reply:receipt.reply,ignored:receipt.ignored});
+    else if (receipt?.state === 'error') emit({error:receipt.error});
+    else emit({pending:true});
+  } finally { clearInterval(heartbeat); res.end(); }
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) {
+  const receivedAt = Date.now();
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
   const path = url.pathname;
   const now = new Date();
@@ -741,6 +821,31 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       'Cache-Control': 'private, max-age=86400',
     });
     return res.end(picture);
+  }
+
+  // A picture she made, fetched by the phone's notification extension, which
+  // has no cookie to offer. The link carries its own signature instead, and the
+  // signature is checked before anything is read off the disk.
+  if (req.method === 'POST' && /^\/api\/picture\/[0-9a-f-]{36}\/keep$/.test(path)) {
+    const id = path.split('/')[3];
+    let body: unknown;
+    try { body = await readBody(req, 512); } catch { return json(res, 400, { error: 'Bad request.' }); }
+    const keep = (body as { keep?: unknown }).keep !== false;
+    if (!deps.keepPicture?.(id, keep)) return json(res, 404, { error: 'No such picture.' });
+    return json(res, 200, { ok: true, kept: keep });
+  }
+
+  if (req.method === 'GET' && path.startsWith('/api/picture/')) {
+    const id = path.slice('/api/picture/'.length);
+    const found = deps.picture?.(id, url.searchParams.get('k') ?? '');
+    if (!found) return json(res, 404, { error: 'No such picture.' });
+    res.writeHead(200, {
+      'Content-Type': found.type,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=86400',
+    });
+    return res.end(found.body);
   }
 
   // What makes her installable rather than a browser tab: her own window, her
@@ -774,6 +879,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   if (req.method === 'GET' && path === '/sw.js') {
     return send(res, 200, serviceWorker(), 'text/javascript; charset=utf-8');
   }
+
+  // Whether the process behind the door is answering at all. Public, before the
+  // sign-in gate, and loopback-only like everything here: the watchdog on this
+  // machine asks it every half minute, and the fastest way to know she is gone
+  // is for a question she has always answered to stop being answered. It says
+  // nothing a stranger could use — only that something is still home.
+  if (req.method === 'GET' && path === '/api/health') return json(res, 200, { ok: true, at: new Date().toISOString() });
 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
 
@@ -815,14 +927,54 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   if (!me.allowed) {
     // Her model is not served to strangers. It is 28MB of somebody's paid asset
     // and there is no reason for the sign-in page to need it.
-    if (path === '/' ) return send(res, 200, loginPage(), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && (path === '/' || path === '/elsewhere' || path === '/call-check')) return send(res, 200, loginPage(), 'text/html; charset=utf-8');
     return json(res, 401, { error: 'Sign in first.' });
   }
 
   // Seen today, so a phone in daily use never gets logged out.
-  if (me.device) deps.saveAccess(touchDevice(access, me.device.id, now));
+  if (me.device) {
+    const touched = touchDevice(access, me.device.id, now);
+    if (touched !== access) deps.saveAccess(touched);
+  }
 
   if (req.method === 'GET' && path === '/') return send(res, 200, appPage(), 'text/html; charset=utf-8');
+
+  if (req.method === 'GET' && path === '/call-check') return send(res, 200, callCheckPage(), 'text/html; charset=utf-8');
+  if (req.method === 'GET' && path === '/call-check-worklet.js') return send(res, 200, callCheckWorklet(), 'text/javascript; charset=utf-8');
+  if (req.method === 'GET' && path === '/api/call-check/results') return json(res, 200, callCheckResults());
+  if (req.method === 'POST' && path === '/api/call-check/results') {
+    if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return json(res, 415, { error: 'JSON required.' });
+    // A browser submission must originate at this authenticated site.
+    try { if (new URL(req.headers.origin ?? '').host !== req.headers.host) return json(res, 403, { error: 'Same origin required.' }); }
+    catch { return json(res, 403, { error: 'Same origin required.' }); }
+    let body: unknown;
+    try { body = await readBody(req, 8192); } catch { return json(res, 400, { error: 'Invalid result.' }); }
+    const checked = readCallCheck(body);
+    if (!checked) return json(res, 400, { error: 'Invalid result.' });
+    return json(res, 200, { ok: true, at: saveCallCheck(checked).at });
+  }
+
+  if (req.method === 'GET' && (path === '/api/world/work' || path.startsWith('/api/world/work/items/'))) {
+    if (!deps.worldWork) return json(res,503,{error:'Work activity is unavailable.'});
+    try {
+      if (path === '/api/world/work') return json(res,200,await deps.worldWork.get());
+      const id=path.slice('/api/world/work/items/'.length),raw=url.searchParams.get('before');
+      if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id) || raw !== null && (!/^\d{1,16}$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw)<1)) return json(res,400,{error:'Invalid work reference.'});
+      return json(res,200,await deps.worldWork.detail(id,raw === null ? undefined : Number(raw)));
+    } catch { return json(res,503,{error:'Work activity could not be read.'}); }
+  }
+  if ((req.method === 'POST' && ['/api/world/control','/api/elsewhere/dialogue'].includes(path)) || (req.method === 'GET' && path === '/api/world')) return json(res,410,{error:'The fictional simulation is archived. Open the work world.'});
+
+  if (req.method === 'GET' && ELSEWHERE_FILES.has(path)) {
+    if (!deps.worldWork) return json(res,503,{error:'Work activity is unavailable.'});
+    const [relative,type] = ELSEWHERE_FILES.get(path)!;
+    const file = fileAt(filePath.resolve(process.env.HARU_WORLD_ASSET_ROOT || filePath.join(process.cwd(),'elsewhere')),relative);
+    if (!file) return json(res,404,{error:'This neighborhood asset is not installed.'});
+    if (type === 'image/png') return sendFile(res,file,type);
+    // Self-contained on Haru: retain the local styles without requesting Google Fonts.
+    const body = readFileSync(file,'utf8').replace(/^@import url\([^\n]+\);\r?\n/, '');
+    return send(res,200,body,type);
+  }
 
   // The stage's moving parts, all behind the login.
   if (req.method === 'GET' && path === '/api/model') {
@@ -888,6 +1040,50 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 415, { error: 'Send JSON.' });
   }
 
+  // Authenticated fixed proxy. No credential, arbitrary URL, provider choice,
+  // retry, session mutation or outcome decision is exposed to the phone.
+  if ((req.method === 'POST' && path === '/api/roleplay') || (req.method === 'GET' && path === '/characters')) {
+    try {
+      const options = coreServiceOptions();
+      if (!options) return json(res,503,{error:'Character mode is unavailable.'});
+      const client = new CoreServiceClient(options);
+      if (req.method === 'GET') {
+        const reply = await client.roleplayPage();
+        if (!reply.ok) return json(res,reply.status,{error:'Character mode is unavailable.'});
+        return send(res,200,await reply.text(),'text/html; charset=utf-8');
+      }
+      if (req.headers.origin) {
+        try { if (new URL(req.headers.origin).host !== req.headers.host) return json(res,403,{error:'Same origin required.'}); }
+        catch { return json(res,403,{error:'Same origin required.'}); }
+      }
+      let body: any;
+      try { body = await readBody(req,8*1024*1024); } catch { return json(res,400,{error:'Invalid character request.'}); }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res,400,{error:'Invalid character request.'});
+      // Execute the existing outbound validator at this transport boundary.
+      // Core requires this observation; clients cannot assert or bypass it.
+      if (body.op === 'custom-save') {
+        const fields = ['name','description','instructions','background'];
+        if (fields.some(k => typeof body[k] !== 'string')) return json(res,400,{error:'Invalid character profile.'});
+        try { const {avatarData:_avatar,...creator} = body.creator && typeof body.creator==='object' ? body.creator : {}; assertOutboundSafe([...fields.map(k => ({role:'user' as const,content:body[k]})),{role:'user',content:JSON.stringify(creator)}]); }
+        catch { return json(res,403,{error:'This profile cannot be sent to Venice under your privacy rules.'}); }
+      }
+      let privacyDigest = '';
+      if (['send','context-save','context-update','generate','extract','insight-extract','regenerate'].includes(body.op)) {
+        const view = await client.roleplay({...body,op:'privacy-view',targetOp:body.op,actor:createHash('sha256').update(me.source).digest('hex'),privacyChecked:false,privacyDigest:''});
+        const prepared = await view.json().catch(()=>null);
+        if (!view.ok) return json(res,view.status,{error:typeof prepared?.detail==='string'?prepared.detail:'Privacy preview failed.'});
+        if (!Array.isArray(prepared?.messages) || typeof prepared?.digest!=='string') return json(res,503,{error:'Privacy preview is unavailable.'});
+        try { assertOutboundSafe(prepared.messages); }
+        catch { return json(res,403,{error:'This content cannot be sent to Venice under your privacy rules.'}); }
+        privacyDigest = prepared.digest;
+      }
+      const reply = await client.roleplay({...body,actor:createHash('sha256').update(me.source).digest('hex'),privacyDigest,privacyChecked:['send','custom-save','context-save','context-update','generate','extract','insight-extract','regenerate'].includes(body.op)});
+      const result = await reply.json().catch(()=>null);
+      if (!reply.ok) return json(res,reply.status,{error:typeof result?.detail==='string'?result.detail:'Character request failed.'});
+      return json(res,reply.status,result);
+    } catch { return json(res,503,{error:'Character mode is unreachable. Check the existing reply before sending again.'}); }
+  }
+
   if (req.method === 'GET' && path === '/api/chat') {
     return json(res, 200, { messages: deps.history(url.searchParams.get('poll') === '1').slice(-60) });
   }
@@ -909,15 +1105,25 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/chat/receipt') {
+    const intake = durableIntakes.get(deps);
+    if (intake) {
+      const id = url.searchParams.get('id') ?? '';
+      if (!/^[a-zA-Z0-9-]{16,80}$/.test(id)) return json(res,400,{error:'Invalid request ID.'});
+      try {
+        const receipt = await intake.get(id,deps.slate()?.at ?? 'none');
+        return json(res,receipt ? 200 : 404,receipt ?? {state:'unknown'});
+      } catch { return json(res,503,{error:'Delivery status is temporarily unavailable.'}); }
+    }
     const entry = receiptsFor(deps).get(url.searchParams.get('id') ?? '', deps.slate()?.at ?? 'none');
     return json(res, entry ? 200 : 404, entry ? publicReceipt(entry) : { state: 'unknown' });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {
-    const body = await readBody(req) as { text?: unknown; attachments?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown; requestId?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
     if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
+    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'plain'},body.requestId);
     const answer = await deps.say(text, files);
     return json(res, 200, answer);
   }
@@ -942,6 +1148,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
     const requestId = typeof body.requestId === 'string' ? body.requestId : undefined;
     if (body.requestId !== undefined && (!requestId || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId))) return json(res, 400, { error: 'Invalid request ID.' });
+    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'stream',interrupted,...(replyTo ? {replyTo} : {}),...(quoted ? {quoted} : {})},body.requestId);
+    const timingId = requestId ?? `web-${receivedAt}`;
+    console.log(`[web-reply-timing] ${JSON.stringify({ request: timingId, stage: 'received', at: receivedAt })}`);
     let receipt: ChatReceipt | undefined;
     let fresh = true;
     if (requestId) {
@@ -972,16 +1181,36 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     res.once('close', () => clearInterval(heartbeat));
     if (requestId) console.log(`[web-chat] accepted ${requestId}`);
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted, ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion }));
+      let visible = false;
+      const answer = await deps.sayStream(text, chunk => {
+        emit({ text: chunk });
+        if (!visible && chunk && chunk !== '\uFFFD') {
+          visible = true;
+          console.log(`[web-reply-timing] ${JSON.stringify({ request: timingId, stage: 'text_event', elapsedMs: Date.now() - receivedAt, connected: !res.destroyed })}`);
+        }
+      }, files, { interrupted, ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion }));
       if (receipt) Object.assign(receipt, { state: 'done', reply: answer.reply, ignored: Boolean(answer.ignored) });
       if (requestId) console.log(`[web-chat] completed ${requestId} connected=${!res.destroyed}`);
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
+      console.log(`[web-reply-timing] ${JSON.stringify({ request: timingId, stage: 'complete', elapsedMs: Date.now() - receivedAt })}`);
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
       if (receipt) Object.assign(receipt, { state: 'error', error: 'Her reply failed. Check the conversation before sending again.' });
       emit({ error: error instanceof Error ? error.message : String(error) });
     } finally { clearInterval(heartbeat); }
     return res.end();
+  }
+
+  if (req.method === 'POST' && path === '/api/chat/nudge-feedback') {
+    const body = await readBody(req) as { id?: unknown; choice?: unknown } | null;
+    if (!body || typeof body.id !== 'string' || !body.id.trim() || body.id.length > 80 || !validNudgePreference(body.choice)) {
+      return json(res, 400, { error: 'Choose a nudge and valid feedback.' });
+    }
+    let aside: Aside | null | undefined;
+    try { aside = await deps.nudgeFeedback?.(body.id, body.choice); }
+    catch (error) { return json(res, error instanceof Error && error.message === 'core_nudge_state_changed' ? 409 : 503, { error: 'Feedback was not saved. Try again.' }); }
+    if (!aside) return json(res, 404, { error: 'That nudge is no longer available.' });
+    return json(res, 200, { ok: true, id: aside.id, choice: aside.nudgeFeedback ?? null });
   }
 
   // What they thought of a reply. A thumb, a note, or both; the reply is named
@@ -1127,17 +1356,27 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const text = (url.searchParams.get('text') ?? '').trim().slice(0, 2000);
     const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
     if (!text) return json(res, 400, { error: 'Nothing to say.' });
-    const streamed = deps.speakStream ? await deps.speakStream(text, emotion) : null;
+    const streamed = deps.speakStream ? await deps.speakStream(text, emotion, { rawPCM: url.searchParams.get('format') === 'pcm' }) : null;
     if (streamed?.body) {
+      if (res.destroyed) { await streamed.body.cancel(); return; }
       res.writeHead(200, {
         'Content-Type': streamed.mime || 'audio/mpeg',
+        ...(streamed.mime === 'audio/pcm' && streamed.sampleRate ? { 'X-Haru-Sample-Rate': String(streamed.sampleRate) } : {}),
         'Content-Security-Policy': "default-src 'none'",
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'no-store',
       });
+      const reader = streamed.body.getReader();
+      const cancel = () => { void reader.cancel().catch(() => {}); };
+      res.once('close', cancel);
       try {
-        for await (const chunk of streamed.body) res.write(Buffer.from(chunk));
+        while (!res.destroyed) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
       } catch { /* a stalled stream ends the reply, not the connection */ }
+      finally { res.off('close', cancel); reader.releaseLock(); }
       return res.end();
     }
     const clip = await deps.speak(text, emotion);
@@ -1416,7 +1655,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     // The slate travels with the records. A body that sees one newer than its
     // own clears itself to match, which is the only way forgetting crosses a
     // merge that only ever adds and updates — see blankslate.ts.
-    return json(res, 200, { memories: deps.memoryRecords(), slate: deps.slate() });
+    return json(res, 200, { memories: deps.memoryRecords(), deletions: deps.memoryDeletions?.() ?? [], slate: deps.slate() });
   }
 
   // What they were doing, as opposed to what they said about it. Pushed by the
@@ -1463,10 +1702,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/memory/records') {
-    const body = await readBody(req, MAX_SYNC_BODY) as { memories?: unknown };
+    const body = await readBody(req, MAX_SYNC_BODY) as { memories?: unknown; deletions?: unknown };
     if (!Array.isArray(body.memories)) return json(res, 400, { error: 'Send a list of memories.' });
-    const merged = deps.mergeMemories(body.memories);
-    return json(res, 200, { ...merged, memories: deps.memoryRecords() });
+    const merged = deps.mergeMemories(body.deletions === undefined ? body.memories : body);
+    return json(res, 200, { ...merged, memories: deps.memoryRecords(), deletions: deps.memoryDeletions?.() ?? [] });
   }
 
   // Little notes taken while the day happens. Separate from the journal on

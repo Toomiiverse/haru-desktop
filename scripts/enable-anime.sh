@@ -10,6 +10,7 @@
 #
 # Run as toomii:  ~/haru-desktop/scripts/enable-anime.sh
 set -euo pipefail
+python3 "$(dirname -- "$0")/legacy-config-guard.py"
 
 CONFIG="$HOME/.config/haru-desktop/config.json"
 JELLYFIN_DB="/opt/jellyfin/config/data/jellyfin.db"

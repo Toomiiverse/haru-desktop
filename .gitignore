@@ -33,3 +33,7 @@ graphify-out/
 
 # Claude Code worktrees (each with its own node_modules)
 .claude/worktrees/
+
+# Local speech emotion model; install from the pinned model manifest.
+models/
+__pycache__/

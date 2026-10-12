@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Pure date helpers for the main process. Deliberately free of electron imports
 // so the logic can be exercised directly in plain Node.
 
@@ -68,6 +69,7 @@ export function formatTimeOfDay(hour: number, minute: number) {
 // calendar out in the prompt did not fix it — so the chat tool passes the user's
 // own wording through and this resolves it, which is deterministic and testable.
 export function resolveDate(input: string, now: Date): string | null {
+  if(process.env.HARU_CORE_AGENDA_POLICY==='on')return corePolicySync<string|null>('agenda-tool.resolveDate',[input,{year:now.getFullYear(),month:now.getMonth()+1,day:now.getDate()}]);
   const text = input.trim().toLowerCase().replace(/\s+/g, ' ');
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());

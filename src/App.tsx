@@ -3,12 +3,13 @@ import { AsidesPage, JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubb
 import { getProvider, testConnection } from './services/ai';
 import { randomGloat, randomRetort } from './retorts';
 import type { Attachment, KeptItem, Message, ProviderConfig, Reaction } from './types';
+import { WorldPage } from './WorldPage';
 
 const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', content: "Hey! About time you showed up. We’ve got work to do. Move it!" };
 const defaultProviderConfig: ProviderConfig = { provider: 'ollama', model: 'qwen2.5:14b', endpoint: 'http://localhost:11434', temperature: 0.7 };
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null); const [staged, setStaged] = useState<Attachment[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'|'world'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null); const [staged, setStaged] = useState<Attachment[]>([]);
   useEffect(() => { window.haru?.live2d.get().then(model => { if (model) setLive2dModel(model); }); }, []);
   useEffect(() => { window.haru?.settings.get('ai.config').then(saved => { if (saved) setProviderConfig(current => ({ ...current, ...(saved as Partial<ProviderConfig>) })); }); }, []);
   // Kept items are owned by the main process — the chat tool loop writes to them
@@ -58,6 +59,15 @@ export default function App() {
         ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
       ];
     });
+  }), []);
+  // A picture she made, as her own message. The file is already on her server;
+  // what rides the message is the name it is fetched by, so the phone draws it
+  // from the same place the desk does.
+  useEffect(() => window.haru?.chat.onPicture(picture => {
+    setMessages(current => [...current, {
+      id: crypto.randomUUID(), role: 'assistant' as const, content: '', time: 'now', at: new Date().toISOString(),
+      attachments: [{ id: picture.id, kind: 'image' as const, name: picture.name, saved: picture.saved, url: picture.url, bytes: picture.bytes, private: picture.private }],
+    }]);
   }), []);
   // Cut off on a call: her last line becomes what she actually got out, or
   // goes altogether when none of it was said. Matched on the text her brain
@@ -254,6 +264,7 @@ export default function App() {
     {page === 'settings' && <SettingsDrawer config={providerConfig} onSave={saveProviderConfig} onTest={testConnection} onClose={backToChat}/>}
     {page === 'journal' && <JournalDrawer onClose={backToChat}/>}
     {page === 'asides' && <AsidesPage/>}
+    {page === 'world' && <WorldPage onOpenChat={backToChat}/>}
     {/* The whole chat is the drop target, not a strip at the bottom. Aiming at
         a small zone is the part of drag-and-drop people hate, and there is
         nothing else on this page a file could sensibly be dropped onto.

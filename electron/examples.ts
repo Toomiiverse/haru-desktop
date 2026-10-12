@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // How she sounds at her best, shown rather than described.
 //
 // Character cards carry example dialogue for a reason: a model copies the voice
@@ -43,6 +44,8 @@ function cleaned(text: unknown): string {
 
 /** Whether a reply can stand as an example of her voice. */
 export function fitForExample(theirs: string, hers: string): boolean {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.fitForExample',[theirs,hers]);
+
   if (theirs.length < 2 || theirs.length > THEIRS_MAX) return false;
   if (hers.length < 20 || hers.length > HERS_MAX) return false;
   if (/\d/.test(hers)) return false;
@@ -56,6 +59,8 @@ export function fitForExample(theirs: string, hers: string): boolean {
  * see in her history, and nothing from it or later is used.
  */
 export function examplePool(archive: Record<string, ExampleTurn[]>, rewrites: Record<string, { text: string }>, before: string, since = VOICE_SINCE): Example[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.examplePool',[archive,rewrites,before,since]);
+
   const said = new Map<string, number>();
   for (const turns of Object.values(archive)) {
     for (const turn of turns ?? []) if (turn.role === 'assistant') said.set(cleaned(turn.content), (said.get(cleaned(turn.content)) ?? 0) + 1);
@@ -87,6 +92,8 @@ function hash(text: string): number {
 
 /** The day's examples: a shuffle keyed by the date, rewrites first because they were made to be her best. */
 export function pickExamples(pool: Example[], dayKey: string, count = EXAMPLES_PER_DAY): Example[] {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.pickExamples',[pool,dayKey,count]);
+
   const order = (list: Example[]) => [...list].sort((a, b) => hash(`${dayKey}:${a.id}`) - hash(`${dayKey}:${b.id}`));
   const revoiced = order(pool.filter(example => example.kind === 'revoiced'));
   const liked = order(pool.filter(example => example.kind === 'liked'));
@@ -96,12 +103,16 @@ export function pickExamples(pool: Example[], dayKey: string, count = EXAMPLES_P
 }
 
 export function examplesNote(examples: Example[]): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.examplesNote',[examples]);
+
   if (!examples.length) return '';
   return `How you sound at your best — a few old exchanges, for your voice only. What happened in them is over and may no longer be true, and the lines are spent: never reuse one, just sound like this.\n\n${examples.map(example => `Them: ${example.theirs}\nYou: ${example.hers}`).join('\n\n')}`;
 }
 
 /** Whether a reply lifted an example's line: eight words in a row from one of them. */
 export function reusedExample(reply: string, examples: Example[], run = 8): Example | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.reusedExample',[reply,examples,run]);
+
   const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}' ]/gu, ' ').split(/\s+/).filter(Boolean);
   const said = ` ${words(reply).join(' ')} `;
   for (const example of examples) {

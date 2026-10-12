@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Little notes, taken while the day is happening.
 //
 // A journal entry is written at the end of a day, about the day, and by then the
@@ -28,6 +29,7 @@ export type CheckInStore = { entries: CheckIn[] };
 const MAX_CHECKINS = 2000;
 
 export function readCheckIns(saved: unknown): CheckInStore {
+  if(process.env.HARU_CORE_USER_RECORDS==='on'){const count=corePolicySync<number>('user-records.missingIds',[saved]);return corePolicySync<CheckInStore>('user-records.readCheckins',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<CheckInStore>;
   const entries = Array.isArray(record.entries) ? record.entries : [];
   return {
@@ -44,6 +46,7 @@ export function readCheckIns(saved: unknown): CheckInStore {
 }
 
 export function addCheckIn(store: CheckInStore, note: string, anxiety: number | undefined, now: Date, date: string): CheckInStore {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<CheckInStore>('user-records.addCheckin',[store,note,anxiety,now.toISOString(),date,Math.random().toString(36).slice(2,10)]);
   const entry: CheckIn = {
     id: Math.random().toString(36).slice(2, 10),
     date,
@@ -55,6 +58,7 @@ export function addCheckIn(store: CheckInStore, note: string, anxiety: number | 
 }
 
 export function checkInsOn(store: CheckInStore, date: string): CheckIn[] {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<CheckIn[]>('user-records.checkinsOn',[store,date]);
   return store.entries.filter(e => e.date === date).sort((a, b) => a.at.localeCompare(b.at));
 }
 
@@ -84,6 +88,7 @@ const clock = (at: string, timeZone: string) => {
  * morning, anxious at 6", and only one of them is about work.
  */
 export function summariseCheckIns(entries: CheckIn[], timeZone: string): string {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<string>('user-records.summary',[entries,timeZone]);
   if (!entries.length) return '';
   const lines = entries.map(e => `${clock(e.at, timeZone)}${e.anxiety ? ` (anxiety ${e.anxiety}/10)` : ''} — ${e.note}`);
   const rated = entries.filter(e => typeof e.anxiety === 'number').map(e => e.anxiety as number);
@@ -101,6 +106,7 @@ export function summariseCheckIns(entries: CheckIn[], timeZone: string): string 
  * part that actually mattered.
  */
 export function checkInInstruction(entries: CheckIn[], timeZone: string): string {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<string>('user-records.checkinInstruction',[entries,timeZone]);
   if (!entries.length) return '';
   const worst = entries.filter(e => typeof e.anxiety === 'number').sort((a, b) => (b.anxiety ?? 0) - (a.anxiety ?? 0))[0];
   return [

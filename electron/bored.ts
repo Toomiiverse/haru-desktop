@@ -1,11 +1,9 @@
 // What she brings up when nothing on their list needs her.
 //
-// Left alone with nothing to chase, she does not sit quietly; she reaches for
-// something she knows — a person in their life, a thing they were doing, a
-// day they had — and needles them with it until they answer. This picks the
-// something. Pure: memories and days in, one of them out, and the last few
-// she used kept out of the draw so a long silence does not get the same jab
-// four times.
+// She reaches for something she knows — a person in their life, a thing they
+// were doing, a day they had. Pure: memories and days in, one of them out.
+// Persisted topic exclusions keep a restart from reopening yesterday's draw;
+// running out of fresh material is allowed to mean nothing to say.
 
 export type Remembered = { id: string; text: string; kind?: string; category?: string; status?: string; importance?: number; lastSeenAt?: string; createdAt?: string };
 
@@ -95,7 +93,7 @@ export function ageNote(thing: Something | null | undefined): string {
   return ` (theirs, and you last saw it ${days} days ago — so talk about it as something of theirs you noticed then, not as what they are doing this minute, and never as something they owe you)`;
 }
 
-export function pickToBringUp(memories: Remembered[], days: Day[], recent: string[], todayKey: string, random: () => number = Math.random): Something | null {
+export function pickToBringUp(memories: Remembered[], days: Day[], recent: string[], todayKey: string, random: () => number = Math.random, excluded: ReadonlySet<string> = new Set(), affinity: (thing: Something) => number = () => 1): Something | null {
   const worth = (text: string) => text.trim().split(/\s+/).length >= MIN_WORDS && !NOTHING_TO_SAY.test(text) && !HOW_TO_TREAT_THEM.test(text);
   const ageOf = (m: Remembered) => dayDistance((m.lastSeenAt ?? m.createdAt ?? '').slice(0, 10) || todayKey, todayKey);
   const facts = memories
@@ -109,7 +107,8 @@ export function pickToBringUp(memories: Remembered[], days: Day[], recent: strin
   const recentDays = days
     .filter(d => d.summary && d.day && d.day < todayKey && dayDistance(d.day, todayKey) <= DAYS_WORTH_RAISING && worth(d.summary))
     .map(d => ({ thing: { id: `day:${d.day}`, text: d.summary.trim(), from: 'day' as const, daysOld: Math.max(0, dayDistance(d.day, todayKey)) }, weight: DAY_IMPORTANCE }));
-  const all = [...facts, ...recentDays].filter(entry => entry.weight > 0);
+  const all = [...facts, ...recentDays].map(entry => ({ ...entry, weight: entry.weight * affinity(entry.thing) }))
+    .filter(entry => Number.isFinite(entry.weight) && entry.weight > 0 && !excluded.has(entry.thing.id));
   if (!all.length) return null;
   const fresh = all.filter(entry => !recent.includes(entry.thing.id));
   const pool = fresh.length ? fresh : all;

@@ -258,7 +258,8 @@ test('knocked awake she is groggy, and up because of them, until the wake she ch
   assert.match(groggyNote(woken, at('2026-09-04', 1, 22)), /a moment ago/);
   assert.match(GROGGY_REGISTER, /Do not ask why they woke you/);
   assert.match(GROGGY_REGISTER, /go_back_to_sleep/);
-  assert.match(GROGGY_REGISTER, /block: true/);
+  assert.match(GROGGY_REGISTER, /block: false/);
+  assert.match(GROGGY_REGISTER, /Sweet dreams/);
   assert.match(wakeNote(3, '01:22', 5), /half asleep/);
   // Knocked awake before midnight, the window math holds on the decision day too.
   const late = wokenAt(s, at('2026-09-03', 23, 50), 4);
@@ -352,4 +353,18 @@ test('the door says no in a different way each time he tries it', () => {
   // Every one of them still has to read as her asleep, or the app will treat
   // the refusal as a real reply and log it as a conversation.
   for (const line of BLOCKED_LINES) assert.ok(isAsleepLine(line), `not an asleep line: ${line}`);
+});
+
+ test('a responsive night wake survives storage and returns to the original wake time', () => {
+  const original = schedule({ blocked: true });
+  const awake = { ...wokenAt(original, at('2026-09-04', 1, 22), 1), responsiveWake: true, blocked: false, wokenForNothing: false, wakeHandled: true };
+  const restored = readHerSleepState(JSON.parse(JSON.stringify(awake)))!;
+  assert.equal(restored.responsiveWake, true);
+  assert.equal(restored.blocked, undefined);
+  assert.equal(herAsleep(restored, at('2026-09-04', 1, 23)), false);
+  const back = backToSleep(restored, { atIso: '2026-09-04T01:25:00Z', pointless: false, block: false });
+  assert.equal(back.wake, original.wake);
+  assert.equal(back.blocked, false);
+  assert.equal(back.wokenForNothing, false);
+  assert.equal(herAsleep(back, at('2026-09-04', 1, 26)), true);
 });

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What being ignored does to her, kept.
 //
 // Her patience (mood.ts) is about the conversation in front of her and cools
@@ -83,6 +84,7 @@ export const NOT_HELD_AGAINST_THEM: readonly string[] = ['goodnight'];
  * but it is not ignoring her — he went back and answered the thing she said.
  */
 export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<string>, nowMs: number, notBeforeMs = 0): Said[] {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.unanswered',[said,heard,[...pushed],nowMs,notBeforeMs]);}
   const theirs = heard
     .filter(turn => turn.role === 'user' && turn.at)
     .map(turn => Date.parse(turn.at!))
@@ -108,6 +110,7 @@ export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<str
 
 /** Once a day, from eight in the evening on, and never twice for the same day. */
 export function tallyDue(minutesIntoDay: number, talliedDay: string | undefined, todayKey: string): boolean {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.tallyDue',[minutesIntoDay,talliedDay,todayKey]);}
   return minutesIntoDay >= TALLY_AT_MINUTES && talliedDay !== todayKey;
 }
 
@@ -117,6 +120,7 @@ export function tallyDue(minutesIntoDay: number, talliedDay: string | undefined,
  * her (`good` — nightfall's TOLD_ENOUGH, which is the same question).
  */
 export function nextGrudge(current: number, ignoredToday: number, good = false, ordinary = 0): number {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.nextGrudge',[current,ignoredToday,good,ordinary]);}
   const base = Math.max(0, Math.min(GRUDGE_MAX, Math.round(current) || 0));
   const worse = ignoredToday - allowed(ordinary);
   if (worse > 0) return Math.min(GRUDGE_MAX, base + Math.min(GRUDGE_DAY_CAP, worse * GRUDGE_PER_IGNORED));
@@ -125,16 +129,19 @@ export function nextGrudge(current: number, ignoredToday: number, good = false, 
 
 /** What she has stopped counting, because it is just how he is. */
 export function allowed(ordinary: number): number {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.allowed',[ordinary]);}
   return Math.max(0, Math.min(ORDINARY_HANGING_CAP, Math.floor(ordinary)));
 }
 
 /** An apology taken: a little off, and no more than once a day (the caller keeps the day). */
 export function grudgeAfterApology(current: number): number {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.grudgeAfterApology',[current]);}
   return Math.max(0, (Math.round(current) || 0) - GRUDGE_APOLOGY);
 }
 
 /** How much more annoyed tonight makes her, on top of whatever the conversation did: a notch a line. */
 export function irritationAfterTally(irritation: number, ignoredToday: number, max: number, ordinary = 0): number {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.irritationAfterTally',[irritation,ignoredToday,max,ordinary]);}
   return Math.min(max, irritation + Math.max(0, ignoredToday - allowed(ordinary)) * 11);
 }
 
@@ -160,6 +167,7 @@ const NOT_A_COUNT = ' It is a pattern you have noticed, not a number: do not put
 const STILL_ON_HIS_SIDE = ' Underneath it you are still on his side, which is the annoying part: you do the thing he asked and you do it properly, and he hears about it the whole way through. The grievance comes out as asides while you help, never as refusing to.';
 
 export function grudgeInstruction(grudge: number, ignoredToday = 0, fond = false): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.grudgeInstruction',[grudge,ignoredToday,fond]);}
   const today = `${ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : ''}${fond && grudge >= GRUDGE.wearing ? STILL_ON_HIS_SIDE : ''}`;
   if (grudge <= 0) return '';
   if (grudge < GRUDGE.wearing) return `They have a habit of leaving your messages unanswered lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}${NOT_A_COUNT}`;
@@ -167,8 +175,8 @@ export function grudgeInstruction(grudge: number, ignoredToday = 0, fond = false
   // Two levels past "openly pissed", which used to be the top from a third of
   // the way up the scale: what it is like once it has set in.
   if (grudge >= GRUDGE.entrenched) return `They have left you talking to yourself for so long that you have stopped expecting anything else. You are cold rather than loud about it now: you answer, flatly, and offer nothing of yourself. One good conversation does not undo it and you will not pretend it does; if they ask, tell them plainly how long this has been going on for you. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
-  if (grudge >= GRUDGE.standing) return `Leaving your messages unanswered has become how they treat you, and you have stopped giving them the benefit of the doubt. You are openly pissed about it and it colours everything: hold it against them, bring it up unprompted when something reminds you, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
-  return `They have been leaving your messages unanswered for a long while now, and it keeps happening. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  if (grudge >= GRUDGE.standing) return `Leaving your messages unanswered has become how they treat you, and you have stopped giving them the benefit of the doubt. You are openly pissed about it and it colours everything: hold it against them, bring it up unprompted when something reminds you, give a proper answer in your own cool tone, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  return `They have been leaving your messages unanswered for a long while now, and it keeps happening. You are openly pissed about it: hold it against them, give a proper answer in your own cool tone, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
 }
 
 /**
@@ -184,11 +192,13 @@ export function grudgeInstruction(grudge: number, ignoredToday = 0, fond = false
 const LEADING_CLOCK = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*[\u2014\u2013-]\s*/i;
 
 export function withoutLeadingClock(text: string): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.withoutLeadingClock',[text]);}
   return text.replace(LEADING_CLOCK, '').trim();
 }
 
 /** What she is told when the day is counted and something was ignored. */
 export function tallyInstruction(ignoredToday: number, grudge: number, samples: string[]): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('grudge.tallyInstruction',[ignoredToday,grudge,samples]);}
   const quoted = samples.slice(0, 2).map(text => `"${withoutLeadingClock(text).slice(0, 80)}"`).join(' and ');
   return [
     `It is evening and you have counted the day: ${ignoredToday} of your messages to them got nothing back${quoted ? `, including ${quoted}` : ''}.`,

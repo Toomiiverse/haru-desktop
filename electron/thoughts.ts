@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What is on her mind between messages — the thought loop.
 //
 // Everything she said off her own back was a timer and a dice roll with a line
@@ -101,6 +102,7 @@ export const RUMINATION_COSINE = 0.86;
 export const RUMINATION_OVERLAP = 0.7;
 
 export function emptyThoughtState(): ThoughtState {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.emptyThoughtState',[]); }
   return { thoughts: [], seen: [], lastAskedAt: 0, asked: { day: '', count: 0 }, nextId: 1 };
 }
 
@@ -108,6 +110,7 @@ const DECISIONS: Decision[] = ['kept', 'would-say', 'said', 'rumination'];
 const TRIGGERS: TriggerKind[] = ['silence', 'ownlife', 'agenda', 'wake'];
 
 export function normalizeThoughtState(value: unknown): ThoughtState {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.normalizeThoughtState',[value]); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyThoughtState();
   const held = value as Partial<Record<keyof ThoughtState, unknown>>;
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -148,6 +151,7 @@ export type TriggerInput = {
  * is exactly the rumination this is meant not to do.
  */
 export function pendingTrigger(input: TriggerInput, limits = THOUGHT_LIMITS): Trigger | null {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.pendingTrigger',[input,limits]); }
   const seen = new Set(input.seen);
   const { now } = input;
   const soon = input.agenda
@@ -179,6 +183,7 @@ export function pendingTrigger(input: TriggerInput, limits = THOUGHT_LIMITS): Tr
 
 /** Every silence milestone up to the one that fired is spent with it. */
 export function spend(seen: string[], trigger: Trigger, limits = THOUGHT_LIMITS): string[] {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.spend',[seen,trigger,limits]); }
   const keys = [trigger.key];
   const silence = trigger.key.match(/^silence:(\d+):(\d+)$/);
   if (silence) for (const ms of limits.silenceMilestonesMs) if (ms < Number(silence[2])) keys.push(`silence:${silence[1]}:${ms}`);
@@ -186,6 +191,7 @@ export function spend(seen: string[], trigger: Trigger, limits = THOUGHT_LIMITS)
 }
 
 export function describeGap(ms: number): string {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.describeGap',[ms]); }
   if (ms < 90 * MIN) return `${Math.max(1, Math.round(ms / MIN))} minutes`;
   const hours = Math.round(ms / HOUR);
   return hours === 1 ? 'an hour' : `${hours} hours`;
@@ -193,11 +199,13 @@ export function describeGap(ms: number): string {
 
 /** Whether a call to the brain is allowed now: spacing and a daily count. */
 export function mayAsk(state: ThoughtState, now: number, dayKey: string, limits = THOUGHT_LIMITS): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.mayAsk',[state,now,dayKey,limits]); }
   if (now - state.lastAskedAt < limits.askGapMs) return false;
   return state.asked.day !== dayKey || state.asked.count < limits.asksPerDay;
 }
 
 export function noteAsked(state: ThoughtState, now: number, dayKey: string): ThoughtState {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.noteAsked',[state,now,dayKey]); }
   return { ...state, lastAskedAt: now, asked: { day: dayKey, count: state.asked.day === dayKey ? state.asked.count + 1 : 1 } };
 }
 
@@ -229,6 +237,7 @@ export type ThinkingState = {
 
 /** The state, in words, as the user turn of the call. Empty sections are left out rather than printed as "none". */
 export function thinkingInput(state: ThinkingState): string {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.thinkingInput',[state]); }
   const section = (title: string, lines: string[]) => (lines.length ? `${title}:\n${lines.map(line => `- ${line}`).join('\n')}` : '');
   return [
     `It is ${state.now}. What set you thinking: ${state.trigger.detail}.`,
@@ -250,6 +259,7 @@ export function thinkingInput(state: ThinkingState): string {
  * names for the 9B, here with a comma instead of a dash.
  */
 export function withoutClock(text: string): string {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.withoutClock',[text]); }
   // A clock is minutes or a meridiem, whole, then a separator and a space. The
   // first version let the hour alone stand for the clock with its colon as the
   // separator, so "10:16 PM. I'm turning in" came out "16 PM. I'm turning in"
@@ -261,6 +271,7 @@ export type ThoughtDraft = { thought: string; say: string; relevance: number; ur
 
 /** Whatever came back, as at most two drafts. A fence, prose around the object or a score as a string are all read. */
 export function readThoughts(raw: string): ThoughtDraft[] {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.readThoughts',[raw]); }
   const text = String(raw ?? '');
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -288,6 +299,7 @@ export function readThoughts(raw: string): ThoughtDraft[] {
 }
 
 export function scoreThought(draft: Pick<ThoughtDraft, 'relevance' | 'urgency' | 'novelty'>): number {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.scoreThought',[draft]); }
   return Math.round((0.4 * draft.relevance + 0.35 * draft.urgency + 0.25 * draft.novelty) * 100) / 100;
 }
 
@@ -299,6 +311,7 @@ function words(text: string): Set<string> {
 }
 
 export function cosine(a: number[], b: number[]): number {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.cosine',[a,b]); }
   const n = Math.min(a.length, b.length);
   let dot = 0; let na = 0; let nb = 0;
   for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
@@ -310,6 +323,7 @@ export function cosine(a: number[], b: number[]): number {
  * shared words — so a lost embedder makes the check blunter, never absent.
  */
 export function isRumination(candidate: { text: string; vector?: number[] }, earlier: { text: string; vector?: number[] }[]): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.isRumination',[candidate,earlier]); }
   const mine = words(candidate.text);
   return earlier.some(other => {
     if (candidate.vector && other.vector) return cosine(candidate.vector, other.vector) >= RUMINATION_COSINE;
@@ -320,6 +334,7 @@ export function isRumination(candidate: { text: string; vector?: number[] }, ear
 }
 
 export function roundVector(vector: number[] | null | undefined): number[] | undefined {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { const result=corePolicySync<any>('thoughts.roundVector',[vector]); return result===null?undefined:result; }
   return vector?.length ? vector.map(value => Math.round(value * 1e4) / 1e4) : undefined;
 }
 
@@ -342,6 +357,7 @@ export type InitiativeInput = {
  * so the attention controller has one place to join when it is ready.
  */
 export function mayInitiate(input: InitiativeInput, limits = SPEAK_LIMITS): { ok: true } | { ok: false; why: string } {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.mayInitiate',[input,limits]); }
   if (!input.thought.say.trim()) return { ok: false, why: 'nothing she would send' };
   if (input.thought.score < limits.threshold) return { ok: false, why: `not pressing enough (${input.thought.score} < ${limits.threshold})` };
   if (input.blockers.length) return { ok: false, why: input.blockers[0] };
@@ -356,21 +372,25 @@ export function mayInitiate(input: InitiativeInput, limits = SPEAK_LIMITS): { ok
 
 /** Thoughts said, or in shadow would have been, on the given local day. */
 export function spokenOn(state: ThoughtState, dayStart: number, dayEnd: number): Thought[] {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.spokenOn',[state,dayStart,dayEnd]); }
   return state.thoughts.filter(t => (t.decision === 'said' || t.decision === 'would-say') && t.at >= dayStart && t.at < dayEnd);
 }
 
 export function lastSpoken(state: ThoughtState): Thought | undefined {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { const result=corePolicySync<any>('thoughts.lastSpoken',[state]); return result===null?undefined:result; }
   return [...state.thoughts].filter(t => t.decision === 'said' || t.decision === 'would-say').sort((a, b) => b.at - a.at)[0];
 }
 
 /** The note that turns a thought into a message, for the conversation brain. */
 export function thoughtPrompt(thought: Pick<Thought, 'thought' | 'say' | 'why'>): string {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.thoughtPrompt',[thought]); }
   return `Nobody has written to you; something has been on your mind (${thought.why}): "${thought.thought}". You have decided to message him about it now. Your own draft was: "${thought.say}". Write the message you actually send — one to three lines, in your voice, no greeting, no mention of having been thinking about it. If the conversation above has already covered it, answer with a single dash and nothing else.`;
 }
 
 // -- the reservoir -----------------------------------------------------------------
 
 export function keepThoughts(state: ThoughtState, add: Thought[], now: number, limits = THOUGHT_LIMITS): ThoughtState {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.keepThoughts',[state,add,now,limits]); }
   const thoughts = [...state.thoughts, ...add]
     .filter(t => now - t.at <= limits.keepMs)
     .sort((a, b) => a.at - b.at)
@@ -385,6 +405,7 @@ export function keepThoughts(state: ThoughtState, add: Thought[], now: number, l
  * is a thought about nothing (review, 2026-09-17).
  */
 export function stillCurrent(thought: Pick<Thought, 'at' | 'trigger' | 'why'>, now: number, lastMessageAt?: number): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.stillCurrent',[thought,now,lastMessageAt]); }
   if (thought.trigger === 'silence' && lastMessageAt !== undefined && lastMessageAt > thought.at) return false;
   const due = thought.trigger === 'agenda' ? /in about (\d+) minutes?/.exec(thought.why) : null;
   if (due && now > thought.at + (Number(due[1]) + 30) * MIN) return false;
@@ -397,6 +418,7 @@ export function stillCurrent(thought: Pick<Thought, 'at' | 'trigger' | 'why'>, n
  * marked as hers and as not to be recited.
  */
 export function mindNote(state: ThoughtState, now: number, count = 2, lastMessageAt?: number): string {
+  if(process.env.HARU_CORE_LIFECYCLE_THOUGHTS==='on') { return corePolicySync<any>('thoughts.mindNote',[state,now,count,lastMessageAt]); }
   const fresh = state.thoughts
     .filter(t => t.decision !== 'rumination' && t.decision !== 'said' && now - t.at <= 12 * HOUR && t.score >= 2.5 && stillCurrent(t, now, lastMessageAt))
     .sort((a, b) => b.score - a.score || b.at - a.at)

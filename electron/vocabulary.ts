@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // The words the ear should expect.
 //
 // Whisper gets the sentence right and the names in it wrong. "Where are you up
@@ -76,6 +77,7 @@ const bare = (word: string) => word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ''
  * word, since by then it is mid-sentence.
  */
 export function namesInText(texts: string[]): string[] {
+ if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync('speech-context.names',[texts]);
   // A word seen in lowercase anywhere is a word, not a name: "Fine." at the top
   // of one reply and "fine" in the middle of the next settles it.
   const lowercase = new Set<string>();
@@ -147,6 +149,7 @@ export type VocabularySources = {
  * front when it does.
  */
 export function spokenVocabulary(sources: VocabularySources, limit = LIMIT): string[] {
+ if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync('speech-context.vocabulary',[sources,limit]);
   const chat = (sources.chat ?? []).slice().reverse();
   const candidates = [
     ...(sources.names ?? []),

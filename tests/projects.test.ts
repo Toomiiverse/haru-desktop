@@ -10,7 +10,7 @@ import {
   admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, isActive,
   hersOwn, judgeAttemptInput, judgeAttemptPrompt, needsHim, nowItStings, pickProject, projectInstruction,
   projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, roomForNew, sameIdea,
-  settleFromGame, settleFromManga, settleFromRead, siblingOf, spawnInstruction, staleSpawns,
+  settleFromRead, siblingOf, spawnInstruction, staleSpawns,
   needsSomethingNew, newProjectInstruction, standingIn, stepInstruction, type Attempt, type Project } from '../electron/projects';
 
 const DAY = 24 * 3_600_000;
@@ -123,11 +123,6 @@ test('what came of the night comes from the reading, and only falls back to the 
   assert.equal(settleFromRead('PART', 'nothing'), 'part');
   assert.equal(settleFromRead('NO', 'nothing'), 'no');
   assert.equal(settleFromRead(null, 'nothing'), 'nothing', 'the judge would not say');
-  assert.equal(settleFromManga({ finished: 4, page: 8 }, { finished: 5, page: 1 }), 'did');
-  assert.equal(settleFromManga({ finished: 4, page: 8 }, { finished: 4, page: 14 }), 'part');
-  assert.equal(settleFromManga({ finished: 4, page: 8 }, { finished: 4, page: 8 }), 'no');
-  assert.equal(settleFromGame({ badges: 1, level: 12 }, { badges: 2, level: 12 }), 'did');
-  assert.equal(settleFromGame({ badges: 1, level: 12 }, { badges: 1, level: 14 }), 'part');
 });
 
 test('a step that lands finishes it; three that go nowhere shelve it', () => {

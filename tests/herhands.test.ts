@@ -51,6 +51,6 @@ test('her own tools are hers: no shell, no services, not his shelf, and no Minec
   for (const name of ['run_command', 'restart_haru', 'stop_service', 'restart_docker_container', 'get_manga', 'minecraft_do', 'power', 'change_setting']) {
     assert.ok(!(HER_HANDS_TOOLS as readonly string[]).includes(name), name);
   }
-  assert.ok((HER_HANDS_TOOLS as readonly string[]).includes('read_manga'));
-  assert.ok((HER_HANDS_TOOLS as readonly string[]).includes('play_pokemon'));
+  assert.ok(!(HER_HANDS_TOOLS as readonly string[]).includes('read_manga'));
+  assert.ok(!(HER_HANDS_TOOLS as readonly string[]).includes('play_pokemon'));
 });

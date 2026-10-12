@@ -21,6 +21,115 @@ function frame(level: number): Uint8Array {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function settle(times = 20) { for (let i = 0; i < times; i++) await tick(); }
 
+test('admitted microphone checks speak without model calls in open, addressed and manual modes',async()=>{
+ for(const mode of ['open','addressed','manual'] as const) {
+  const text=mode==='addressed'?'Haru, testing one two three.':'Testing one two three.';
+  let commits=0;
+  const h=harness({inputMode:mode==='open'?'open':'addressed',
+   hear:async()=>text,prepareHear:async()=>Object.assign(()=>{commits++;return text;},{text})});
+  if(mode==='manual') {h.call.manualInput(true);h.call.inputHeld(true);h.feed(.3,900);h.call.inputHeld(false);}
+  else {h.feed(.002,2000);h.feed(.3,900);h.feed(.002,600);}
+  await settle();
+  assert.equal(h.answered.length,0,mode);
+  assert.deepEqual(h.spoken.map(row=>row.text),['Your words came through.'],mode);
+  assert.equal(h.events.filter(row=>row.type==='user_message').length,1);
+  assert.equal(h.events.filter(row=>row.type==='assistant_message').length,1);
+  if(mode!=='open')assert.equal(commits,1);
+  h.call.close();await settle();
+ }
+});
+
+test('microphone diagnostics cannot bypass addressed admission or a released manual gate',async()=>{
+ for(const manual of [false,true]) {
+  let reads=0,commits=0;
+  const h=harness({inputMode:'addressed',prepareHear:async()=>{reads++;return Object.assign(()=>{commits++;return 'Mic check.';},{text:'Mic check.'});}});
+  if(manual)h.call.manualInput(true);
+  h.feed(.002,2000);h.feed(.3,900);h.feed(.002,1500);await settle();
+  assert.equal(commits,0);assert.equal(h.answered.length,0);assert.equal(h.spoken.length,0);
+  assert.equal(h.events.some(e=>e.type==='user_message'),false);
+  if(manual)assert.equal(reads,0);
+  h.call.close();await settle();
+ }
+});
+
+test('a mixed microphone check and memory request still reaches the answer pipeline',async()=>{
+ const text='Haru, mic check, what did I tell you yesterday?';
+ const h=harness({inputMode:'addressed',prepareHear:async()=>Object.assign(()=>text,{text})});
+ h.feed(.002,2000);h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(h.answered.length,1);assert.equal(h.answered[0].text,'mic check, what did I tell you yesterday?');
+ assert.equal(h.spoken.some(row=>row.text==='Your words came through.'),false);h.call.close();
+});
+
+test('manual input drops even addressed background audio outside a hold and releases one turn immediately',async()=>{
+ let commits=0,reads=0;
+ const h=harness({inputMode:'addressed',prepareHear:async()=>{reads++;return Object.assign(()=>{commits++;return 'How are you?';},{text:'How are you?'});}});
+ h.call.manualInput(true);
+ h.feed(.3,1500);await settle();assert.equal(reads,0);
+ h.call.inputHeld(true);h.feed(.3,900);h.feed(.002,1200);await settle();assert.equal(h.answered.length,0);
+ h.call.inputHeld(false);await settle();
+ assert.equal(h.answered.length,1);assert.equal(h.answered[0].text,'How are you?');assert.equal(commits,1);
+ h.feed(.3,1500);await settle();assert.equal(reads,1);h.call.close();
+});
+
+test('new manual press interrupts a pending answer without waiting for speech recognition',async()=>{
+ let signal:AbortSignal|undefined;
+ const h=harness({prepareHear:async()=>Object.assign(()=> 'Hi.',{text:'Hi.'}),answer:async(_text,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>signal!.addEventListener('abort',()=>reject(Error('cancelled'))));}});
+ h.call.manualInput(true);h.call.inputHeld(true);h.feed(.3,900);h.call.inputHeld(false);await settle();
+ assert.ok(signal);h.call.inputHeld(true);assert.equal(signal.aborted,true);h.call.close();await settle();
+});
+
+test('a second manual press invalidates recognition from an older release before committing',async()=>{
+ let complete!:()=>void,commits=0;
+ const h=harness({prepareHear:async()=>{await new Promise<void>(resolve=>{complete=resolve;});return Object.assign(()=>{commits++;return 'Old phrase.';},{text:'Old phrase.'});}});
+ h.call.manualInput(true);h.call.inputHeld(true);h.feed(.3,900);h.call.inputHeld(false);await settle();
+ h.call.inputHeld(true);complete();await settle();assert.equal(commits,0);assert.equal(h.answered.length,0);h.call.close();
+});
+
+test('manual holds are capped and a disconnected hold never commits',async()=>{
+ const h=harness({prepareHear:async()=>Object.assign(()=> 'One phrase.',{text:'One phrase.'})});
+ h.call.manualInput(true);h.call.inputHeld(true);h.feed(.3,17000);await settle();
+ assert.equal(h.answered.length,1);assert.ok(h.events.some(e=>e.type==='input_gate'&&e.active===false));
+ h.call.inputHeld(true);h.feed(.3,900);h.call.close();await settle();assert.equal(h.answered.length,1);
+});
+
+test('hangup aborts an unanswered model request without reporting a brain failure', async () => {
+ let signal:AbortSignal|undefined;
+ const h=harness({answer:async(_text,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>signal!.addEventListener('abort',()=>reject(Error('cancelled')),{once:true}));}});
+ h.feed(.002,2000);h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.ok(signal);h.call.close();await settle();assert.equal(signal.aborted,true);
+ assert.equal(h.types().includes('error'),false);
+});
+
+test('replacement speech cancels the old request and rejects its late sentence',async()=>{
+ let old:Parameters<LocalCallDeps['answer']>[1]|undefined;let calls=0;
+ const h=harness({answer:async(_text,options)=>{if(++calls===1){old=options;return new Promise((_resolve,reject)=>options.signal!.addEventListener('abort',()=>{options.onSentence('STALE','neutral');reject(Error('cancelled'));}));}return {reply:'Replacement.'};}});
+ h.feed(.002,2000);h.feed(.3,900);h.feed(.002,700);await settle();
+ h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(old?.signal?.aborted,true);assert.equal(calls,2);assert.equal(h.types().includes('error'),false);
+ assert.equal(h.spoken.some(line=>line.text==='STALE'),false);h.call.close();
+});
+
+test('addressed mode rejects video before recognition commit, interruption or answering',async()=>{
+ let commits=0;let line='A nearby video is talking.';let signal:AbortSignal|undefined;
+ const h=harness({inputMode:'addressed',prepareHear:async()=>Object.assign(()=>{commits++;return line;},{text:line}),
+  answer:async(_text,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>signal!.addEventListener('abort',()=>reject(Error('cancelled'))));}});
+ h.feed(.002,2000);h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(commits,0);assert.equal(h.types().includes('user_message'),false);
+ line='Haru, how are you?';h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(commits,1);assert.ok(signal);assert.equal(h.events.find(e=>e.type==='user_message')?.text,'how are you?');
+ line='More background video.';h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(commits,1);assert.equal(signal.aborted,false);assert.equal(h.types().includes('user_interruption'),false);
+ h.call.close();await settle();
+});
+
+test('mode controls are voiced locally and apply only to this call',async()=>{
+ let line='Haru, hands free mode.';let modelCalls=0;
+ const h=harness({inputMode:'addressed',prepareHear:async()=>Object.assign(()=>line,{text:line}),answer:async()=>{modelCalls++;return {reply:'Hello.'};}});
+ h.feed(.002,2000);h.feed(.3,900);h.feed(.002,700);await settle();
+ assert.equal(modelCalls,0);assert.ok(h.spoken.some(row=>/Hands free/.test(row.text)));
+ h.advance(2000);line='How are you?';h.feed(.002,1000);h.feed(.3,900);h.feed(.002,700);await settle();assert.equal(modelCalls,1);h.call.close();
+});
+
 /** A stream of a few PCM chunks, cancellable, that records whether it was drained. */
 function voice(chunks: number, chunkBytes = 480): { stream: ReadableStream<Uint8Array>; cancelled(): boolean } {
   let cancelled = false;
@@ -77,6 +186,64 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
   return { call, events, audio, closes, heard, answered, spoken, voices, saids, feed, types, advance: (ms: number) => { clock += ms; } };
 }
 
+test('hangup cancels synthesis that has not returned a stream', async () => {
+  let signal: AbortSignal | undefined;
+  const h = harness({ speak: async (_text, _emotion, _seed, pending) => {
+    signal = pending;
+    return new Promise((_resolve, reject) => pending!.addEventListener('abort', () => reject(pending!.reason), { once: true }));
+  } });
+  h.feed(0.002, 2000); h.feed(0.3, 900); h.feed(0.002, 700);
+  await settle();
+  assert.ok(signal);
+  h.call.close();
+  await settle();
+  assert.equal(signal.aborted, true);
+  assert.equal(h.audio.length, 0);
+});
+
+test('interruption cancels a stalled PCM read before replacement speech', async () => {
+  let cancelled = false, calls = 0;
+  const h = harness({
+    hear: async () => 'Please change the subject.',
+    answer: async (_text, options) => { options.onSentence('Here is my answer.', 'neutral'); return { reply: 'Here is my answer.' }; },
+    speak: async () => ({ sampleRate: 24000, stream: ++calls === 1
+      ? new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(480)); }, cancel() { cancelled = true; } })
+      : voice(2).stream }),
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 900); h.feed(0.002, 700);
+  await settle();
+  assert.equal(calls, 1);
+  h.call.herSpeaking(true);
+  h.feed(0.4, 1600); h.feed(0.002, 700);
+  await settle(60);
+  assert.equal(cancelled, true);
+  assert.equal(calls, 2, 'the old pending read cannot hold the replacement behind it');
+  assert.ok(h.types().includes('user_interruption'));
+  h.call.close();
+});
+
+test('interruption aborts synthesis waiting for headers and voices the replacement', async () => {
+  let calls = 0, cancelled = false;
+  const h = harness({
+    hear: async () => 'Please change the subject.',
+    answer: async (_text, options) => { options.onSentence('Here is my answer.', 'neutral'); return { reply: 'Here is my answer.' }; },
+    speak: async (_text, _emotion, _seed, signal) => {
+      if (++calls > 1) return { stream: voice(2).stream, sampleRate: 24000 };
+      return new Promise((_resolve, reject) => signal!.addEventListener('abort', () => {
+        cancelled = true; reject(signal!.reason);
+      }, { once: true }));
+    },
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 900); h.feed(0.002, 700);
+  await settle();
+  assert.equal(calls, 1); assert.equal(h.audio.length, 0);
+  h.feed(0.4, 1600); h.feed(0.002, 700);
+  await settle(60);
+  assert.equal(cancelled, true); assert.equal(calls, 2);
+  assert.ok(h.audio.length > 0);
+  h.call.close();
+});
+
 test('an utterance is heard, answered, and voiced a sentence at a time', async () => {
   const h = harness();
   h.feed(0.002, 2000);                 // the room
@@ -94,12 +261,81 @@ test('an utterance is heard, answered, and voiced a sentence at a time', async (
     'assistant_end',
   ]);
   assert.equal(h.audio.length, 6, 'three chunks per line went down');
-  assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'annoyed', 'the face at the end is the mood the reply was said in');
+  assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'smug', 'the face at the end follows the last delivered sentence');
   assert.equal((h.events[1] as { text: string }).text, 'First thing.');
-  assert.deepEqual(h.spoken.map(s => s.emotion), ['annoyed', 'annoyed'], 'one register for the whole reply, not a mood per sentence');
+  assert.deepEqual(h.spoken.map(s => s.emotion), ['neutral', 'smug'], 'sentence delivery overrides the resting mood');
   assert.equal(h.spoken[0].seed, h.spoken[1].seed, 'one take: the same seed for every piece');
   assert.deepEqual(h.saids, [], 'she said all of it: nothing to correct');
   assert.equal((h.events[2] as { sampleRate: number }).sampleRate, 24000);
+});
+
+test('a complete greeting without ASR punctuation is answered without an extra fragment hold', async () => {
+  const h = harness({ hear: async () => 'Hello Haru' });
+  h.feed(0.002, 2000); h.feed(0.3, 800); h.feed(0.002, 520);
+  await settle(60);
+  assert.equal(h.answered.length, 1);
+  assert.equal(h.answered[0].text, 'Hello Haru');
+  h.call.close();
+});
+
+test('call latency stamps real reply PCM separately from queuing and never labels it playback', async () => {
+  const logs: string[] = [];
+  let audio: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const h = harness({
+    log: line => logs.push(line),
+    hear: async () => { h.advance(120); return 'Hello Haru.'; },
+    answer: async (_text, options) => { h.advance(80); options.onSentence('Hey there.', 'neutral'); return { reply: 'Hey there.' }; },
+    speak: async () => ({ stream: new ReadableStream<Uint8Array>({ start(controller) { audio = controller; } }), sampleRate: 24000 }),
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 800); h.feed(0.002, 520);
+  await settle();
+  assert.equal(logs.filter(line => line.startsWith('[call-latency]')).length, 0, 'queued text and audio headers are not PCM');
+  h.advance(260);
+  audio!.enqueue(new Uint8Array(480)); audio!.close();
+  await settle();
+  const rows = logs.filter(line => line.startsWith('[call-latency]')).map(line => JSON.parse(line.slice('[call-latency] '.length)));
+  assert.deepEqual(rows.map(row => row.stage), ['first-audio', 'done']);
+  assert.equal(rows[0].endpointMs, 520);
+  assert.ok(rows[0].listenMs >= 120);
+  assert.equal(rows[0].answerMs, 80);
+  assert.equal(rows[0].ttsFirstPcmMs, 260);
+  assert.equal(rows[0].transcriptToFirstPcmMs, 340);
+  assert.equal(rows[0].receivedSpeechEndToFirstPcmMs, rows[0].endpointMs + rows[0].listenMs + rows[0].holdMs + 340);
+  assert.equal(rows[0].playbackMeasured, false);
+  assert.ok(logs.some(line => /reply queued at 80ms, first PCM at 340ms/.test(line)));
+  assert.ok(logs.every(line => !line.includes('first voice at')));
+  h.call.close();
+});
+
+test('a tool filler is not measured as the first answer audio', async () => {
+  const logs: string[] = [];
+  let resume: (() => void) | undefined;
+  const h = harness({ log: line => logs.push(line), answer: async (_text, options) => {
+    options.onToolCall('search');
+    await new Promise<void>(resolve => { resume = resolve; });
+    options.onSentence('Here is the answer.', 'neutral'); return { reply: 'Here is the answer.' };
+  } });
+  h.feed(0.002, 2000); h.feed(0.3, 800); h.feed(0.002, 700);
+  await settle(40);
+  assert.ok(h.audio.length > 0, 'the filler was streamed');
+  assert.equal(logs.filter(line => line.startsWith('[call-latency]')).length, 0);
+  h.advance(900); resume!(); await settle(40);
+  const row = JSON.parse(logs.find(line => line.startsWith('[call-latency]'))!.slice('[call-latency] '.length));
+  assert.equal(row.answerMs, 900);
+  h.call.close();
+});
+
+test('a failed speech engine does not fabricate first-audio latency', async () => {
+  const logs: string[] = [];
+  const h = harness({ log: line => logs.push(line), speak: async () => null });
+  h.feed(0.002, 2000); h.feed(0.3, 800); h.feed(0.002, 700); await settle(40);
+  const rows = logs.filter(line => line.startsWith('[call-latency]')).map(line => JSON.parse(line.slice('[call-latency] '.length)));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].stage, 'done');
+  assert.equal(rows[0].receivedSpeechEndToFirstPcmMs, null);
+  assert.equal(rows[0].ttsFirstPcmMs, null);
+  assert.equal(rows[0].playbackMeasured, false);
+  h.call.close();
 });
 
 test('a breath mid-sentence does not split what they said: the first half waits for the second', async () => {
@@ -168,6 +404,23 @@ test('the first sentence goes out at once; the rest of the reply is said in stre
   assert.deepEqual(h.spoken.map(s => s.emotion), ['smug', 'smug', 'smug'], 'the first sentence names the register; her resting mood only when it reads as nothing');
   assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'smug');
   assert.equal(h.types().at(-1), 'assistant_end');
+});
+
+test('tone changes end a stretch without changing the words or the voice seed', async () => {
+  const parts = [['First.', 'affectionate'], ['Still gentle.', 'affectionate'], ['Now neutral.', 'neutral'], ['And steady.', 'neutral']];
+  const h = harness({ answer: async (_text, options) => {
+    for (const [text, mood] of parts) options.onSentence(text, mood);
+    return { reply: parts.map(([text]) => text).join(' ') };
+  } });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(80);
+  assert.deepEqual(h.spoken.map(s => [s.text, s.emotion]), [
+    ['First.', 'affectionate'], ['Still gentle.', 'affectionate'], ['Now neutral. And steady.', 'neutral'],
+  ]);
+  assert.equal(new Set(h.spoken.map(s => s.seed)).size, 1);
+  assert.equal(h.spoken.map(s => s.text).join(' '), parts.map(([text]) => text).join(' '));
+  assert.equal(h.events.at(-1)?.emotion, 'neutral');
+  h.call.close();
 });
 
 test('nothing worth answering is nothing said', async () => {
@@ -282,6 +535,77 @@ test('her own voice back through the phone is not an interruption', async () => 
   assert.equal(h.types().filter(t => t === 'user_message').length, 1, 'the echo is not a message of his');
   assert.equal(answers.length, 1, 'and not a turn');
   release!();
+  h.call.close();
+});
+
+for (const nextEmotion of ['', 'worried']) {
+  test(`an interrupted reply keeps its audible take; ${nextEmotion || 'unlabelled'} delivery follows the new words`, async () => {
+    let release: (() => void) | undefined;
+    const answers: boolean[] = [];
+    const spoken: { text: string; emotion: string | null; seed: number }[] = [];
+    const h = harness({
+      hear: async () => answers.length ? 'Wait, the blue one.' : 'First thing.',
+      answer: async (_text, options) => {
+        answers.push(options.interrupted);
+        if (answers.length === 1) {
+          options.onSentence(LONG_LINE, 'affectionate');
+          // This later mood is queued but never sent: it must not become the
+          // continuity anchor after the interruption.
+          options.onSentence('A different direction.', 'annoyed');
+          await new Promise<void>(resolve => { release = resolve; });
+          return { reply: LONG_LINE + ' A different direction.' };
+        }
+        if (nextEmotion) options.onSentence('The blue one, got it.', nextEmotion);
+        return { reply: 'The blue one, got it.' };
+      },
+      speak: async (text, emotion, seed) => {
+        spoken.push({ text, emotion, seed });
+        const v = voice(text === LONG_LINE ? 400 : 3); h.voices.push(v);
+        return { stream: v.stream, sampleRate: 24000 };
+      },
+    });
+    h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+    await settle(30);
+    assert.ok(h.audio.length > 0);
+    h.feed(0.5, 600); h.feed(0.002, 700);
+    await settle(30);
+    release!(); await settle(40);
+    assert.deepEqual(answers, [false, true]);
+    assert.ok(h.voices[0].cancelled());
+    assert.deepEqual(spoken.map(s => [s.text, s.emotion]), [
+      [LONG_LINE, 'affectionate'], ['The blue one, got it.', nextEmotion || 'affectionate'],
+    ]);
+    assert.equal(spoken[0].seed, spoken[1].seed, 'an interruption does not randomize her voice');
+    h.call.close();
+  });
+}
+
+test('interrupting audio still playing on the phone preserves delivery after server streaming has finished', async () => {
+  const answers: boolean[] = [];
+  const h = harness({
+    hear: async () => answers.length ? 'Wait, the blue one.' : 'First thing.',
+    answer: async (_text, options) => {
+      answers.push(options.interrupted);
+      if (answers.length === 1) options.onSentence(LONG_LINE, 'affectionate');
+      return { reply: answers.length === 1 ? LONG_LINE : 'The blue one, got it.' };
+    },
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(40);
+  assert.equal(h.types().at(-1), 'assistant_end', 'the server has finished sending');
+  h.call.herSpeaking(true);
+  h.feed(0.5, 600); h.feed(0.002, 700);
+  await settle(40);
+  assert.deepEqual(answers, [false, true]);
+  assert.equal(h.types().filter(t => t === 'user_interruption').length, 1);
+  assert.deepEqual(h.spoken.map(s => s.emotion), ['affectionate', 'affectionate']);
+  assert.equal(h.spoken[0].seed, h.spoken[1].seed);
+  h.call.herSpeaking(false);
+  h.advance(1000);
+  h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(40);
+  assert.deepEqual(answers, [false, true, false], 'a completed turn clears interruption continuity');
+  assert.equal(h.spoken[2].emotion, 'annoyed', 'normal turns still consult the current resting mood');
   h.call.close();
 });
 
@@ -414,4 +738,61 @@ test('talked over before a word of it: the reply stays in the day as written', a
   assert.deepEqual(answers.map(a => a.interrupted), [false, true]);
   // Nothing of it came out, so nothing is rewritten: the draft is her answer.
   assert.deepEqual(h.saids, [], 'a reply she got no word of is not taken out of the day');
+});
+
+test('tentative recognition commits only at an identical final endpoint', async () => {
+  let preparations=0,commits=0;
+  const h=harness({prepareAfterMs:150,prepareHear:async()=>{preparations++;return()=>{commits++;return 'What did you say?';};}});
+  h.feed(.002,1000);h.feed(.3,900);h.feed(.002,200);await settle();
+  assert.equal(preparations,1);assert.equal(commits,0);assert.equal(h.answered.length,0);
+  h.feed(.002,400);await settle();
+  assert.equal(commits,1);assert.equal(h.heard.length,0);assert.equal(h.answered.length,1);h.call.close();
+});
+
+test('resumed speech and hangup discard tentative recognition without committing',async()=>{
+  let commits=0,release!:()=>void;
+  const h=harness({prepareAfterMs:150,prepareHear:async()=>{await new Promise<void>(r=>release=r);return()=>{commits++;return 'Old partial.';};}});
+  h.feed(.002,1000);h.feed(.3,900);h.feed(.002,200);await settle();
+  h.feed(.3,500);h.feed(.002,600);await settle();
+  assert.equal(h.heard.length,0);release();await settle();
+  assert.equal(commits,0);assert.equal(h.heard.length,1);assert.equal(h.answered[0].text,'What did you say?');h.call.close();
+  const closed=harness({prepareAfterMs:150,prepareHear:async()=>()=>{commits++;return 'Stale.';}});
+  closed.feed(.002,1000);closed.feed(.3,900);closed.feed(.002,200);await settle();closed.call.close();closed.feed(.002,600);await settle();assert.equal(commits,0);
+});
+
+test('unfinished quiet option counts existing silence but preserves a resumed phrase',async()=>{
+  const h=harness({unfinishedQuietMs:700,hear:async()=> 'I was thinking about'});
+  h.feed(.002,1000);h.feed(.3,900);h.feed(.002,600);await settle();assert.equal(h.answered.length,0);
+  h.feed(.002,160);await settle();assert.equal(h.answered.length,1);h.call.close();
+  const resumed=harness({unfinishedQuietMs:700,hear:async()=> 'I was thinking about'});
+  resumed.feed(.002,1000);resumed.feed(.3,900);resumed.feed(.002,600);await settle();
+  resumed.feed(.3,280);await settle();assert.equal(resumed.answered.length,0);resumed.call.close();
+});
+
+test('hangup cancels tentative recognition and never commits its result',async()=>{
+ let signal:AbortSignal|undefined,commits=0;
+ const h=harness({prepareAfterMs:150,prepareHear:async(_wav,received)=>{
+  signal=received;await new Promise<void>((_resolve,reject)=>received!.addEventListener('abort',()=>reject(received!.reason),{once:true}));
+  return()=>{commits++;return 'stale';};
+ }});
+ h.feed(.002,1000);h.feed(.3,900);h.feed(.002,200);await settle();assert.ok(signal);
+ h.call.close();await settle();assert.equal(signal.aborted,true);assert.equal(commits,0);assert.equal(h.answered.length,0);
+});
+
+test('early recognition with the existing fragment hold preserves a 900 ms unfinished pause',async()=>{
+ for(const quiet of [undefined,700]){
+  const parts=['I was thinking about the','green felt hat.'];
+  const recognize=async()=>parts.shift()??'';
+  const h=harness({vad:{endAfterMs:550},prepareAfterMs:150,unfinishedQuietMs:quiet,
+   hear:recognize,prepareHear:async()=>{const text=await recognize();return()=>text;}});
+  h.feed(.002,2000);h.feed(.3,800);h.feed(.002,200);await settle();
+  h.feed(.002,360);await settle();
+  h.feed(.002,360);await settle();
+  assert.equal(h.answered.length,quiet===700?1:0,'700 ms total quiet splits this unfinished pause; the existing hold does not');
+  if(quiet===undefined){
+   h.feed(.3,600);h.feed(.002,200);await settle();h.feed(.002,360);await settle(60);
+   assert.deepEqual(h.answered.map(a=>a.text),['I was thinking about the green felt hat.']);
+  }
+  h.call.close();
+ }
 });

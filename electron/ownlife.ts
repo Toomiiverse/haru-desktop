@@ -1,3 +1,5 @@
+import {corePolicySync} from './core-policy-sync';
+import {coreRandomPolicy,coreEntropyPolicy} from './core-policy-observations';
 // Her own life beyond her nights: the anniversaries of the things she took up,
 // the wants her tastes declare, and the reading she does in the day while they
 // work. What she does about a want, and how one gets harder, is projects.ts —
@@ -26,6 +28,7 @@ const MILESTONE_WORDS: Record<number, string> = {
  * biggest one that is current.
  */
 export function firstsNote(interests: { name: string; since?: string; nights: number }[], today: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof firstsNote>>('own-time.ownfirstsNote',[interests,today]);
   const lines: string[] = [];
   for (const interest of interests) {
     if (!interest.since) continue;
@@ -71,6 +74,7 @@ export const WANT_GAVE_UP = 0.20;
 export const WANT_NOTHING = 0.15;
 
 export function readWants(saved: unknown): Want[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof readWants>>('own-time.ownreadWants',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved.filter((want): want is Want =>
     !!want && typeof want === 'object'
@@ -95,6 +99,7 @@ function wantKey(interest: string, text: string): string {
  * as it moves through done or dropped — only new wording seeds a new record.
  */
 export function reconcileWants(interests: { name: string; since?: string; wants?: string }[], wants: Want[], now: string): Want[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return coreEntropyPolicy<ReturnType<typeof reconcileWants>>('own-time.ownwantsWire',[interests,wants,now],interests.length,()=>Math.random().toString(36).slice(2,10));
   let next = [...wants];
   for (const interest of interests) {
     if (!interest.wants || !interest.name) continue;
@@ -133,6 +138,7 @@ export type WantOutcome = { kind: 'slog' | 'clicked' | 'gave_up' | 'nothing' };
  * are on the table, so a want is never resolved on its first try.
  */
 export function wantOutcome(roll: number, workedNights: number): WantOutcome {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof wantOutcome>>('own-time.ownwantOutcome',[roll,workedNights]);
   if (roll < WANT_SLOG) return { kind: 'slog' };
   if (roll < WANT_SLOG + WANT_CLICKED) return workedNights >= 2 ? { kind: 'clicked' } : { kind: 'slog' };
   if (roll < WANT_SLOG + WANT_CLICKED + WANT_GAVE_UP) return workedNights >= 1 ? { kind: 'gave_up' } : { kind: 'slog' };
@@ -170,6 +176,7 @@ export const REC_ODDS = 0.35;
 export const REC_MAX_PER_DAY = 2;
 
 export function readRecs(saved: unknown): Rec[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof readRecs>>('own-time.ownreadRecs',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved.filter((rec): rec is Rec =>
     !!rec && typeof rec === 'object'
@@ -189,6 +196,7 @@ export function readRecs(saved: unknown): Rec[] {
  * is owed no more, and the composer can be told he has seen it.
  */
 export function recsAnsweredBy(recs: Rec[], theirs: { content?: string; at?: string }[]): { recs: Rec[]; answered: string[] } {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof recsAnsweredBy>>('own-time.ownrecsAnsweredBy',[recs,theirs,new Date().toISOString()]);
   const answered: string[] = [];
   const updated = recs.map(rec => {
     if (rec.followed || rec.answeredAt) return rec;
@@ -217,11 +225,19 @@ const GENERIC_WORDS = new Set(['ultimate', 'edition', 'season', 'series', 'ghost
 
 /** The recommendations made on a day, by the caller's clock. */
 export function recsOnDay(recs: Rec[], dayOf: (iso: string) => string, dayKey: string): Rec[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on') {
+    const requested=corePolicySync<number[]>('own-time.ownrecsCalendar',[recs]);
+    const observed:(string|null)[]=Array.from({length:recs.length},()=>null);
+    if(new Set(requested).size!==requested.length||requested.some(i=>!Number.isInteger(i)||i<0||i>=recs.length))throw Error('core_calendar_observation_protocol');
+    for(const i of requested)observed[i]=dayOf(recs[i].at);
+    return corePolicySync<ReturnType<typeof recsOnDay>>('own-time.ownrecsOnDay',[recs,observed,dayKey]);
+  }
   return recs.filter(rec => Number.isFinite(Date.parse(rec.at)) && dayOf(rec.at) === dayKey);
 }
 
 /** A recommendation overdue for its one follow-up, if any. */
 export function recDueForFollowUp(recs: Rec[], nowMs: number): Rec | null {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof recDueForFollowUp>>('own-time.ownrecDueForFollowUp',[recs,nowMs]);
   return recs
     .filter(rec => !rec.followed && Number.isFinite(Date.parse(rec.at)) && nowMs - Date.parse(rec.at) >= REC_FOLLOW_UP_MS)
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))[0] ?? null;
@@ -233,6 +249,7 @@ export function recDueForFollowUp(recs: Rec[], nowMs: number): Rec | null {
  * keeps it a chance rather than a rota.
  */
 export function pickRecommend(interests: { name: string; stance: string }[], recs: Rec[], nowMs: number, random: () => number = Math.random, madeToday = 0): string | null {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return coreRandomPolicy<ReturnType<typeof pickRecommend>>('own-time.ownpickRecommend',[interests,recs,nowMs,madeToday],random);
   if (madeToday >= REC_MAX_PER_DAY) return null;
   const recd = new Set(recs.filter(rec => nowMs - Date.parse(rec.at) < REC_MIN_GAP_MS).map(rec => rec.interest.toLowerCase()));
   const candidates = interests.filter(interest => interest.stance && !recd.has(interest.name.toLowerCase()));
@@ -242,10 +259,12 @@ export function pickRecommend(interests: { name: string; stance: string }[], rec
 }
 
 export function noteRecommendation(recs: Rec[], interest: string, at: string): Rec[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof noteRecommendation>>('own-time.ownnoteRecommendation',[recs,interest,at,Math.random().toString(36).slice(2,10)]);
   return [...recs, { id: Math.random().toString(36).slice(2, 10), interest, at, followed: false }].slice(-40);
 }
 
 export function markRecFollowed(recs: Rec[], id: string): Rec[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof markRecFollowed>>('own-time.ownmarkRecFollowed',[recs,id]);
   return recs.map(rec => rec.id === id ? { ...rec, followed: true } : rec);
 }
 
@@ -259,6 +278,7 @@ export type HerWeek = {
 
 /** The most recent Sunday on or before the given date. */
 export function weekKey(dayKey: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof weekKey>>('own-time.ownweekKey',[dayKey]);
   const [year, month, day] = dayKey.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() - date.getUTCDay()); // back to Sunday
@@ -266,6 +286,7 @@ export function weekKey(dayKey: string): string {
 }
 
 export function readWeek(saved: unknown): HerWeek | null {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof readWeek>>('own-time.ownreadWeek',[saved]);
   if (!saved || typeof saved !== 'object') return null;
   const record = saved as Partial<HerWeek>;
   if (typeof record.day !== 'string' || typeof record.summary !== 'string') return null;
@@ -274,6 +295,7 @@ export function readWeek(saved: unknown): HerWeek | null {
 
 /** Whether the week summary is due: Sunday evening, not yet written this week. */
 export function weekSummaryDue(now: Date, week: HerWeek | null): boolean {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof weekSummaryDue>>('own-time.ownweekSummaryDue',[now,week]);
   const today = localDateKey(now);
   if (now.getHours() < 18) return false;
   const sunday = weekKey(today);
@@ -283,6 +305,7 @@ export function weekSummaryDue(now: Date, week: HerWeek | null): boolean {
 
 /** What the block shows of the week just past, while it is still the current one. */
 export function weekNote(week: HerWeek | null, today: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof weekNote>>('own-time.ownweekNote',[week,today]);
   if (!week) return '';
   const sunday = weekKey(today);
   if (week.day !== sunday) return '';
@@ -291,6 +314,7 @@ export function weekNote(week: HerWeek | null, today: string): string {
 
 /** What she is handed on Sunday night, with her week's material. */
 export function weekReflectionInstruction(material: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof weekReflectionInstruction>>('own-time.ownweekReflectionInstruction',[material]);
   return [
     'It is Sunday night. This is your week, in what actually happened:',
     material,
@@ -316,6 +340,7 @@ export const DAY_START_HOUR = 10;
 export const DAY_END_HOUR = 17;
 
 export function readDays(saved: unknown): HerDay[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof readDays>>('own-time.ownreadDays',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved.filter((day): day is HerDay =>
     !!day && typeof day === 'object'
@@ -325,11 +350,13 @@ export function readDays(saved: unknown): HerDay[] {
 }
 
 export function keepDay(days: HerDay[], day: HerDay): HerDay[] {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof keepDay>>('own-time.ownkeepDay',[days,day]);
   return [...days, day].slice(-KEEP_DAYS);
 }
 
 /** Whether the daytime pass is due right now. */
 export function dayPassDue(now: Date, todayKey: string, alreadyToday: boolean, roll: number, odds = DAY_ODDS): boolean {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof dayPassDue>>('own-time.owndayPassDue',[now,todayKey,alreadyToday,roll,odds]);
   if (now.getHours() < DAY_START_HOUR || now.getHours() >= DAY_END_HOUR) return false;
   if (alreadyToday) return false;
   // A quiet day makes her likelier to go and do something (dice.ts 'own-time').
@@ -338,6 +365,7 @@ export function dayPassDue(now: Date, todayKey: string, alreadyToday: boolean, r
 
 /** What the block shows of today's reading. */
 export function dayNote(days: HerDay[], today: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof dayNote>>('own-time.owndayNote',[days,today]);
   const latest = days.filter(day => day.day === today).at(-1);
   if (!latest) return '';
   return `- Today, on your own: you read up on "${latest.about}" — ${latest.note}`;
@@ -345,6 +373,7 @@ export function dayNote(days: HerDay[], today: string): string {
 
 /** The pick for the daytime pass, day-flavoured rather than the night one. */
 export function dayPickInstruction(theirs: string[], herRecent: string[]): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof dayPickInstruction>>('own-time.owndayPickInstruction',[theirs,herRecent]);
   const known = theirs.slice(0, 6).map(text => `- ${text.slice(0, 90)}`).join('\n');
   const already = herRecent.slice(-6).map(text => `"${text}"`).join(', ');
   return [
@@ -358,6 +387,7 @@ export function dayPickInstruction(theirs: string[], herRecent: string[]): strin
 
 /** What she is told once the day's reading is in front of her. */
 export function dayNoteInstruction(about: string, found: string): string {
+  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof dayNoteInstruction>>('own-time.owndayNoteInstruction',[about,found]);
   return [
     `It is the middle of the day and you read up on "${about}" for yourself. This is what you found, and it is everything you know about it:`,
     found,

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // What she actually did.
 //
 // She has no record of her own conduct. Her memory holds his life in detail —
@@ -57,7 +58,7 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   core_memory_rethink: a => `rewrote your ${text(a.label, 'memory')} block`,
   note_check_in: a => `noted down "${text(a.note, 'a check-in')}"`,
   save_journal_entry: () => 'wrote their journal entry for the day',
-  adopt_interest: a => `took up ${text(a.name, 'something new')}`,
+  adopt_interest: a => `took up ${text(a.title, text(a.name, 'something new'))}`,
   complete_kept_item: a => `ticked off "${text(a.title, 'one of their items')}"`,
   delete_kept_item: a => `deleted "${text(a.title, 'one of their items')}" from their list`,
   update_kept_item: a => `changed "${text(a.title, 'one of their items')}" on their list`,
@@ -81,14 +82,13 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   run_command: a => `used the terminal on the server${text(a.command) ? `: ${text(a.command).slice(0, 60)}` : ''}`,
   // Asking how it is going is looking; fetching it is the deed.
   get_manga: a => (a.action === 'status' ? '' : `saw to "${text(a.title, 'a manga')}" for them — put it on their shelf and started fetching it`),
-  play_pokemon: a => (a.action === 'start' ? 'sat down to play your Pokémon Red' : a.action === 'stop' ? 'put the Game Boy down' : ''),
-  read_manga: a => `sat down to read your manga${text(a.title) ? ` — ${text(a.title)}` : ''}`,
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
   // Asking how it is going is looking; putting it on or fetching it is the deed.
   watch_anime: a => (a.action === 'status' ? '' : `saw to "${text(a.title, 'a show')}" for them — put it on, or started fetching it`),
 };
 
 export function isADeed(tool: string): boolean {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.isADeed',[tool]);}
   return Object.hasOwn(DEEDS, tool);
 }
 
@@ -101,6 +101,7 @@ export function isADeed(tool: string): boolean {
  * so the first call of a pair changes nothing at all.
  */
 export function deedFrom(tool: string, args: Record<string, unknown>, failed: boolean, atIso: string): Deed | null {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.deedFrom',[tool,args,failed,atIso]);}
   if (failed || !isADeed(tool)) return null;
   const what = DEEDS[tool](args ?? {});
   if (!what) return null;
@@ -108,6 +109,7 @@ export function deedFrom(tool: string, args: Record<string, unknown>, failed: bo
 }
 
 export function readDeeds(saved: unknown): Deed[] {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.readDeeds',[saved]);}
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is Deed => Boolean(entry) && typeof entry === 'object'
@@ -117,10 +119,12 @@ export function readDeeds(saved: unknown): Deed[] {
 }
 
 export function keepDeed(deeds: Deed[], deed: Deed): Deed[] {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.keepDeed',[deeds,deed]);}
   return [...deeds, deed].slice(-DEEDS_KEPT);
 }
 
 export function recentDeeds(deeds: Deed[], nowMs: number, days = DEEDS_SHOWN_DAYS, limit = DEEDS_SHOWN): Deed[] {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.recentDeeds',[deeds,nowMs,days,limit]);}
   const floor = nowMs - days * 86_400_000;
   return deeds
     .filter(deed => { const at = Date.parse(deed.at); return Number.isFinite(at) && at >= floor; })
@@ -139,6 +143,7 @@ export function recentDeeds(deeds: Deed[], nowMs: number, days = DEEDS_SHOWN_DAY
 const A_CLAIM = /\b(?:why (?:did|would|do|are) you|when did you|how come you|did ?n[o']t you|didn't you|you (?:said|told me|turned|deleted|changed|removed|stopped|started|forgot|ignored|blocked|muted|switched|shut|cancelled|canceled|promised|decided|kept)\b|you never\b|you always\b|you keep\b)/i;
 
 export function claimsAboutHer(message: string): boolean {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('deeds.claimsAboutHer',[message]);}
   return A_CLAIM.test(message ?? '');
 }
 
@@ -151,6 +156,7 @@ export function claimsAboutHer(message: string): boolean {
  * because the failure being fixed is her filling a silence with a reason.
  */
 export function deedsInstruction(deeds: Deed[], nowMs: number, dayOf: (iso: string) => string): string {
+  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const selected=corePolicySync<Deed[]>('deeds.recentDeeds',[deeds,nowMs]);return corePolicySync('deeds.deedsInstruction',[deeds,nowMs,selected.map(d=>dayOf(d.at))]);}
   const recent = recentDeeds(deeds, nowMs);
   if (!recent.length) {
     return 'You have not done anything to their things or your own settings lately. If they say you did, they are mistaken — say so, and do not invent a reason for it.';

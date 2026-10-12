@@ -12,23 +12,14 @@ test('observed memory-save sequence does not clear frustration or boredom', () =
   assert.deepEqual(state, { ...NO_FEELINGS, frustration: 34, boredom: 26.63, hemmed: 11 });
 });
 
-test('only success of the failed tool gives one small recovery; failure gives no downtime', () => {
+test('unrelated success does not erase a failure; retired recreation grants no downtime', () => {
   const policy = new DeedFeelings();
-  assert.deepEqual(policy.events('read_manga', {}, '{"error":"offline"}', 0), ['broke']);
+  assert.deepEqual(policy.events('browser_control', {}, '{"error":"offline"}', 0), ['broke']);
   assert.deepEqual(policy.events('remember_about_user', {}, '{"ok":true}', 1), []);
-  assert.deepEqual(policy.events('read_manga', {}, '{"read":true}', 2), ['worked', 'own-time']);
-  assert.deepEqual(policy.events('read_manga', {}, '{"read":true}', 3), []);
-  assert.deepEqual(policy.events('read_manga', {}, '{"read":true}', 1_800_002), ['own-time']);
-});
-
-test('permission, declined starts, status reads, and malformed results give no reward', () => {
-  const policy = new DeedFeelings();
-  for (const result of ['{"confirm":false}', '{"started":false}', 'null', '[]', 'invalid']) {
-    assert.deepEqual(policy.events('play_pokemon', { action: 'start' }, result, 0), []);
-  }
-  assert.deepEqual(policy.events('play_pokemon', { action: 'status' }, '{"ok":true}', 0), []);
-  assert.deepEqual(policy.events('play_pokemon', { action: 'start' }, '{"started":true}', 0), ['own-time']);
-  assert.deepEqual(policy.events('read_manga', {}, '{"read":true}', 1), [], 'shared recreation cooldown');
+  assert.deepEqual(policy.events('browser_control', {}, '{"ok":true}', 2), ['worked']);
+  assert.deepEqual(policy.events('browser_control', {}, '{"ok":true}', 3), []);
+  assert.deepEqual(policy.events('play_pokemon', {action:'start'}, '{"started":true}', 4), []);
+  assert.deepEqual(policy.events('read_manga', {}, '{"read":true}', 5), []);
 });
 
 test('observed near-100 loneliness cannot vanish in three messages, even at maximum relief', () => {

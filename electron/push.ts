@@ -230,7 +230,7 @@ export function pushRequest(
   device: Pick<PushDevice, 'endpoint' | 'p256dh' | 'auth'>,
   payload: string,
   vapid: { publicKey: string; privateKey: string },
-  options: { now?: Date; local?: { privateKey: Buffer }; salt?: Buffer } = {},
+  options: { now?: Date; local?: { privateKey: Buffer }; salt?: Buffer; ttlSeconds?: number } = {},
   topic?: string,
 ): { url: string; headers: Record<string, string>; body: Buffer } {
   const body = sealPayload(
@@ -247,7 +247,7 @@ export function pushRequest(
       'Authorization': `vapid t=${token}, k=${vapid.publicKey}`,
       'Content-Encoding': 'aes128gcm',
       'Content-Type': 'application/octet-stream',
-      'TTL': String(TTL_SECONDS),
+      'TTL': String(options.ttlSeconds === undefined ? TTL_SECONDS : Math.max(0, Math.floor(options.ttlSeconds))),
       'Urgency': 'normal',
       // Same topic, and the push service keeps only the newest while the phone
       // is unreachable: three nudges queued through a bad hour arrive as one.
@@ -257,29 +257,6 @@ export function pushRequest(
     body,
   };
 }
-
-/** The gap between one unprompted push and the next: somewhere in here, never the same twice. */
-export const NUDGE_GAP_MS: [number, number] = [45 * 60_000, 120 * 60_000];
-
-/**
- * How long until the next unprompted push.
- *
- * Random within the gap — a nudge on the hour every three hours is a
- * scheduler, and reads as one. A nudge that would land in the quiet hours is
- * pushed past them, plus a little, so the first of the morning is not on the
- * dot of the quiet ending either. `now` is the user's own clock (zonedNow),
- * the same clock inQuietHours reads.
- */
-/**
- * Enough of an evening left to be worth one more, rather than sleeping on it.
- *
- * At twenty to ten a draw of 45-120 minutes lands after eleven about half the
- * time, and the hop below then carries it past the whole night: she went quiet
- * at 21:37 with a booking 526 minutes out, skipping the eighty minutes of
- * evening that were left. Inside this much of the wakeful day, the draw is
- * squeezed into what remains instead of being thrown over the night.
- */
-export const LAST_CALL_MS = 30 * 60_000;
 
 /** How long until the quiet hours begin, or null if they are already here. */
 export function untilQuiet(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date): number | null {
@@ -291,38 +268,6 @@ export function untilQuiet(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now:
   if (begins.getTime() <= now.getTime()) begins.setDate(begins.getDate() + 1);
   return begins.getTime() - now.getTime();
 }
-
-export function nextNudgeDelay(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date, random: () => number = Math.random): number {
-  const delay = NUDGE_GAP_MS[0] + random() * (NUDGE_GAP_MS[1] - NUDGE_GAP_MS[0]);
-  const at = new Date(now.getTime() + delay);
-  if (!inQuietHours(prefs, at)) return delay;
-  // Would land in the quiet, but the evening is not over: take what is left of
-  // it instead of writing off the night. A minute of margin keeps the landing
-  // off the exact stroke of the quiet hour.
-  const left = untilQuiet(prefs, now);
-  if (left !== null && left >= LAST_CALL_MS) return Math.max(60_000, random() * (left - 60_000));
-  const [hour, minute] = prefs.quietTo.split(':').map(Number);
-  const wake = new Date(at.getTime());
-  wake.setHours(hour, minute, 0, 0);
-  if (wake.getTime() <= at.getTime()) wake.setDate(wake.getDate() + 1);
-  return wake.getTime() - now.getTime() + (5 + random() * 35) * 60_000;
-}
-
-/**
- * The longest she may go without reaching them at all.
- *
- * NUDGE_GAP_MS above caps the gap between *attempts*, which is not the same
- * thing and was mistaken for it: an attempt that gets refused — her line named
- * a finished errand, they were mid-conversation, the app restarted before the
- * timer fired — costs the whole cycle, and a morning of deploys cost eleven of
- * them in a row. This is measured from when something of hers last actually
- * landed, and it is checked on the five-minute beat rather than the random one,
- * so nothing that cancels a booking can cancel this.
- */
-export const NUDGE_FLOOR_MS = 2 * 60 * 60_000;
-
-/** After a composed line was thrown away before it could go out, try again in. */
-export const NUDGE_RETRY_MS = 6 * 60_000;
 
 /**
  * The least time between two notifications that are not reminders.
@@ -337,18 +282,4 @@ export const PUSH_BREATHER_MS = 20 * 60_000;
 export function tooSoonToPush(kind: 'random' | 'events' | 'system' | 'weather', lastReachedAt: number, now: number): boolean {
   if (kind === 'events') return false;
   return lastReachedAt > 0 && now - lastReachedAt < PUSH_BREATHER_MS;
-}
-
-/**
- * Has it been too long since anything of hers reached them?
- *
- * `lastReachedAt` counts a delivered push or a message from them — a
- * conversation is her reaching them too, and buzzing someone mid-reply is the
- * noise this is supposed to prevent, not cause. Zero means nothing is known
- * yet, which is not the same as overdue.
- */
-export function nudgeOverdue(lastReachedAt: number, now: number, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, nowLocal: Date): boolean {
-  if (!lastReachedAt) return false;
-  if (inQuietHours(prefs, nowLocal)) return false;
-  return now - lastReachedAt >= NUDGE_FLOOR_MS;
 }

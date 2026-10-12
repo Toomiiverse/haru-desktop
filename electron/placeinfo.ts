@@ -1,3 +1,5 @@
+import {coreNavRemote} from './core-navigation-policy';
+import {navigationPolicy} from './core-navigation-policy';
 // A place, from somebody who has been there.
 //
 // OpenStreetMap can find "Rockingham" and cannot say whether Happytel is open.
@@ -35,6 +37,7 @@ export const PLACES_URL = 'https://places.googleapis.com/v1/places:searchText';
 const BIAS_RADIUS_M = 30_000;
 
 export function placeRequest(query: string, key: string, near: { lat: number; lon: number } | null) {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('placeRequest',[query,key,near]);
   return {
     method: 'POST',
     headers: {
@@ -64,10 +67,12 @@ const PLACE_TYPES = new Set(['locality', 'sublocality', 'sublocality_level_1', '
 
 /** The suburb out of "K031 Rockingham Centre, 1 Council Ave, Rockingham WA 6168, Australia". */
 export function areaOf(address: string): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('areaOf',[address]);
   return (AREA.exec(address ?? '')?.[1] ?? '').trim();
 }
 
 export function parsePlaces(body: unknown): GooglePlace[] {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('parsePlaces',[body]);
   const found: GooglePlace[] = [];
   for (const hit of (body as Payload)?.places ?? []) {
     const lat = Number(hit.location?.latitude), lon = Number(hit.location?.longitude);
@@ -91,6 +96,7 @@ export function parsePlaces(body: unknown): GooglePlace[] {
 
 /** What a Google error reads as to her, without the project id and the console link. */
 export function plainPlaceError(status: number, body: unknown): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('plainPlaceError',[status,body]);
   const message = String((body as { error?: { message?: string } })?.error?.message ?? '');
   if (/not been used|disabled/i.test(message)) return 'the Places API is switched off on the Google project';
   if (/billing/i.test(message)) return 'Google wants billing enabled on the project';
@@ -99,6 +105,7 @@ export function plainPlaceError(status: number, body: unknown): string {
 }
 
 export async function searchGooglePlaces(query: string, key: string, near: { lat: number; lon: number } | null, fetchImpl: Fetcher): Promise<GooglePlace[]> {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreNavRemote('google',[query,key,near],fetchImpl);
   if (!key) throw new Error('no Google Maps key');
   const response = await fetchImpl(PLACES_URL, placeRequest(query, key, near));
   const body = await response.json().catch(() => ({}));
@@ -114,6 +121,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
  * day name, because the list is Monday-first and today is whatever it is.
  */
 export function placeWords(place: PlaceFacts & { name: string }, weekday: number): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('placeWords',[place,weekday]);
   const bits: string[] = [];
   if (place.closed) bits.push(place.closed === 'permanently' ? 'Google lists it as permanently closed.' : 'Google lists it as temporarily closed.');
   if (place.address) bits.push(`Address: ${place.address}.`);
@@ -143,6 +151,7 @@ const NOT_A_SHOP = /^(?:you|i|we|they|he|she|it|this|that|there|my|your|door|win
 
 /** The question about a place's doors, hours or worth, if the message is one. */
 export function placeAsk(text: string): PlaceAsk | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('placeAsk',[text]);
   const line = (text ?? '').trim();
   if (!line || line.length > 300) return null;
   for (const { pattern, want } of PLACE_ASKS) {
@@ -158,6 +167,7 @@ export function placeAsk(text: string): PlaceAsk | null {
 
 /** Her brief for a doors-and-hours question — no maps button under it, so no route talk either. */
 export function placeNote(ask: PlaceAsk, place: GooglePlace | null, weekday: number): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('placeNote',[ask,place,weekday]);
   const wanted = ask.want === 'open' ? 'whether it is open' : ask.want === 'hours' ? 'its hours' : 'whether it is any good';
   if (!place) return `They asked about "${ask.destination}" — ${wanted}. Google Maps was searched and nothing was found by that name. Say so plainly; do not guess at hours or make up a shop.`;
   // An address alone does not answer "is it open": the gap is named, so she

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import * as fs from 'node:fs';
 import { createFolder, insideVault, listVault, readNote, writeNote, NOTE_CAP_CHARS } from '../electron/vaultnotes';
 
 function vault(): string {
@@ -18,6 +19,63 @@ function vault(): string {
   writeFileSync(path.join(root, 'Haru', 'Her.md'), 'hers');
   return root;
 }
+
+test('linked files and directories cannot escape or share note writes', () => {
+  const root = vault();
+  const outside = mkdtempSync(path.join(tmpdir(), 'haru-outside-fixture-'));
+  try {
+    writeFileSync(path.join(outside, 'Secret.md'), 'disposable outside fixture\n');
+    fs.symlinkSync(outside, path.join(root, 'Link'), 'dir');
+    fs.symlinkSync(path.join(outside, 'Secret.md'), path.join(root, 'Linked.md'));
+    fs.linkSync(path.join(outside, 'Secret.md'), path.join(root, 'Hard.md'));
+    assert.equal(readNote(root, 'Link/Secret.md').ok, false);
+    assert.equal(readNote(root, 'Linked.md').ok, false);
+    assert.equal(listVault(root, 'Link').ok, false);
+    assert.equal(writeNote(root, 'Link/Created.md', 'new', 'create').ok, false);
+    assert.equal(createFolder(root, 'Link/Folder').ok, false);
+    assert.equal(writeNote(root, 'Hard.md', 'new', 'append').ok, false);
+    assert.equal(writeNote(root, 'Linked.md', 'new', 'replace').ok, false);
+    assert.equal(readFileSync(path.join(outside, 'Secret.md'), 'utf8'), 'disposable outside fixture\n');
+    assert.equal(existsSync(path.join(outside, 'Created.md')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('create is exclusive even if another file appears after its existence check', () => {
+  const root = vault(), target = path.join(root, 'Race.md');
+  const original = fs.existsSync;
+  // The compiler's namespace wrapper can be read-only; patch the actual CJS
+  // module so the real helper observes this deterministic interleaving.
+  const module = require('node:fs') as typeof fs;
+  module.existsSync = ((given: fs.PathLike) => {
+    const existed = original(given);
+    if (given === target && !existed) writeFileSync(target, 'competing writer\n');
+    return existed;
+  }) as typeof fs.existsSync;
+  try {
+    const result = writeNote(root, 'Race.md', 'proposed write', 'create');
+    assert.ok(!result.ok && result.exists === true);
+    assert.equal(readFileSync(target, 'utf8'), 'competing writer\n');
+  } finally { module.existsSync = original; rmSync(root, { recursive: true, force: true }); }
+});
+
+test('exact create preserves UTF-8 text while ordinary writes retain their normalization', () => {
+  const root = vault();
+  try {
+    const bodies = ['', '  \n', 'no newline', '😀\r\nSecond\n\n', '\ufeffBOM\r\n'];
+    bodies.forEach((body, i) => {
+      const result = writeNote(root, `Exact${i}.md`, body, 'create', true);
+      assert.ok(result.ok && result.preserved === true && result.chars === body.length && !result.existed);
+      assert.deepEqual(readFileSync(path.join(root, `Exact${i}.md`)), Buffer.from(body, 'utf8'));
+    });
+    const ordinary = writeNote(root, 'Ordinary.md', 'First\r\nLast\n\n', 'create');
+    assert.ok(ordinary.ok && ordinary.preserved === undefined);
+    assert.equal(readFileSync(path.join(root, 'Ordinary.md'), 'utf8'), 'First\nLast\n');
+    for (const mode of ['append', 'replace'] as const) {
+      assert.equal(writeNote(root, 'Exact3.md', 'changed', mode, true).ok, false);
+      assert.equal(readFileSync(path.join(root, 'Exact3.md'), 'utf8'), bodies[3]);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('a path is inside the vault, a note, and not hers — or it is refused with a reason', () => {
   const root = vault();

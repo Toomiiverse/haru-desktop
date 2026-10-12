@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Consolidation: the periodic review that keeps the memory list honest.
 //
 // Runs on stored records, never on the write path — rememberInto still handles
@@ -44,12 +45,14 @@ const NEGATIVE = /\b(do(?:es)?n'?t|do not|does not|not|never|dislikes?|hates?|st
 const POSITIVE = /\b(likes?|loves?|enjoys?|uses?|wants?|prefers?|is a|is the|has|had|does)\b/i;
 
 export function polarity(text: string): 'positive' | 'negative' | 'neutral' {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<'positive' | 'negative' | 'neutral'>('memory-maintenance.polarity', [text]);
   if (NEGATIVE.test(text)) return 'negative';
   if (POSITIVE.test(text)) return 'positive';
   return 'neutral';
 }
 
 export function isContradictory(a: MemoryRecord, b: MemoryRecord): boolean {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<boolean>('memory-maintenance.isContradictory', [a,b]);
   const left = keywords(a.text);
   const right = keywords(b.text);
   if (!left.size || !right.size) return false;
@@ -62,6 +65,7 @@ export function isContradictory(a: MemoryRecord, b: MemoryRecord): boolean {
 }
 
 export function overlapScore(a: MemoryRecord, b: MemoryRecord): number {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<number>('memory-maintenance.overlapScore', [a,b]);
   const left = keywords(a.text);
   const right = keywords(b.text);
   if (!left.size || !right.size) return 0;
@@ -87,6 +91,7 @@ export function overlapScore(a: MemoryRecord, b: MemoryRecord): number {
  * while mergedFrom only ever held the ids of records that no longer exist.
  */
 export function mergeText(a: string, b: string): string {
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<string>('memory-maintenance.mergeText', [a,b]);
   return a.length >= b.length ? a : b;
 }
 
@@ -133,6 +138,8 @@ export type ConsolidationChange = {
 
 export type ConsolidateOptions = {
   now?: string;
+  /** Measured vectors, transferred once; Core decides semantic merge thresholds. */
+  vectors?: Map<string, number[]>;
   /** Semantic similarity between two records, when an embedder is available.
    *  Absent → keyword overlap only. */
   similarity?: (a: MemoryRecord, b: MemoryRecord) => number | undefined;
@@ -150,6 +157,14 @@ export type ConsolidationResult = {
  */
 export function consolidateMemories(memories: MemoryRecord[], options: ConsolidateOptions = {}): ConsolidationResult {
   const now = options.now ?? new Date().toISOString();
+  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') {
+    // Custom callbacks report identity-pair observations. Live callers send raw
+    // vectors once, avoiding O(n²) policy RPCs. No Node merge decision runs.
+    const observations: [string,string,number | undefined][] = [];
+    if (options.similarity && !options.vectors) for (let i=0;i<memories.length;i++) for(let j=i+1;j<memories.length;j++) observations.push([memories[i].id,memories[j].id,options.similarity(memories[i],memories[j])]);
+    const result=corePolicySync<ConsolidationResult>('memory-maintenance.consolidateMemories',[memories,now,observations,options.vectors ? [...options.vectors] : []]);
+    return result.changes.length ? result : {...result,memories};
+  }
   const changes: ConsolidationChange[] = [];
   // Superseded and archived records are history, not candidates — the sweep
   // must not tidy away something that was deliberately shelved.

@@ -1,3 +1,5 @@
+import {corePolicySync} from './core-policy-sync';
+import {agendaClock} from './core-agenda-lifecycle';
 import { justTalking, readsAsRough } from './room';
 import { reminderAsk } from './remindme';
 import { asksToLookUp } from './reply';
@@ -122,6 +124,8 @@ export type HeldOptions = {
  * A bare greeting is not decided here; nothingInIt already does that.
  */
 export function roomHeldBack(latest: string, options: HeldOptions = {}): string {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-policy.roomHeldBack',[latest,{...options,now:agendaClock(options.now??new Date())}]);
+
   const said = (latest ?? '').replace(/[‘’]/g, "'").trim();
   if (!said) return '';
   if (options.answering) return 'they are answering something she asked';

@@ -78,7 +78,7 @@ test('the documented order holds, from the tools down to the last word', () => {
     ['the fresh-start correction', 'deliberately cleared'],
     ['being told to drop it', 'leave the subject of work alone'],
     ['goodnight', 'They are saying goodnight'],
-    ['the row about being shouted at', 'not being spoken to like that'],
+    ['the row about being shouted at', 'do not like being spoken to like that'],
   ] as const;
 
   let previous = -1;
@@ -219,7 +219,7 @@ test('a day the list disagrees with becomes the subject, and outranks the put-of
 
 test('a short follow-up is read as continuing the thread, and never echoed back as an opener', () => {
   const prompt = chatSystemPrompt(state());
-  const continuity = prompt.indexOf('Read the last few turns before answering');
+  const continuity = prompt.indexOf('Read the last few turns and pick up from there');
   assert.notEqual(continuity, -1, 'the continuity rule never made it into the prompt');
   assert.ok(prompt.includes('an echo cannot'));
   assert.ok(continuity > prompt.indexOf(IDENTITY), 'it must come after the persona, or a small model forgets it');
@@ -391,4 +391,13 @@ test('a question about what she can see routes to describe_myself', () => {
   // is"); she never called it, because the trigger named her models and voice
   // and not her senses.
   assert.match(prompt, /what you can see, know, reach or have access to/i);
+});
+
+test('tested lessons and labelled imagination reach both normal and cached chat prompts', () => {
+  const s = state({ learnedLessons: 'SENTINEL-TESTED-LESSON', imaginedDream: 'SENTINEL-FICTION-ONLY' });
+  assert.match(chatSystemPrompt(s), /SENTINEL-TESTED-LESSON/);
+  assert.match(chatSystemPrompt(s), /SENTINEL-FICTION-ONLY/);
+  assert.doesNotMatch(chatSystemPrompt(s, true), /SENTINEL-TESTED-LESSON|SENTINEL-FICTION-ONLY/);
+  assert.match(chatDynamicContext(s), /SENTINEL-TESTED-LESSON/);
+  assert.match(chatDynamicContext(s), /SENTINEL-FICTION-ONLY/);
 });
