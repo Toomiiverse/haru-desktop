@@ -8,7 +8,8 @@ import { createTurnContext } from '../electron/turncontext';
 import { appendPhoneTurn } from '../electron/core-brain-history';
 
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
-const fake = (status: number, type: string, body: Buffer) => (async () => new Response(new Uint8Array(body), { status, headers: { 'content-type': type } })) as unknown as typeof fetch;
+const seen: { headers?: Record<string, string> }[] = [];
+const fake = (status: number, type: string, body: Buffer) => (async (_url: string, init?: RequestInit) => { seen.push({ headers: init?.headers as Record<string, string> }); return new Response(new Uint8Array(body), { status, headers: { 'content-type': type } }); }) as unknown as typeof fetch;
 
 test('a web picture is saved beside her drawings with its type as the extension', async () => {
   const folder = mkdtempSync(path.join(tmpdir(), 'haru-pictures-'));
@@ -17,6 +18,8 @@ test('a web picture is saved beside her drawings with its type as the extension'
   assert.deepEqual(readdirSync(folder), [`${made.id}.jpg`]);
   assert.deepEqual(readFileSync(made.file), png);
   assert.equal(made.source, 'https://www.imdb.com/title/tt1/');
+  assert.equal(seen.at(-1)?.headers?.Referer, 'https://www.imdb.com/title/tt1/');
+  assert.match(seen.at(-1)?.headers?.['User-Agent'] ?? '', /Mozilla/);
 });
 
 test('not an image, not https, too large and errors are refused without writing', async () => {
