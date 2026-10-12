@@ -6085,7 +6085,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // This turn owns its tool state from entry through every round and retry.
   // Reading outside text withdraws its tools without affecting other replies.
   // Publish once, after the tool loop and final filters accept the reply.
-  const replyGate = new ReplyGate(onChunk);
+  const replyGate = new ReplyGate(onChunk, line => console.warn(line));
   let spilledHome = false;
   // Fixed for the whole turn. Only `tools` changes round to round, and that is
   // the loop's decision rather than this function's.
