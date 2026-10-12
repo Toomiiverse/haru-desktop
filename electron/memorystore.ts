@@ -354,6 +354,10 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       const current = new Map(getMemories().filter(memory => !memory.supersededBy).map(memory => [memory.id, memory.text]));
       const next = new Map<string, number[]>();
       memories.forEach((memory, index) => { if (current.get(memory.id) === memory.text) next.set(memory.id, embedded[index]); });
+      // Said out loud, because the failure below is survivable by design: with
+      // only a warning to go on, a semantic memory that has been off for a
+      // month and one working perfectly look exactly alike in the log.
+      if (!vectors.size) console.log(`[memory] embedded ${next.size} memories with ${model.model}; retrieval is semantic`);
       vectors = next;
     } catch (error) {
       // Kept, not cleared: yesterday's vectors still score better than none.

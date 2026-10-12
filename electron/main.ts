@@ -113,7 +113,7 @@ import { ReplyGate } from './reply-gate';
 import { readModelRegistry, readTaskPolicy, isLocalConfig, type ModelEntry, type ModelRole, type RouteRequest } from './model-registry';
 import {callRegistry,selectCallModel,CALL_ROUTE_ID} from './call-route';
 import { assertOutboundSafe, guardedRequest } from './outbound';
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer, session } from 'electron';
 import { installConsole, broadcastConsole, consolePort } from './console';
 installConsole();
 import path from 'node:path';
@@ -125,6 +125,9 @@ import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
 import { CoreWorkWorld, workWorldAssets } from './core-work-world';
+import { apiUsage, trackedFetch } from './apiusage';
+import { collectSpend, keepSnapshots, type BalanceSnapshot, type ServiceSpend } from './spend';
+import { SERVER_PARTITION, serverOrigin, sendServerChat, serverJson, jsonPost, type ServerRequest } from './server-chat';
 import { AttentionExperiment, readAttentionMode } from './attention';
 import { ActivityObservations, idleWithoutEyes, type ActivityObservation } from './activity-observation';
 import { ActivityReporter } from './activity-reporter';
@@ -142,7 +145,7 @@ import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_K
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
-import { activityInstruction, isJustATool, isNotable, readActivity, type Activity, type ActivityKind } from './activity';
+import { activityInstruction, isJustATool, isNotable, promotedByFullscreen, readActivity, type Activity, type ActivityKind } from './activity';
 import { belongsToPlace, expireHaunts, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
@@ -154,11 +157,14 @@ import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsThei
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
-import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig } from './search';
+import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
+import { groundPosition, fallPosition, fallFrame, jumpFrame, jumpPosition, type PerchJump, type PerchFall, type PerchState, choosePerch, perchPosition, parseSurfaces, readPerchMetrics, type Perch, type PerchMetrics, type DesktopSurface } from './perching';
+import { chooseLockedDisplay, clampAvatar, surfacesOnDisplay, desktopScene, chooseVisit, visitTarget, type DesktopVisit, type DesktopScene, type DesktopPeek } from './desktopAwareness';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
 import { CAPTURE_HEIGHT, CAPTURE_WIDTH, readWatchingConfig, recentScene, sceneAsk, shouldLook, watchingPrompt, worthMentioning, type WatchingConfig } from './watching';
 import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, welcomePrompt } from './games';
+import { obsScreenshot, readObsServer } from './obs';
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
@@ -225,7 +231,9 @@ import { readCallConfig, pickFiller } from './call';
 import { openLocalCall, withoutWavHeader, oneChunk, wavSampleRate } from './localcall';
 import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
-import { readBrowserControlConfig } from './browserctl';
+import { cdpBrowser, readBrowserControlConfig, type Browser } from './browserctl';
+import { playwrightArgs, playwrightBrowser, type PlaywrightBrowser } from './playwright';
+import { startGuardProxy } from './webguard';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, DIAGNOSTIC_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { readWhatsAppConfig, readHeard, isForHer, asTurn, asOverheard, chatLabel, splitForWhatsApp, gapBefore, sendThroughWorker, type WhatsAppConfig, type Heard as WhatsAppHeard } from './whatsapp';
@@ -250,7 +258,7 @@ import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { easedEnough, easedFallback, easedPrompt, gaveUpFallback, gaveUpPrompt, stopsTrafficWatch, trafficWatchAsk, TRAFFIC_WATCH_KIND, WATCH_EVERY_MS, WATCH_FOR_MS, watchJob, watchNote } from './trafficwatch';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
-import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, spliceRecentAsides, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
+import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, keepHeldBack, spliceRecentAsides, markReached, pruneAsides, readAsides, type Aside, type AsideSource, type HeldBack, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
@@ -271,7 +279,7 @@ import { chooseGuide, gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guide
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, DREAMS_FILE, recentEntries, type Dream, type Entry } from './diary';
-import { liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
+import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from './feedback';
 import { appendTuningPage, recordTuning, tuningNote } from './tuning';
@@ -385,6 +393,12 @@ const ACTIVITY_RETENTION_DAYS = 90;
 const SESSIONS_KEPT = ARCHIVE_RETENTION_DAYS + 60;
 
 const live2dRoots = new Map<string, string>();
+let microphoneListening = false;
+function setMicrophoneListening(active: boolean) {
+  if (microphoneListening === active) return;
+  microphoneListening = active;
+  sendToWindows('listen:active', active);
+}
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 
@@ -541,7 +555,7 @@ async function lookAtSyncedShots() {
       const bytes = readShot(root, shot.day, shot.name);
       if (!bytes) continue;
       try {
-        const sighting = await backgroundLook(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
+        const sighting = await backgroundLook(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), trackedFetch, {
           ask: SHOT_LOOK_PROMPT,
           keepAlive,
           numCtx: visionNumCtx(vision, endpoint),
@@ -589,11 +603,15 @@ async function lookAtSyncedShots() {
 }
 
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
-const storeOptions = { cwd: app.getPath('userData'), knowledgeFile };
 
 // Opening and recovery share the actual user-data paths. A corrupt config is
 // replaced by its newest valid backup, keeping healthy files and damaged bytes.
 let store: HaruStore;
+// Spelled out rather than left to default. Both are userData either way, but
+// recoverBackups builds its own paths from these options — with no cwd it looks
+// for a relative "config.json" beside the executable, finds nothing, and
+// recovers everything except the one file most likely to need it.
+const storeOptions = { knowledgeFile, cwd: app.getPath('userData') };
 let storeWasRecovered = false;
 try {
   store = new HaruStore(storeOptions);
@@ -604,6 +622,16 @@ try {
   // was between the backup and now, she does not have any more (feelings.ts).
   storeWasRecovered = true;
   store = new HaruStore(storeOptions);
+}
+// The line above does not read the file: conf parses on the first get, so a
+// half-written config.json opens perfectly and then throws from whichever timer
+// reads first — 720 times in 23 seconds, in the one case on record. verify is
+// the eager read that turns that into a recovery here, where a backup can still
+// be put back, instead of a crash loop an hour later.
+if (!store.verify()) {
+  console.error('[store] a store file will not parse — restoring the newest backup');
+  if (HaruStore.recoverBackups(storeOptions)) { storeWasRecovered = true; store = new HaruStore(storeOptions); }
+  else console.error('[store] no backup to restore; carrying on with what parses');
 }
 store.migrate();
 store.hardenPermissions();
@@ -663,6 +691,36 @@ if (process.env.HARU_RESET === '1') {
   console.log('[reset] HARU_BODY_CLEAR is set — this machine is letting go of its own life');
   resetHer({ body: true });
 }
+
+// Counted rather than bare. Everything Haru calls out to goes through this one
+// wrapper — including the fetch handed down to the modules that take one — so
+// the services panel has a tally per host without a counter in every caller.
+// See apiusage.ts for why it is flushed on a timer rather than on each call.
+apiUsage.load(store.get('apiusage'));
+function saveApiUsage() { if (apiUsage.dirty) store.set('apiusage', apiUsage.snapshot()); }
+
+// What each service costs and what is left in it (spend.ts). The Claude Code
+// pass reads a month of transcripts — a second of work the first time — so the
+// answer is held for ten minutes rather than gathered again per repaint.
+let spendHeld: { at: number; report: ServiceSpend[] } | null = null;
+const SPEND_FRESH_MS = 10 * 60_000;
+
+function spendReport(force = false): ServiceSpend[] {
+  if (!force && spendHeld && Date.now() - spendHeld.at < SPEND_FRESH_MS) return spendHeld.report;
+  const balance = store.get('venice.balance') as { usd?: number; diem?: number } | undefined;
+  const calls: Record<string, number> = {};
+  for (const row of apiUsage.report()) calls[row.service] = row.month;
+  const report = collectSpend({
+    home: os.homedir(),
+    venice: balance && Number.isFinite(Number(balance.usd)) ? { usd: Number(balance.usd), diem: Number(balance.diem ?? 0) } : null,
+    veniceHistory: (store.get('venice.balanceHistory') as BalanceSnapshot[] | undefined) ?? [],
+    veniceLowUsd: typeof store.get('venice.lowBalanceUsd') === 'number' ? store.get('venice.lowBalanceUsd') as number : 2,
+    calls,
+  });
+  spendHeld = { at: Date.now(), report };
+  return report;
+}
+setInterval(saveApiUsage, 5 * 60_000).unref();
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -777,6 +835,211 @@ let lastWalkAt = 0;
 let lastUserMovedAt = Date.now();
 let nextWanderAt = 0;
 
+// Window-edge perching uses the same desktop helper and movement tick as roaming.
+let desktopSurfaces: DesktopSurface[] = [];
+let surfacesAt = 0;
+let perchMetrics: PerchMetrics | null = null;
+let perched: Perch | null = null;
+let perchMove: { from: Point; started: number; duration: number; landing?: Point } | null = null;
+let perchFall: PerchFall | null = null;
+let perchHoldUntil = Date.now() + 12_000;
+let nextPerchCheck = 0;
+let companionDragging = false;
+let perchReducedMotion = false;
+let ignoringCompanionMouse = false;
+
+let desktopVisit: (DesktopVisit & {phase:'approach'|'hidden'|'peek'|'return';home:Point;started:number;holdUntil:number;jump?:PerchJump;from?:Point}) | null = null;
+let desktopPeek: DesktopPeek | null = null;
+let lastDesktopSnapshot = '';
+let settledPerchAt = 0;
+
+function desktopSnapshot(): DesktopScene | undefined {
+  if(!companionWindow || companionWindow.isDestroyed())return;
+  const body=companionWindow.getBounds(),display=companionDisplay(body);
+  return desktopScene(freshSurfaces(),display.workArea,body,display.id,desktopPeek,desktopVisit?.id);
+}
+function reportDesktop() {
+  const state=perchState(),key=JSON.stringify(state);
+  if(key!==lastDesktopSnapshot){lastDesktopSnapshot=key;sendToWindows('companion:perching',state);}
+}
+function cancelDesktopVisit(land=true) {
+  const elevated=desktopVisit?.edge==='top' && desktopVisit.phase==='peek';
+  if(!desktopVisit && !desktopPeek)return;
+  desktopVisit=null;desktopPeek=null;stopWalking();
+  nextWanderAt=Date.now()+20_000;perchHoldUntil=Math.max(perchHoldUntil,Date.now()+30_000);
+  if(elevated && land)settleOnGround();
+  reportPerch();
+}
+function beginDesktopVisit(target:DesktopVisit,body:Bounds) {
+  const surface=freshSurfaces().find(s=>s.id===target.id);if(!surface || !perchMetrics)return false;
+  const work=companionDisplay(body).workArea;
+  const hidden=groundPosition(work,{...body,x:surface.x+surface.width*target.offset-body.width/2},perchMetrics.feet);
+  desktopVisit={...target,phase:'approach',home:{x:body.x,y:body.y},started:Date.now(),holdUntil:0};
+  desktopPeek=null;perchHoldUntil=Date.now()+90_000;walkTo(hidden);reportPerch();return true;
+}
+function visitTick(now:number,body:Bounds):boolean {
+  const visit=desktopVisit;if(!visit)return false;
+  if(desktopBusy() || !roamState().enabled){cancelDesktopVisit();return false;}
+  const surfaces=freshSurfaces(),surface=surfaces.find(s=>s.id===visit.id),work=companionDisplay(body).workArea;
+  if(!surface || !perchMetrics || now-visit.started>90_000){cancelDesktopVisit();return false;}
+  const target=visitTarget(surface,visit.edge,work,body,perchMetrics,visit.offset,surfaces);
+  if(!target){cancelDesktopVisit();return false;}
+  if(visit.phase==='return'){
+    if(walkingTo || perchMove || perchFall)return false;
+    desktopVisit=null;desktopPeek=null;nextWanderAt=now+20_000+Math.round((desktopSnapshot()?.crowding??0)*20_000);perchHoldUntil=now+30_000;reportPerch();return false;
+  }
+  if(visit.phase==='approach'){
+    const hidden=groundPosition(work,{...body,x:surface.x+surface.width*visit.offset-body.width/2},perchMetrics.feet);
+    if(Math.abs(body.x-hidden.x)>2){walkingTo=hidden;return false;}
+    stopWalking();visit.phase='hidden';visit.holdUntil=now+900;reportPerch();return true;
+  }
+  if(visit.phase==='hidden'){
+    if(now<visit.holdUntil)return true;
+    visit.phase='peek';
+    if(visit.edge==='top'){
+      visit.from={x:body.x,y:body.y};visit.jump={started:now,flight:Math.min(1000,640+Math.hypot(target.x-body.x,target.y-body.y)*.35)};
+      reportPerch();
+    }else walkTo(target);
+  }
+  if(visit.jump){
+    const frame=jumpFrame(visit.jump,now,perchReducedMotion),ceiling=work.y+12-perchMetrics.head*body.height;
+    const point=jumpPosition(visit.from!,target,frame,body.height,ceiling);positionCompanion(point.x,point.y);
+    if(frame.phase!=='seated' || Math.abs(body.x-target.x)>1 || Math.abs(body.y-target.y)>1)return true;
+    visit.jump=undefined;reportPerch();
+  }
+  if(visit.edge!=='top' && Math.abs(body.x-target.x)>2){walkingTo=target;return false;}
+  stopWalking();
+  if(visit.edge==='top')positionCompanion(target.x,target.y);
+  if(!desktopPeek){desktopPeek={edge:visit.edge,started:now,duration:2600};visit.holdUntil=now+2600;reportPerch();}
+  if(now<visit.holdUntil)return true;
+  const elevated=visit.edge==='top';visit.phase='return';desktopPeek=null;visit.jump=undefined;
+  if(elevated)settleOnGround();
+  walkTo(visit.home);reportPerch();return false;
+}
+function desktopGeometryNote(): string {
+  const desktop=desktopSnapshot();if(!desktop)return '';
+  const action=desktopPeek?`peeking around a window's ${desktopPeek.edge} edge`:perched?'sitting on a window edge':perchFall?'coming down to the floor':walkingTo?'walking along the monitor floor':'standing on the monitor floor';
+  const windows=Date.now()-surfacesAt<5000?`${desktop.windowCount} visible windows covering about ${Math.round(desktop.crowding*100)}% of its work area`:'window geometry is temporarily unavailable';
+  return `Current desktop facts: you remain on your assigned monitor; ${windows}. You are ${action}. These facts come only from window rectangles; they do not reveal window contents.`;
+}
+function reconcileCompanionDisplay() {
+  if(!companionWindow || companionWindow.isDestroyed())return;
+  cancelDesktopVisit(false);detachPerch(false);stopWalking();
+  const body=companionWindow.getBounds();companionDisplay(body);
+  const width=clampCompanionWidth(body.width),height=Math.round(width*COMPANION_ASPECT);
+  const point=clampCompanionPosition(body.x,body.y,width,height);
+  companionWindow.setBounds({...point,width,height});settleOnGround(false);reportDesktop();
+}
+
+function freshSurfaces() { return Date.now()-surfacesAt < 5000 ? surfacesOnDisplay(desktopSurfaces,companionDisplay(companionWindow?.getBounds()).workArea) : []; }
+function companionDisplay(body?: Bounds) {
+  const displays=screen.getAllDisplays(),saved=store.get('companion.displayId');
+  const selected=chooseLockedDisplay(displays,saved,body ?? screen.getPrimaryDisplay().workArea);
+  if(saved!==selected.id)store.set('companion.displayId',selected.id);
+  return selected;
+}
+function perchDisplays() { return [companionDisplay(companionWindow?.getBounds()).workArea]; }
+function desktopBusy() { return companionDragging || summonOpen || speakingNow || microphoneListening || perchReducedMotion; }
+function canPerch() { return !!perchMetrics && !!currentModelPath()?.toLowerCase().endsWith('.vrm'); }
+function perchState(): PerchState {
+  return {seated:!!perched,jump:desktopVisit?.jump ?? (perched && perchMove && !perchMove.landing ? {started:perchMove.started,flight:perchMove.duration} : null),fall:perchFall,desktop:desktopSnapshot()};
+}
+function reportPerch() { reportDesktop(); }
+function clearFall() {
+  if(!perchFall)return;
+  perchFall=null;reportPerch();
+}
+function settleOnGround(react=true) {
+  if(!canPerch() || !companionWindow || companionWindow.isDestroyed())return;
+  const body=companionWindow.getBounds(),target=groundPosition(companionDisplay(body).workArea,body,perchMetrics!.feet);
+  reportWalk(false,0);
+  perchMove={from:body,started:Date.now(),duration:Math.min(950,Math.max(180,Math.sqrt(Math.max(0,target.y-body.y)/1800)*1000)),landing:target};
+  const distance=target.y-body.y,wasFalling=!!perchFall;
+  perchFall=react && !perchReducedMotion && distance>8
+    ?{started:perchMove.started,duration:perchMove.duration,strength:Math.min(1,Math.max(.2,Math.sqrt(distance/(body.height*1.1))))}:null;
+  if(perchFall || wasFalling)reportPerch();
+}
+function detachPerch(land: boolean) {
+  cancelDesktopVisit(false);settledPerchAt=0;
+  const was=!!perched,wasFalling=!!perchFall;perched=null;perchMove=null;perchFall=null;perchHoldUntil=Date.now()+30_000;
+  if(was || wasFalling)reportPerch();
+  if(was && land)settleOnGround();
+}
+function attachPerch(target: Perch) {
+  if(!companionWindow || companionWindow.isDestroyed())return;
+  const from=companionWindow.getBounds(),to=perchMetrics&&perchPosition(target,freshSurfaces(),from,perchMetrics,perchDisplays());
+  if(!to)return;
+  cancelDesktopVisit(false);settledPerchAt=0;stopWalking();perchFall=null;perched={...target,size:{width:from.width,height:from.height}};
+  perchMove=perchReducedMotion?null:{from,started:Date.now(),duration:Math.min(1000,640+Math.hypot(to.x-from.x,to.y-from.y)*.35)};
+  reportPerch();
+}
+function findPerch(nearby: boolean) {
+  if(!canPerch() || !companionWindow || companionWindow.isDestroyed())return null;
+  return choosePerch(freshSurfaces(),companionWindow.getBounds(),perchMetrics!,perchDisplays(),nearby);
+}
+// Electron round-trips the size through integer DIPs even for setPosition.
+// At fractional display scaling that repeatedly enlarges a transparent canvas.
+// The existing Windows helper moves the HWND with SWP_NOSIZE instead.
+function positionCompanion(x: number, y: number) {
+  if(!companionWindow || companionWindow.isDestroyed())return;
+  const body=companionWindow.getBounds(),next=clampCompanionPosition(x,y,body.width,body.height);
+  const point={x:Math.round(next.x),y:Math.round(next.y)};
+  if(process.platform==='win32' && helperReady && helper?.stdin?.writable) {
+    const physical=screen.dipToScreenPoint(point),handle=companionWindow.getNativeWindowHandle();
+    const id=handle.length>=8?handle.readBigUInt64LE().toString():String(handle.readUInt32LE());
+    helper.stdin.write(`move ${id} ${physical.x} ${physical.y}\n`);
+  } else companionWindow.setPosition(point.x,point.y);
+}
+function perchTick(now: number, body: Bounds): boolean {
+  if(companionDragging)return true;
+  if(perched && canPerch()) {
+    const target=perchPosition(perched,freshSurfaces(),body,perchMetrics!,perchDisplays());
+    if(target) {
+      let x=target.x,y=target.y;
+      if(perchMove) {
+        const frame=jumpFrame({started:perchMove.started,flight:perchMove.duration},now,perchReducedMotion);
+        const ceiling=companionDisplay(body).workArea.y+12-perchMetrics!.head*body.height;
+        const point=jumpPosition(perchMove.from,target,frame,body.height,ceiling);x=point.x;y=point.y;
+        if(frame.phase==='seated'){perchMove=null;settledPerchAt=now;reportPerch();}
+      }
+      if(!perchMove && !settledPerchAt)settledPerchAt=now;
+      if(!perchMove && now-settledPerchAt>90_000 && !desktopBusy() && roamState().enabled){detachPerch(true);nextWanderAt=now+20_000;return true;}
+      x=Math.round(x);y=Math.round(y);
+      if(body.x!==x || body.y!==y)positionCompanion(x,y);
+      return true;
+    }
+    detachPerch(true);
+  } else if(perched)detachPerch(true);
+  if(perchMove?.landing) {
+    const to=perchMetrics?groundPosition(companionDisplay(body).workArea,body,perchMetrics.feet):perchMove.landing;
+    const point=fallPosition(perchMove.from,to,now-perchMove.started,perchMove.duration,perchReducedMotion);
+    // The Windows movement helper is asynchronous. Observe contact rather than
+    // starting the landing reaction when its final move has merely been sent.
+    if(Math.abs(body.x-to.x)<=1 && Math.abs(body.y-to.y)<=1) {
+      perchMove=null;
+      if(perchFall){perchFall={...perchFall,landed:now};reportPerch();}
+    } else positionCompanion(point.x,point.y);
+    return true;
+  }
+  // Dragging and supported seats were handled above. Any other VRM placement
+  // belongs on the floor, including startup, resizing, and monitor/taskbar changes.
+  if(canPerch()) {
+    const floor=groundPosition(companionDisplay(body).workArea,body,perchMetrics!.feet);
+    if(Math.abs(body.y-floor.y)>2 || Math.abs(body.x-floor.x)>2){settleOnGround();return true;}
+  }
+  if(perchFall) {
+    if(fallFrame(perchFall,now,perchReducedMotion).phase!=='done')return true;
+    clearFall();
+  }
+  if(now>=nextPerchCheck && now>=perchHoldUntil && !desktopBusy() && !desktopVisit && !walkingTo && canPerch() && store.get('companion.autoPerch',true)) {
+    nextPerchCheck=now+5000;
+    const work=companionDisplay(body).workArea;
+    const target=choosePerch(freshSurfaces(),body,perchMetrics!,[work],false);
+    if(target){attachPerch(target);return true;}
+  }
+  return false;
+}
+
 function roamState() {
   return readRoamConfig(store.get('roam'));
 }
@@ -792,7 +1055,9 @@ function reportWalk(moving: boolean, facing: number) {
 /** Sends her somewhere. Used by the wander timer and by getting out of the way. */
 function walkTo(point: Point) {
   if (!companionWindow || companionWindow.isDestroyed()) return;
-  walkingTo = point;
+  if(perched)detachPerch(true);
+  const body=companionWindow.getBounds();
+  walkingTo = canPerch()?groundPosition(companionDisplay(body).workArea,{...body,...point},perchMetrics!.feet):point;
   lastWalkAt = Date.now();
 }
 
@@ -807,17 +1072,22 @@ function roamTick() {
   const config = roamState();
   const bounds = window_.getBounds();
   const now = Date.now();
+  reportDesktop();
+  // The SVG presentation settles beside windows; the legacy floor walker must not compete.
+  if (store.get('avatar.kind', 'svg') === 'svg') { stopWalking(); return; }
+  if(visitTick(now,bounds))return;
+  if(perchTick(now,bounds))return;
 
   if (walkingTo) {
     // Interrupted rather than finished: whatever she was crossing the desktop
     // for matters less than not talking over herself while doing it.
-    if (speakingNow || now - lastUserMovedAt < 1_000) { stopWalking(); return; }
+    if (desktopBusy() || now - lastUserMovedAt < 1_000) { stopWalking(); return; }
     const delta = Math.min(now - lastWalkAt, 250);
     lastWalkAt = now;
     const vitals = store.get('vitals') as { energy?: number } | undefined;
     const walk = step({ x: bounds.x, y: bounds.y }, walkingTo, speedFor(vitals?.energy ?? 0.6), delta);
     const { x, y } = clampCompanionPosition(walk.position.x, walk.position.y, bounds.width, bounds.height);
-    window_.setBounds({ ...bounds, x: Math.round(x), y: Math.round(y) });
+    positionCompanion(x,y);
     reportWalk(!walk.arrived, walk.facing);
     if (walk.arrived) { walkingTo = null; console.log(`[roam] arrived at ${Math.round(x)}`); }
     return;
@@ -831,7 +1101,7 @@ function roamTick() {
     enabled: config.enabled,
     speaking: speakingNow,
     dragging: now - lastUserMovedAt < 1_000,
-    listening: false,
+    listening: microphoneListening || perchReducedMotion,
     fullscreen: false,
     sinceUserMovedMs: now - lastUserMovedAt,
   })) { nextWanderAt = 0; return; }
@@ -839,15 +1109,28 @@ function roamTick() {
   if (!nextWanderAt) { nextWanderAt = now + nextWanderDelay(config.restlessness); return; }
   if (now < nextWanderAt) return;
   nextWanderAt = 0;
-  const work = screen.getDisplayMatching(bounds).workArea;
+  const work = companionDisplay(bounds).workArea;
+  const crowding=desktopSnapshot()?.crowding??0;
+  const visit=!desktopBusy() && canPerch() && Math.random()<.55-.25*crowding?chooseVisit(freshSurfaces(),work,bounds,perchMetrics!):null;
+  if(visit && beginDesktopVisit(visit,bounds))return;
   const destination = pickDestination(work, bounds);
   if (!destination) return;
+  destination.x=Math.round(bounds.x+(destination.x-bounds.x)*(1-.5*crowding));
+  if(Math.abs(destination.x-bounds.x)<bounds.width*.35)return;
   console.log(`[roam] wandering from ${bounds.x} to ${destination.x}`);
   walkTo(destination);
 }
 
 function startRoaming() {
   if (roamTimer) return;
+  if(store.get('companion.desktopRoamVersion')!==1){
+    store.set('roam',{...roamState(),enabled:true});
+    nextWanderAt=Date.now()+20_000;
+    lastUserMovedAt=0;perchHoldUntil=Date.now()+30_000;
+    store.set('companion.desktopRoamVersion',1);
+  }
+  screen.on('display-removed',reconcileCompanionDisplay);
+  screen.on('display-metrics-changed',(_event,display)=>{if(display.id===store.get('companion.displayId'))reconcileCompanionDisplay();});
   roamTimer = setInterval(roamTick, ROAM_TICK_MS);
 }
 
@@ -860,9 +1143,11 @@ function startRoaming() {
 function stepAsideForFullscreen() {
   const window_ = companionWindow;
   if (!window_ || window_.isDestroyed() || !window_.isVisible()) return;
-  if (!roamState().avoidFullscreen) return;
+  if (!roamState().avoidFullscreen || desktopBusy()) return;
   const bounds = window_.getBounds();
-  const work = screen.getDisplayMatching(bounds).workArea;
+  const display=companionDisplay(bounds),work=display.workArea;
+  if(watchingScreen){const physical={x:watchingScreen.left,y:watchingScreen.top,width:watchingScreen.right-watchingScreen.left,height:watchingScreen.bottom-watchingScreen.top};const area=screen.screenToDipRect(null,physical);if(area.x>=display.bounds.x+display.bounds.width || area.x+area.width<=display.bounds.x || area.y>=display.bounds.y+display.bounds.height || area.y+area.height<=display.bounds.y)return;}
+  cancelDesktopVisit();
   // Only if she is actually in the way. Already tucked into a corner, walking to
   // the other corner would be movement for its own sake.
   const inset = Math.min(bounds.x - work.x, (work.x + work.width) - (bounds.x + bounds.width));
@@ -873,6 +1158,7 @@ function stepAsideForFullscreen() {
 }
 
 function broadcastLive2DChange(model: Live2DModel | null) {
+  detachPerch(false);perchMetrics=null;
   sendToWindows('live2d:changed', model);
 }
 
@@ -1687,7 +1973,7 @@ const attentionMode = readAttentionMode(process.env.HARU_ATTENTION_MODE, process
 const attention = new AttentionExperiment(() => path.join(app.getPath('userData'), 'attention-shadow.jsonl'),
   attentionMode !== 'off', 2 * 1024 * 1024, process.env.HARU_ATTENTION_LOG !== '0');
 const activityObservations = new ActivityObservations();
-const activityReporter = new ActivityReporter((input, init) => net.fetch(String(input), init));
+const activityReporter = new ActivityReporter((input, init) => trackedFetch(String(input), init));
 let attentionTick = 0;
 let vitals: Vitals = { ...DEFAULT_VITALS };
 let lastTickAt = Date.now();
@@ -1790,14 +2076,15 @@ async function lifeTick() {
   observeAttention(environment, observation, tickId, now);
   // Keep existing delivery gates on their established host readings until the
   // live nudge pilot. Corrected observations already feed mood and shadow state.
-  const attentionWork = considerReminding(host).then(reminded => {
+  // A desk pointed at her server leaves reminding and piping up to the server.
+  const attentionWork = desktopServer() ? undefined : considerReminding(host).then(reminded => {
     if (reminded) attention.baseline(tickId, false, true, 'reminder-priority');
     else return considerPipingUp(host, tickId);
   }, () => { attention.baseline(tickId, false, true, 'reminder-error'); })
     .catch(error => { console.warn('[attention] baseline tick failed', error); });
   const reportWork = seesItsOwnScreen() && store.get('activityLog', true) === true
     ? activityReporter.report(readCheckInSource(store.get('checkinSource')), readHostEnvironment) : undefined;
-  const revoiceWork = considerRevoicing();
+  const revoiceWork = desktopServer() ? undefined : considerRevoicing();
   if (corePeriodic) {
     await Promise.allSettled([attentionWork, reportWork, revoiceWork]);
     return vitals.sleepiness;
@@ -2372,6 +2659,20 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
  * not butt in; a version of it that silences only the written half prevents
  * nothing and loses the record.
  */
+/**
+ * The lines she nearly said, newest last.
+ *
+ * Not persisted: "why is she quiet" is a question about this evening, and a
+ * ring buffer in memory answers it without another file to corrupt.
+ */
+let heldBackLines: HeldBack[] = [];
+function holdBack(line: string, why: string): false {
+  console.log(`[interject] dropped — ${why}`);
+  heldBackLines = keepHeldBack(heldBackLines, { at: new Date().toISOString(), why, line });
+  sendToWindows('chat:heldBack', heldBackLines);
+  return false;
+}
+
 function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource, about = '', nudge = undefined as NudgeDetail | undefined } = {}): boolean {
   const now = Date.now();
   if(process.env.HARU_CORE_NUDGE_GENERAL==='on') {
@@ -2381,21 +2682,15 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   if (herAsleepNow()) { console.log('[interject] dropped — she is asleep'); return false; }
   if (herKnockedAwakeNow()) { console.log('[interject] dropped — she was got up, she is not making conversation'); return false; }
   const refusal = whyNotInterject({ aboutTheGame });
-  if (refusal) {
-    console.log(`[interject] dropped — ${refusal}`);
-    return false;
-  }
+  if (refusal) return holdBack(line, refusal);
   // A line off her own back that names something done, or an event long gone,
   // is not said: twenty days after Ammie's party she announced it was tomorrow,
   // and no block in the prompt had named it. Checked on the line, not the
   // prompt — see staleItemNamed.
   const stale = staleItemNamed(line, getKept(), localDateKey(zonedNow(CHAT_TIMEZONE)));
   const invented = inventedTimeFor(line, getKept());
-  if (invented) { console.log(`[interject] dropped — it gave "${invented.title}" a time, and it has none saved`); return false; }
-  if (stale) {
-    console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
-    return false;
-  }
+  if (invented) return holdBack(line, `it gave "${invented.title}" a time, and it has none saved`);
+  if (stale) return holdBack(line, `it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
   // Nor is a line of today's conversation said again. At 13:30 on 2026-09-16 she
   // piped up with "7900X is already overkill for most of what you do. Spend the
   // money on Emma…" — her own reply from two hours before; echoesAside only
@@ -2403,16 +2698,12 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   // Her own replies only: a phrase of his inside her line ("how was your day")
   // is her asking back, not her repeating herself.
   const conversation = ((store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? []).slice(-14).filter(message => message.role === 'assistant').map(message => message.content ?? '');
-  if (looksLikeAnEcho(line, conversation)) {
-    console.log('[interject] dropped — it repeats something already said in the conversation');
-    return false;
-  }
+  if (looksLikeAnEcho(line, conversation)) return holdBack(line, 'it repeats something already said in the conversation');
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
   if (echoesAside(line, getAsides(), now)) {
     attention.event('repeat-blocked');
-    console.log('[interject] dropped — it repeats a line she already said');
-    return false;
+    return holdBack(line, 'it repeats a line she already said');
   }
   }
   if(!(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'))lastInterjectionAt = now;
@@ -2572,6 +2863,56 @@ function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionCon
   return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
 }
 
+/**
+ * The address embeddings go to.
+ *
+ * The same shape as visionEndpoint above and for an unrelated reason: not where
+ * the data is allowed to go, but where the model actually is. The embed model
+ * is a name Ollama has pulled — nomic-embed-text, by default — so asking a
+ * hosted brain for it returns a 404 and quietly costs her semantic recall. See
+ * the embedder in ./knowledgestore.
+ */
+function embedEndpoint(chatEndpoint: string): string {
+  const chat = chatEndpoint.trim();
+  return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
+}
+
+/**
+ * Whether she can actually do the things she is switched on for.
+ *
+ * Every unprompted path ends in the same line — `if (!provider?.model) return;`
+ * — which is right, and completely silent. An ai.config that never got written
+ * therefore looks exactly like a quiet evening: she goes on watching the screen
+ * and saying nothing about it, and there is no way in or out of the app to tell
+ * which of the two is happening. That cost three days once.
+ *
+ * So the setup is read out at boot, and it is deliberately the settings that
+ * gate her behaviour rather than everything in the store.
+ */
+function reportSetup() {
+  if (desktopServer()) { console.log('[setup] native desktop chat uses ' + desktopServer()); return; }
+  const provider = store.get('ai.config') as ProviderConfig | undefined;
+  if (provider?.model) console.log(`[setup] brain: ${provider.model} at ${provider.endpoint || LOCAL_MODELS}${isRemote(provider.endpoint ?? '') ? '' : ' (this machine)'}`);
+  else console.error('[setup] NO CHAT MODEL — she will answer nothing and say nothing unprompted. Set one in Settings.');
+
+  const vision = readVisionConfig(store.get('vision'));
+  const watching = readWatchingConfig(store.get('watching'));
+  const screenshots = readScreenshotConfig(store.get('screenshots'));
+  if (vision.enabled) {
+    console.log(`[setup] eyes: ${vision.model} at ${visionEndpoint(provider, vision)}`);
+    // Which eye she gets, rather than whether she has one. Both work; the
+    // difference is 1920 against 1280 and whether an exclusive-fullscreen game
+    // comes back black. Said at boot because OBS being shut is invisible
+    // otherwise — the glance just quietly uses the worse frame.
+    const obs = readObsServer(app.getPath('appData'));
+    console.log(obs?.enabled
+      ? `[setup] OBS websocket on at :${obs.port} — glances use its frame while OBS is running, else the ${CAPTURE_WIDTH}px screen capture`
+      : `[setup] OBS websocket off — glances use the ${CAPTURE_WIDTH}px screen capture`);
+  }
+  // Only worth a warning where something is actually waiting on them.
+  else if (watching.enabled || screenshots.enabled) console.warn(`[setup] eyes are OFF, so ${[watching.enabled && 'watching the screen', screenshots.enabled && 'noticing screenshots'].filter(Boolean).join(' and ')} will do nothing.`);
+}
+
 let lastLookAt = 0;
 let lastSceneSeen = '';
 let lastSceneAt = 0;
@@ -2710,22 +3051,35 @@ async function glanceAtScreen() {
   lastLookAt = Date.now();
   try {
     const startedAt = Date.now();
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
-    });
-    const frame = activeScreen(sources)?.thumbnail;
-    if (!frame || frame.isEmpty()) return;
-    const encoded = frame.toPNG().toString('base64');
+    // OBS first, when it is running: full resolution where the thumbnail path
+    // tops out at 1280, and its capture does not black-frame on exclusive
+    // fullscreen. Both are this machine; the frame goes to the same local
+    // eyes either way. See obs.ts.
+    const obs = readObsServer(app.getPath('appData'));
+    let encoded = obs?.enabled ? await obsScreenshot(obs) : null;
+    const eyes = encoded ? 'obs' : 'screen';
+    if (!encoded) {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
+      });
+      const frame = activeScreen(sources)?.thumbnail;
+      if (!frame || frame.isEmpty()) return;
+      encoded = frame.toPNG().toString('base64');
+    }
     const title = gameNow() || watchingTitle || currentActivity?.label || '';
     // The eyes report game state, plainly; she reacts to the report in her own
     // voice with the chat model, and the report stays in her context so a
     // question about the fight is answered from the screen. See sceneAsk.
-    const sighting = await backgroundLook(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
+    const sighting = await backgroundLook(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), trackedFetch, {
       ask: sceneAsk(title),
       keepAlive: eyesHold(vision, '30m'),
       numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)),
-      numPredict: 160,
+      // qwen3-vl reasons before it answers whatever think:false says, and the
+      // reasoning counts against this. At 160 the answer was cut off or never
+      // started — "the vision model returned nothing", three nights running —
+      // measured at 370–510 tokens for a fight scene, so 800 leaves room.
+      numPredict: 800,
     });
     const scene = sighting.description;
     const mentionable = worthMentioning(scene, lastSceneSeen);
@@ -2733,7 +3087,7 @@ async function glanceAtScreen() {
     // what is on screen is context either way.
     lastSceneSeen = scene;
     lastSceneAt = Date.now();
-    console.log(`[watch] saw: ${toLength(scene, 160)} (${Date.now() - startedAt}ms)`);
+    console.log(`[watch] saw (${eyes}): ${toLength(scene, 160)} (${Date.now() - startedAt}ms)`);
     if (!mentionable) return;
     const character = getActiveCharacter();
     const line = toLength(await ollamaQuip(
@@ -2827,7 +3181,7 @@ async function remarkOnScreenshot() {
     // asked as a screen rather than as a picture — the same SHOT_LOOK_PROMPT
     // the server pass uses, so a shot described here and one described there
     // come back in the same shape.
-    const sighting = await backgroundLook(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT, numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)), keepAlive: eyesHold(vision, '5m') });
+    const sighting = await backgroundLook(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), trackedFetch, { ask: SHOT_LOOK_PROMPT, numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)), keepAlive: eyesHold(vision, '5m') });
     const name = path.basename(shot.path);
     console.log(`[shot] ${name} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars${mayRemark ? '' : ', quiet hours — noted not said'}`);
     // Written down whether or not she says anything, and here rather than only
@@ -2839,6 +3193,11 @@ async function remarkOnScreenshot() {
       const described = describeShot(store.getActivityLog(), currentChatDayKey(), name, sighting.description);
       if (described !== store.getActivityLog()) store.setActivityLog(described);
     }
+    // Written down here, said somewhere else. The line below is composed on
+    // this machine's model, and when her brain is on the server that is a
+    // second Haru talking over the first — so the desk looks, writes it
+    // down, and leaves the talking to her.
+    if (desktopServer()) return;
     if (!mayRemark) return;
     screenshotSpokeAt = Date.now();
     const character = getActiveCharacter();
@@ -3142,6 +3501,7 @@ async function handlePoke(kind: PokeKind) {
 const DUCK_TO = 0.35;
 
 let helper: ReturnType<typeof spawn> | null = null;
+let helperReady=false;
 let systemVolume: number | null = null;
 let ducked = false;
 let watchingTitle: string | null = null;
@@ -3191,7 +3551,7 @@ function startWindowsHelper() {
   const script = candidates.find(candidate => existsSync(candidate));
   if (!script) { console.warn('[helper] windows-helper.ps1 not found; no ducking or fullscreen detection'); return; }
 
-  helper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true });
+  helper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-HaruPid', String(process.pid)], { windowsHide: true });
   let buffered = '';
   helper.stdout?.on('data', (chunk: Buffer) => {
     buffered += chunk.toString();
@@ -3200,7 +3560,7 @@ function startWindowsHelper() {
     for (const line of lines) handleHelperLine(line.trim());
   });
   helper.stderr?.on('data', (chunk: Buffer) => console.warn('[helper]', chunk.toString().trim().slice(0, 200)));
-  helper.on('exit', code => { console.warn(`[helper] exited (${code})`); helper = null; });
+  helper.on('exit', code => { console.warn(`[helper] exited (${code})`); helper = null; helperReady=false; });
   // A stream's 'error' with nobody listening is thrown, not logged, and killing
   // PowerShell a line after writing to it is the ordinary way to produce one.
   // There is nothing to say about it — the helper is going anyway — but there
@@ -3259,7 +3619,7 @@ function findVoiceLauncher(): string | null {
 async function isAnswering(endpoint: string, ms = 1500, tries = 1): Promise<boolean> {
   for (let attempt = 1; attempt <= tries; attempt += 1) {
     try {
-      await net.fetch(`${trimEndpoint(endpoint)}/`, { signal: AbortSignal.timeout(ms) });
+      await trackedFetch(`${trimEndpoint(endpoint)}/`, { signal: AbortSignal.timeout(ms) });
       return true;
     } catch {
       if (attempt < tries) await new Promise(done => setTimeout(done, 400));
@@ -3318,9 +3678,15 @@ function coreFullscreenAdapter(){return {...deviceStateAdapter(),facts:()=>devic
 function handleHelperLine(line: string) {
  if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{handleCoreHelper(line,coreHelperAdapter());}catch(error){console.warn('[helper] Core event refused:',error);}return;}
   if (!line) return;
+  if(line.startsWith('surfaces ')) {
+    const rows=parseSurfaces(line.slice(9));
+    if(rows){desktopSurfaces=rows.map(r=>({...r,...screen.screenToDipRect(null,r)}));surfacesAt=Date.now();}
+    return;
+  }
   // Proves the pipe end to end. Its absence was how a silently buffered stdout
   // looked from this side: a helper that had started, was alive, and said nothing.
   if (line === 'ready') {
+    helperReady=true;
     // A duck recorded on disk means the last run died mid-sentence — force
     // killed, crashed, or the machine went down — and left the volume pulled
     // down with nothing to put it back. Undo it before anything else reads the
@@ -3360,7 +3726,14 @@ function handleHelperLine(line: string) {
     // something she had opinions about, and it would have gone into the
     // following tracker as a thing they keep coming back to.
     if (isJustATool(process, title)) { console.log('[activity] ignoring a tool window'); return; }
-    const activity = readActivity(process, title);
+    let activity = readActivity(process, title);
+    // The helper checks fullscreen before the foreground in the same tick, so
+    // by the time a fullscreen game's own foreground line lands here,
+    // watchingTitle already names it. Promoted only when the titles agree:
+    // done from the fullscreen line instead, the promotion landed on whatever
+    // window was foreground a tick earlier — the first game folder this ever
+    // made was for haru-desktop itself. See promotedByFullscreen.
+    if (activity.kind === 'other' && watchingTitle && title.trim() === watchingTitle) activity = promotedByFullscreen(activity, process);
     // The label is what she says out loud, and for a game it was the process
     // name — "wdc", or the publisher if the window title got there first. Steam
     // knows the real one, so every remark that names the game gets it, not just
@@ -3675,13 +4048,14 @@ async function transcribeFile(wav: string): Promise<string> {
     audio,
     'audio/wav',
     config,
-    net.fetch as never,
+    trackedFetch as never,
     key ? { Authorization: `Bearer ${key}` } : remoteAuth(config.endpoint),
   );
 }
 
 /** She notices what they have opened. */
 async function reactToActivity(activity: Activity, url = '') {
+  if (desktopServer()) return;
  if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on'){try{await reactCoreActivity(activity,url,coreActivityAdapter());}catch(error){console.warn('[activity] could not react:',error);}return;}
   if (!isNotable(activity) || reactingToActivity) return;
   const now = Date.now();
@@ -4078,7 +4452,7 @@ async function localModelSees(config: ProviderConfig): Promise<boolean> {
       modelEyes.set(key,capabilities.vision);
       return capabilities.vision;
     }
-    const response = await net.fetch(`${endpoint}/api/show`, { method: 'POST', headers: modelHeaders(endpoint), body: JSON.stringify({ model: config.model }), signal: AbortSignal.timeout(5_000) });
+    const response = await trackedFetch(`${endpoint}/api/show`, { method: 'POST', headers: modelHeaders(endpoint), body: JSON.stringify({ model: config.model }), signal: AbortSignal.timeout(5_000) });
     if (!response.ok) { console.warn(`[attach] ${endpoint} would not say whether ${config.model} can see: ${response.status}`); return false; }
     const body = await response.json() as { capabilities?: string[] };
     const sees = Array.isArray(body.capabilities) && body.capabilities.includes('vision');
@@ -4157,7 +4531,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // eyesFor. A far fuller read than the glance prompt, because this text is
       // now the only thing standing in for the image.
       const eyes = await eyesForReading(vision, provider);
-      const sighting = await ownedLook(imageForSending(source), eyes.config, eyes.endpoint, modelHeaders(eyes.endpoint), net.fetch, { ask: READ_IT_ALL_PROMPT, timeoutMs: IN_TURN_LOOK_MS, numPredict: IN_TURN_READ_TOKENS, ...(eyes.numCtx ? { numCtx: eyes.numCtx } : {}) });
+      const sighting = await ownedLook(imageForSending(source), eyes.config, eyes.endpoint, modelHeaders(eyes.endpoint), trackedFetch, { ask: READ_IT_ALL_PROMPT, timeoutMs: IN_TURN_LOOK_MS, numPredict: IN_TURN_READ_TOKENS, ...(eyes.numCtx ? { numCtx: eyes.numCtx } : {}) });
       console.log(`[attach] ${eyes.config.model} read ${name} into ${sighting.description.length} chars in ${Math.round((Date.now() - started) / 1000)}s`);
       return sighting.description;
     }
@@ -4180,7 +4554,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // frames, which is a fact about the video that no single frame contains.
       const sighting = await ownedLook(
         frames.map(frame => readFileSync(frame).toString('base64')),
-        vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch,
+        vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), trackedFetch,
         { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.`, numCtx: visionNumCtx(vision, visionEndpoint(provider, vision)), keepAlive: eyesHold(vision, '5m') },
       );
       parts.push(sighting.description);
@@ -4302,7 +4676,7 @@ async function releaseModelForGame(config: ProviderConfig) {
   if (evictedFor === config.model) return;
   evictedFor = config.model;
   try {
-    await net.fetch(`${trimEndpoint(config.endpoint)}/api/generate`, {
+    await trackedFetch(`${trimEndpoint(config.endpoint)}/api/generate`, {
       method: 'POST',
       headers: modelHeaders(config.endpoint),
       body: JSON.stringify({ model: config.model, keep_alive: 0 }),
@@ -4923,6 +5297,7 @@ let lastFocusSync = 0;
 // waiting out the rest of the interval to see a change made seconds ago on a
 // phone reads as broken. Rate-limited so alt-tabbing does not sync repeatedly.
 function syncOnFocus() {
+  if (desktopServer()) return;
   if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const decision=corePolicySync<any>('agenda-google.focus',[Date.now(),lastFocusSync]);if(!decision.run)return;lastFocusSync=decision.at;backgroundSync();return;}
   if (Date.now() - lastFocusSync < GOOGLE_FOCUS_SYNC_MIN_GAP_MS) return;
   lastFocusSync = Date.now();
@@ -5111,8 +5486,9 @@ function getProfile(): Profile {
  */
 const knowledge = createKnowledgeStore({
   store,
-  fetch: net.fetch,
+  fetch: trackedFetch,
   apiKeyFor: keyFor,
+  embedEndpoint,
   // The vault pages become standing memories. Wired after the memory store
   // exists below — the knowledge store is created first because the memory
   // store embeds through it, so this is a mutable ref, not a direct call.
@@ -5587,7 +5963,7 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
 
 /** Where her brain is, if it is not this machine. */
 function herBrain(): string | null {
-  return readCheckInSource(store.get('checkinSource'))?.url || null;
+  return desktopServer() || readCheckInSource(store.get('checkinSource'))?.url || null;
 }
 
 /**
@@ -6053,7 +6429,7 @@ async function refreshAniList(force = false) {
   if (!config.enabled || !config.username) { cachedList = []; listError = ''; return; }
   if (!force && Date.now() - listFetchedAt < ANILIST_TTL_MS) return;
   try {
-    cachedList = await userList(config.username, net.fetch);
+    cachedList = await userList(config.username, trackedFetch);
     listFetchedAt = Date.now();
     listError = '';
     console.log(`[anilist] list for ${config.username}: ${cachedList.length} in progress or stalled`);
@@ -6313,6 +6689,67 @@ function withoutStaleDenials<T extends { role: string; content: string }>(messag
   return messages.filter(message => !(message.role === 'assistant' && DENIAL.test(message.content)));
 }
 
+/** Her own browser (playwright.ts), made on first use and kept: it carries the page she is on. */
+let ownBrowser: PlaywrightBrowser | null = null;
+
+/** Where Playwright writes the screenshots and snapshots it takes; cleared of anything older than a day at each start. */
+function browserOutputDir(): string {
+  const dir = path.join(app.getPath('userData'), 'browser-shots');
+  mkdirSync(dir, { recursive: true });
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  try {
+    for (const name of readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (statSync(file).mtimeMs < cutoff) rmSync(file, { force: true });
+    }
+  } catch { /* a folder she cannot tidy is still a folder she can write to */ }
+  return dir;
+}
+
+/**
+ * Her browser, as the tools see it (browserctl.ts), or null when switched off.
+ *
+ * The desk's Chrome is a fresh handle each time: it is a window on his screen,
+ * and the tab it drives is whichever is in front. Her own is a process, kept
+ * across calls so the page she opened is still the page she follows a link on.
+ * It is started with a bare environment — none of her keys — as the node this
+ * process already is (ELECTRON_RUN_AS_NODE), and every request it makes goes
+ * through the guard proxy (webguard.ts).
+ */
+function herBrowser(): Browser | null {
+  const config = readBrowserControlConfig(store.get('browser'));
+  if (!config.enabled) return null;
+  if (config.backend === 'chrome') return cdpBrowser(config.port, net.fetch as Parameters<typeof cdpBrowser>[1]);
+  if (!ownBrowser) {
+    ownBrowser = playwrightBrowser({
+      startProxy: () => startGuardProxy({ log: line => console.log(line) }),
+      spawn: proxyPort => {
+        // Through package.json: the package exports no ./cli.js subpath, so resolving it directly throws.
+        const cli = path.join(path.dirname(require.resolve('@playwright/mcp/package.json')), 'cli.js');
+        const env: NodeJS.ProcessEnv = {
+          PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          HOME: process.env.HOME ?? app.getPath('home'),
+          USER: process.env.USER ?? '',
+          LANG: 'C.UTF-8',
+          // os, not app: the Core brain worker's app shim has no 'temp' path.
+          TMPDIR: os.tmpdir(),
+          ELECTRON_RUN_AS_NODE: '1',
+          ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
+        };
+        const child = spawn(process.execPath, playwrightArgs(cli, config, proxyPort, browserOutputDir()), { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        child.stderr?.on('data', (chunk: Buffer) => {
+          const line = String(chunk).trim();
+          if (line) console.log(`[browser] ${line.slice(0, 300)}`);
+        });
+        return child;
+      },
+      log: line => console.log(line),
+      warn: line => console.warn(line),
+    });
+  }
+  return ownBrowser;
+}
+
 /** What is switched on right now, for chatTools to draw the table from. */
 function availableTools(turn: TurnContext): ToolAvailability {
   const search = readSearchConfig(store.get('search'));
@@ -6327,6 +6764,7 @@ function availableTools(turn: TurnContext): ToolAvailability {
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
+    ownBrowser: readBrowserControlConfig(store.get('browser')).backend === 'playwright',
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
@@ -6539,6 +6977,10 @@ function toolDeps(turn: TurnContext): ToolDeps {
       const saved = store.get('screenshots') as { folder?: string } | undefined;
       return typeof saved?.folder === 'string' && saved.folder ? saved.folder : path.join(app.getPath('userData'), 'browser-shots');
     },
+    // Her browser (browserctl.ts): her own, or the desk's Chrome.
+    browser: herBrowser(),
+    pageWasRead: turn.pageWasRead,
+    addPicture: turn.addPicture,
     // The anime stack, likewise captured at call time (anime.ts).
     anime: (link => link ? { watch: input => link.watch(input), status: title => link.status(title) } : null)(animeLink()),
   };
@@ -6704,6 +7146,8 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * have to know or care which provider answered.
  */
 type PostOptions = { firstWordMs?: number; tools?: boolean;
+  /** Only these tools, of the turn's table — her browser alone, once a page is in the reply (toolloop.ts BROWSE_TOOLS). */
+  only?: readonly string[];
   /** A table laid by the caller — her own pass — instead of the one the turn would be given. */
   table?: ChatTool[]; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
   /** Only an explicit chat turn can offer tools; background composers have none. */
@@ -6720,7 +7164,7 @@ type PostOptions = { firstWordMs?: number; tools?: boolean;
 const heldTools = { day: '', names: new Set<string>() };
 
 /** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
-function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext): ChatTool[] {
+function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext, only?: readonly string[]): ChatTool[] {
   const day = localDateKey(zonedNow(CHAT_TIMEZONE));
   if(process.env.HARU_CORE_TOOL_MENU==='on'){
     const result=corePolicySync<{tools:ChatTool[];state:{day:string;names:string[]}}>('tool-menu.hosted',[
@@ -6729,7 +7173,10 @@ function hostedTools(conversation: { role?: string; content?: string }[], turn: 
   }
   if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
   const available = availableTools(turn);
-  return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
+  const table = steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
+  // Narrowed after the day's table is held, so a browse round does not shrink
+  // what tomorrow's first turn is offered.
+  return only ? table.filter(tool => only.includes(tool.function.name)) : table;
 }
 
 /** The last thing the user actually said — what the tool table should be laid for. */
@@ -6740,12 +7187,13 @@ function latestUserText(conversation: { role?: string; content?: string }[]): st
   return '';
 }
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && !toolless.has(config.model) ? table ?? (turn && !turn.pageWasRead() ? hostedTools(conversation, turn) : undefined) : undefined,
+    // A page read ends the tools, unless the loop has narrowed them to her browser (only).
+    tools: tools && !toolless.has(config.model) ? (table && only ? table.filter(tool => only.includes(tool.function.name)) : table) ?? (turn && (!turn.pageWasRead() || only) ? hostedTools(conversation, turn, only) : undefined) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),
@@ -6754,7 +7202,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     cacheKey,
   });
   assertOutboundSafe(conversation, (body as { tools?: unknown[] }).tools);
-  const response = await coreCloudFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/chat/completions`, {
+  const response = await coreCloudFetch((url,init)=>trackedFetch(url,init), `${trimEndpoint(config.endpoint)}/chat/completions`, {
     method: 'POST',
     headers: modelHeaders(config.endpoint),
     body: JSON.stringify(body),
@@ -6873,12 +7321,13 @@ function homeTwin(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn, signal }: PostOptions = {}) {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreProviderFallback(conversation,modelForNow(config),{...naturalPolicy<any>('postOptions',[config,{tools:arguments[2]?.tools,temperature:arguments[2]?.temperature}]),table,format,maxTokens,onChunk,numCtx,turn,signal});
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn, signal }: PostOptions = {}) {
+  if (desktopServer()) throw new Error('Chat is handled by the Haru server. Open Haru to continue there.');
+  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreProviderFallback(conversation,modelForNow(config),{...naturalPolicy<any>('postOptions',[config,{tools:arguments[2]?.tools,temperature:arguments[2]?.temperature}]),only,table,format,maxTokens,onChunk,numCtx,turn,signal});
 
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, table, temperature, format, maxTokens, onChunk, numCtx, turn, signal };
+  const options = { tools, only, table, temperature, format, maxTokens, onChunk, numCtx, turn, signal };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -7001,8 +7450,11 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
   providerAvailability.assertAvailable(config);
   const replySignal = isLocalConfig(config) ? inferencePriority.replySignal : undefined;
   if (replySignal) options = { ...options, signal: options.signal ? AbortSignal.any([options.signal, replySignal]) : replySignal };
-  const table = options.table ?? (options.tools !== false && options.turn && !options.turn.pageWasRead()
-    ? isOpenAIShaped(config.provider) ? hostedTools(conversation, options.turn) : chatTools(availableTools(options.turn), latestUserText(conversation)) : []);
+  // A page read ends the tools, unless the loop has narrowed them to her browser (only).
+  const only = options.only;
+  const narrowed = (tools: ChatTool[]) => only ? tools.filter(tool => only.includes(tool.function.name)) : tools;
+  const table = narrowed(options.table ?? (options.tools !== false && options.turn && (!options.turn.pageWasRead() || only)
+    ? isOpenAIShaped(config.provider) ? hostedTools(conversation, options.turn, only) : chatTools(availableTools(options.turn), latestUserText(conversation)) : []));
   if (!isLocalConfig(config)) {
     if (!isAllowedTaskProvider(config)) throw new Error('provider_not_allowed');
     assertOutboundSafe(conversation, table);
@@ -7031,7 +7483,7 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
   return withToolContract(await guardedRequest((signal, chunk) => run(signal, chunk), { signal: options.signal, totalMs: 180_000, firstWordMs: options.firstWordMs, onChunk: options.onChunk }), options.tools === false ? [] : table);
 }
 
-async function sendToProviderUnchecked(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
+async function sendToProviderUnchecked(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
   if (config.model === 'gpt-6-astra' && new URL(config.endpoint).hostname === 'api.openai.com') {
     requireKeyFor(config.endpoint, 'openai');
     const body = toResponsesBody({ model: config.model, conversation, tools: tools ? table : undefined, maxTokens: maxTokens ?? 2048, stream: Boolean(onChunk), cacheKey });
@@ -7053,11 +7505,12 @@ async function sendToProviderUnchecked(conversation: OllamaMessage[], config: Pr
     if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), 'anthropic'));
     return onChunk ? streamAnthropic(response, config.model, onChunk) : fromAnthropicReply(await response.json(), config.model);
   }
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, table, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, only, table, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
   const chatConfig = store.get('ai.config') as ProviderConfig | undefined;
   const contextSize = requestContextSize(config, chatConfig ? modelForNow(chatConfig) : undefined, chatNumCtx(), numCtx ?? sideNumCtx());
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
-    const offered = table ?? (withTools && turn && !turn.pageWasRead() ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
+    const laid = table ?? (withTools && turn && (!turn.pageWasRead() || only) ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
+    const offered = only ? laid.filter(tool => only.includes(tool.function.name)) : laid;
     if (offered.length) {
       // The estimate is a rough chars/4 token count of the conversation being
       // sent — the tool round's prompt — so the real peak can be measured
@@ -7066,7 +7519,7 @@ async function sendToProviderUnchecked(conversation: OllamaMessage[], config: Pr
       console.log(`[ai] offering ${offered.length} tools to ${config.model} (prompt ~${est} tokens)`);
     }
     try {
-      return await coreModelFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/api/chat`, {
+      return await coreModelFetch((url,init)=>trackedFetch(url,init), `${trimEndpoint(config.endpoint)}/api/chat`, {
         method: 'POST',
         ...(signal ? { signal } : {}),
         headers: modelHeaders(config.endpoint),
@@ -7842,6 +8295,26 @@ let pullingCheckIns = false;
 
 async function pullCheckIns(): Promise<void> {
   if (pullingCheckIns) return;
+  // Her server's notes, over the session that is already signed in to it. The
+  // password below cannot be opened on this machine (see feedHerServer), and a
+  // 401 every quarter of an hour is not a pull.
+  if (desktopServer()) {
+    pullingCheckIns = true;
+    try {
+      const body = await serverJson<{ entries?: unknown }>(serverRequest, '/api/checkins');
+      const theirs = Array.isArray(body.entries) ? body.entries : [];
+      if (!theirs.length) return;
+      const before = getCheckIns();
+      const merged = mergeCheckIns(before, theirs as never);
+      const what = describePull(before, merged);
+      if (!what) return;
+      setCheckIns(merged);
+      console.log('[checkins] ' + what);
+    } catch (error) {
+      console.warn('[checkins] could not read hers:', error instanceof Error ? error.message : error);
+    } finally { pullingCheckIns = false; }
+    return;
+  }
   const source = readCheckInSource(store.get('checkinSource'));
   if (!source) return;
   // readCheckInSource already refuses anything off-tailnet, and this asks again
@@ -7856,7 +8329,7 @@ async function pullCheckIns(): Promise<void> {
 
   pullingCheckIns = true;
   try {
-    const signIn = await net.fetch(source.url + '/api/login', {
+    const signIn = await trackedFetch(source.url + '/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: source.username, password, remember: false }),
@@ -7865,7 +8338,7 @@ async function pullCheckIns(): Promise<void> {
     // Her own session cookie, held for this one exchange and not stored.
     const cookie = (signIn.headers.get('set-cookie') ?? '').split(',').map(part => part.split(';')[0].trim()).filter(Boolean).join('; ');
 
-    const got = await net.fetch(source.url + '/api/checkins', { headers: cookie ? { cookie } : {} });
+    const got = await trackedFetch(source.url + '/api/checkins', { headers: cookie ? { cookie } : {} });
     if (!got.ok) { console.warn('[checkins] could not read them (' + got.status + ')'); return; }
     const body = await got.json() as { entries?: unknown };
     const theirs = Array.isArray(body.entries) ? body.entries : [];
@@ -7908,6 +8381,12 @@ let syncingMemories = false;
 
 async function syncMemories(): Promise<void> {
   if (syncingMemories) return;
+  // Pointed at her server: no password, no second login. See feedHerServer.
+  if (desktopServer()) {
+    syncingMemories = true;
+    try { await feedHerServer(); } finally { syncingMemories = false; }
+    return;
+  }
   const source = readCheckInSource(store.get('checkinSource'));
   if (!source) return;
   // Asked again rather than trusted, the same as the check-in pull: her memory
@@ -7922,7 +8401,7 @@ async function syncMemories(): Promise<void> {
 
   syncingMemories = true;
   try {
-    const signIn = await net.fetch(source.url + '/api/login', {
+    const signIn = await trackedFetch(source.url + '/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: source.username, password, remember: false }),
@@ -7932,8 +8411,11 @@ async function syncMemories(): Promise<void> {
     const headers: Record<string, string> = cookie ? { cookie } : {};
 
     activityReporter.connected(source, cookie);
+    // The same shape the signed-in session has, so everything below is written
+    // once and works through either door.
+    const send: ServerRequest = (route, init = {}) => trackedFetch(source.url + route, { ...init, headers: { ...headers, ...(init.headers as Record<string, string> | undefined) } } as never) as never;
 
-    const got = await net.fetch(source.url + '/api/memory/records', { headers });
+    const got = await trackedFetch(source.url + '/api/memory/records', { headers });
     // An older server has the route this replaced and not this one. Say so once
     // and plainly, rather than letting it read as the server being unreachable.
     if (got.status === 404) { console.warn('[memory] that server is too old to sync memories'); return; }
@@ -7945,6 +8427,10 @@ async function syncMemories(): Promise<void> {
     // would hand the whole of it back.
     followSlate(body);
 
+    // Before the merge, and before the push below: if her brain has reset, this
+    // machine is holding a mirror of a Haru who no longer exists, and the push
+    // would hand the whole of it back.
+    followSlate(body);
     const report = mergeIn(withoutPreSlate(body, getSlate()));
     const what = describeMerge(report);
     if (what) console.log('[memory] ' + what + ' from the server');
@@ -7952,7 +8438,7 @@ async function syncMemories(): Promise<void> {
     // Everything, not just what changed: the server has no idea which of these
     // it is missing, and sixty records is a smaller thing to send than the
     // bookkeeping that would work it out.
-    const sent = await net.fetch(source.url + '/api/memory/records', {
+    const sent = await trackedFetch(source.url + '/api/memory/records', {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ memories: getMemories(), deletions: memoryStore.getDeletions() }),
@@ -7967,27 +8453,86 @@ async function syncMemories(): Promise<void> {
     // same login and the same tailnet check — and a second sign-in would only
     // be a second thing to fail.
     if (store.get('activityLog', true) === true) {
-      const log = store.getActivityLog();
-      if (Object.keys(log).length) {
-        const pushed = await net.fetch(source.url + '/api/activity', {
-          method: 'POST',
-          headers: { ...headers, 'content-type': 'application/json' },
-          body: JSON.stringify({ activity: log }),
-        });
-        if (pushed.status === 404) console.warn('[activity] that server is too old to take the log');
-        else if (!pushed.ok) console.warn('[activity] the server would not take the log (' + pushed.status + ')');
-        else {
-          const held = await pushed.json() as { days?: number; entries?: number };
-          console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
-        }
-      }
-      await pushScreenshots(source.url, headers);
+      await pushActivityLog(send);
+      await pushScreenshots(send);
     }
   } catch (error) {
     console.warn('[memory] could not reach the server:', error instanceof Error ? error.message : error);
   } finally {
     syncingMemories = false;
   }
+}
+
+/**
+ * The day at the desk, sent to whichever machine is keeping it.
+ *
+ * One direction only: the server has no foreground window, so there is nothing
+ * there to pull back.
+ */
+async function pushActivityLog(send: ServerRequest): Promise<void> {
+  const log = store.getActivityLog();
+  if (!Object.keys(log).length) return;
+  const pushed = await send('/api/activity', jsonPost({ activity: log }));
+  if (pushed.status === 404) console.warn('[activity] that server is too old to take the log');
+  else if (!pushed.ok) console.warn('[activity] the server would not take the log (' + pushed.status + ')');
+  else {
+    const held = await pushed.json() as { days?: number; entries?: number };
+    console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
+  }
+}
+
+/**
+ * What this desk gives her back when her brain is on the server.
+ *
+ * The same payloads the sync below sends, through a door that is already open:
+ * the chat session in the server partition, which every message she is sent
+ * goes through. The sync's own login cannot be used here — its password is
+ * sealed per machine by safeStorage, and the copy in this config was sealed on
+ * the server, so decrypting it returns an empty string and both halves of the
+ * sync returned without a word. The desk had been sending her nothing at all.
+ *
+ * Memory comes down and does not go back up. The server forms and forgets; the
+ * desk takes a copy so the panel here is not a year out of date, and sending
+ * its own stale set back would re-add everything she has since let go of.
+ */
+async function feedHerServer(): Promise<void> {
+  try {
+    const body = await serverJson<{ memories?: unknown; slate?: unknown }>(serverRequest, '/api/memory/records');
+    followSlate(body);
+    const what = describeMerge(mergeIn(body.memories));
+    if (what) console.log('[memory] ' + what + ' from her server');
+    if (store.get('activityLog', true) !== true) return;
+    await pushActivityLog(serverRequest);
+    await pushScreenshots(serverRequest);
+    await armAttentionReports();
+  } catch (error) {
+    console.warn('[sync] could not reach her server:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * The attention samples, pointed at the session's own cookie.
+ *
+ * The reporter opens its own connection rather than borrowing this one — it
+ * fires every thirty seconds from the life loop, long after any sync has
+ * finished — so it needs the cookie as a string. The partition has one, and
+ * reading it out once a sync is cheaper than teaching the reporter what an
+ * Electron session is.
+ */
+let attentionArmed = false;
+
+async function armAttentionReports(): Promise<void> {
+  const origin = desktopServer();
+  const source = readCheckInSource(store.get('checkinSource'));
+  if (!origin || !source) return;
+  const jar = await session.fromPartition(SERVER_PARTITION).cookies.get({ url: origin });
+  const cookie = jar.map(entry => `${entry.name}=${entry.value}`).join('; ');
+  if (!cookie) return;
+  activityReporter.connected(source, cookie);
+  // Once, on the first sync that arms it. The reporter is silent by design —
+  // a diagnostic that talks is a diagnostic in the way — and silent is also
+  // what it looks like when it was never connected at all.
+  if (!attentionArmed) { attentionArmed = true; console.log('[attention] idle, focus and battery are going to her server'); }
 }
 
 /** At most this many per sync. A first run against a full folder would
@@ -8007,7 +8552,7 @@ const SHOTS_PER_SYNC = 20;
  * image on the server for a day whose log has already been pruned out from
  * under it.
  */
-async function pushScreenshots(serverUrl: string, headers: Record<string, string>): Promise<void> {
+async function pushScreenshots(send: ServerRequest): Promise<void> {
   const config = readScreenshotConfig(store.get('screenshots'));
   if (!config.enabled) return;
   const folder = screenshotFolder();
@@ -8016,12 +8561,14 @@ async function pushScreenshots(serverUrl: string, headers: Record<string, string
   const mine = localShots(folder, at => localDateKey(at), looksLikeScreenshot, new Date(), ACTIVITY_RETENTION_DAYS);
   if (!mine.length) return;
 
-  const asked = await net.fetch(serverUrl + '/api/activity/shots', { headers });
+  const asked = await send('/api/activity/shots');
   if (asked.status === 404) { console.warn('[activity] that server is too old to take screenshots'); return; }
   if (!asked.ok) { console.warn('[activity] could not ask what it already has (' + asked.status + ')'); return; }
   const held = (await asked.json() as { shots?: unknown }).shots;
   const missing = missingFrom(held && typeof held === 'object' ? held as Record<string, string[]> : {}, mine);
-  if (!missing.length) return;
+  // Said rather than passed over: a desk that is sending nothing because
+  // there is nothing to send looks exactly like one that is not sending.
+  if (!missing.length) { console.log(`[activity] the server already has all ${mine.length} screenshot(s)`); return; }
 
   let sent = 0;
   for (const shot of missing.slice(0, SHOTS_PER_SYNC)) {
@@ -8033,9 +8580,9 @@ async function pushScreenshots(serverUrl: string, headers: Record<string, string
       if (!bytes.length || bytes.length > MAX_SHOT_BYTES) continue;
     } catch { continue; }
     const query = `?day=${encodeURIComponent(shot.day)}&name=${encodeURIComponent(shot.name)}`;
-    const put = await net.fetch(serverUrl + '/api/activity/shots' + query, {
+    const put = await send('/api/activity/shots' + query, {
       method: 'POST',
-      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      headers: { 'content-type': 'application/octet-stream' },
       body: bytes as never,
     });
     if (put.ok) sent += 1;
@@ -8096,7 +8643,7 @@ async function jellyfinReach(config: JellyfinConfig, key: string) {
     Authorization: `MediaBrowser Client="Haru", Device="Haru", DeviceId="haru-desktop", Version="1.0.0", Token="${key}"`,
     Accept: 'application/json',
   };
-  const info = await net.fetch(`${config.url}/System/Info`, { headers });
+  const info = await trackedFetch(`${config.url}/System/Info`, { headers });
   if (info.status === 401 || info.status === 403) throw new Error('Jellyfin rejected that key.');
   if (!info.ok) throw new Error(`Jellyfin answered ${info.status}.`);
   const server = await info.json() as { ServerName?: string; Version?: string };
@@ -8104,11 +8651,11 @@ async function jellyfinReach(config: JellyfinConfig, key: string) {
   let userId = config.userId;
   try {
     if (!userId) {
-      const users = await (await net.fetch(`${config.url}/Users`, { headers })).json() as { Id: string }[];
+      const users = await (await trackedFetch(`${config.url}/Users`, { headers })).json() as { Id: string }[];
       userId = users?.[0]?.Id ?? '';
     }
     if (userId) {
-      const views = await (await net.fetch(`${config.url}/UserViews?userId=${encodeURIComponent(userId)}`, { headers })).json() as { Items?: unknown[] };
+      const views = await (await trackedFetch(`${config.url}/UserViews?userId=${encodeURIComponent(userId)}`, { headers })).json() as { Items?: unknown[] };
       libraries = views?.Items?.length ?? 0;
     }
   } catch { /* the key works; the library count is a nicety */ }
@@ -8805,7 +9352,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     try {
       // A wider net than the usual four: she is picking three or four out of
       // it, and half of any page of results is a listicle rather than a place.
-      const found = await searchWeb(lookUp, { ...searchConfig, limit: Math.max(searchConfig.limit, 8) }, net.fetch, getSearchKey());
+      const found = await searchWeb(lookUp, { ...searchConfig, limit: Math.max(searchConfig.limit, 8) }, trackedFetch, getSearchKey());
       if (found.length) {
         aside = [aside, groundedInstruction(formatResults(lookUp, found, false))].filter(Boolean).join(' ');
         fromSearch = true;
@@ -8832,7 +9379,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     try {
       const [transcript, title] = await Promise.all([
         fetchTranscript(videoLink),
-        net.fetch(watchUrl(videoLink), { headers: { 'accept-language': 'en' } }).then(r => r.text()).then(titleFrom).catch(() => ''),
+        trackedFetch(watchUrl(videoLink), { headers: { 'accept-language': 'en' } }).then(r => r.text()).then(titleFrom).catch(() => ''),
       ]);
       const words = formatTranscript(transcript.captions);
       aside = [aside, transcriptInstruction(title || 'that video', transcript.generated, words)].filter(Boolean).join(' ');
@@ -9036,7 +9583,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     path: compactConversation ? 'natural' : 'full', reason: compactReason, instructionCacheHit: Boolean(assemblyCache.hit), preferenceCacheHit })}`);
   // Collected before the prompt so a machine question is answered from facts,
   // not from the model's assumptions about what it runs on.
-  const machineNote = compactConversation ? '' : await systemContextFor(latest);
+  const machineNote = compactConversation ? '' : [await systemContextFor(latest),desktopGeometryNote()].filter(Boolean).join('\n');
   prepMark('systemContext');
   // Likewise the way somewhere: found first, spoken about second, linked last.
   const directions = compactConversation ? null : await directionsFor(latest, messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-4));
@@ -9436,10 +9983,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
       replyGate.chunk(text);
     },
   };
-  const answerLocally = async (sending: OllamaMessage[], localConfig: ProviderConfig, tools: boolean, inputProfile?:'grounded-perception') => {
+  const answerLocally = async (sending: OllamaMessage[], localConfig: ProviderConfig, tools: boolean, inputProfile?:'grounded-perception', only?: readonly string[]) => {
     const localLimit=await coreLocalBudget(localConfig,chatNumCtx(),net.fetch);
     return inferencePriority.localReply(async () => {
-    if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreNaturalLocal({sending,config:localConfig,tools,inputProfile:inputProfile??null,visualProfiles:process.env.HARU_CORE_VISUAL_PROFILES==='on',naturalKind,compactSources,latest,replyEvidence,mood:getMood(),blankSlate:blankSlateInstruction(getSlate(),knownSinceSlate()),voice:voiceEvidence,localSinglePass:store.get('ai.fastConversation.localSinglePass')===true,directKind,character:getActiveCharacter(),aside:aside??null,numCtx:chatNumCtx(),recentReplies:herRecentReplies},roundOptions);
+    if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return runCoreNaturalLocal({sending,config:localConfig,tools,inputProfile:inputProfile??null,visualProfiles:process.env.HARU_CORE_VISUAL_PROFILES==='on',naturalKind,compactSources,latest,replyEvidence,mood:getMood(),blankSlate:blankSlateInstruction(getSlate(),knownSinceSlate()),voice:voiceEvidence,localSinglePass:store.get('ai.fastConversation.localSinglePass')===true,directKind,character:getActiveCharacter(),aside:aside??null,numCtx:chatNumCtx(),recentReplies:herRecentReplies},{...roundOptions,only});
     const compactLocal = naturalKind && compactSources && naturalConversationEligible(sending, latest) ? compactSources : null;
     const localConversation = compactLocal?.messages ?? sending;
     const evidence = { ...replyEvidence, mood: getMood(), blankSlate: blankSlateInstruction(getSlate(), knownSinceSlate()), ...(compactLocal ? {
@@ -9497,7 +10044,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     }
     // A draft can contain a false memory or an invented explanation. Keep it
     // out of the stream and let the same local model answer from evidence.
-    const draft = await ollamaPost(sending, localConfig, { ...roundOptions, tools, onChunk: undefined });
+    const draft = await ollamaPost(sending, localConfig, { ...roundOptions, tools, only, onChunk: undefined });
     const draftMs = Date.now() - startedAt;
     const answer = await finishLocalReply(draft, localConversation, latest, evidence,
       messages => sendToProvider(messages, localConfig, {
@@ -9600,7 +10147,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     // searched the web for the traffic, got three American states back, and
     // guessed — while the live number sat in the note beside his message.
     ...(turnLoop?('maxRounds' in turnLoop?{maxRounds:turnLoop.maxRounds}:{}):directions?.route?{maxRounds:1}:{}),
-    ask: async (sending, { tools,inputProfile,planningTable,maxTokens:workflowMaxTokens,candidateId,temperature }) => {
+    ask: async (sending, { tools,only,inputProfile,planningTable,maxTokens:workflowMaxTokens,candidateId,temperature }) => {
       if(inputProfile==='general-tool-planning'||inputProfile==='general-tool-response'){
         if(process.env.HARU_CORE_GENERAL_TOOL_SPLIT!=='on')throw Error('general_tool_split_disabled');
         const planning=inputProfile==='general-tool-planning';
@@ -9676,7 +10223,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
               ? await answerNaturalConversation(sending, latest, voiceEvidence, messages => sendToProvider(messages, config, {
                   ...roundOptions, tools: false, table: [], cacheKey, firstWordMs, maxTokens: naturalMaxTokens,
                 }), withFiles.filter(message => message.role === 'assistant').slice(-3).map(message => message.content ?? ''))
-              : await sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, firstWordMs });
+              : await sendToProvider(sending, config, { ...roundOptions, tools, only, cacheKey, firstWordMs });
             const turnAnswer=process.env.HARU_CORE_NATURAL_TURN==='on'?naturalTurn<any>('hostedAnswer',[{answer,naturalRound:Boolean(naturalRound),brain,needsReview:needsGroundedConversationReview(latest)}]):null;
             const refusal=turnAnswer?turnAnswer.invalid:conversationReplyIssue(answer.content??'');
             if(turnAnswer?Boolean(refusal):!answer.tool_calls?.length&&refusal)throw new ToolLoopFailure('invalid_conversational_reply',refusal);
@@ -9744,7 +10291,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
             sendToWindows('ai:fellBack', `${config.model} could not complete this request. Haru is using ${home.model}.`);
             brain = { config: home, escalated: false, because: 'hosted fallback', sees: false };
             config = home;
-            return answerLocally(sending, home, tools,inputProfile);
+            return answerLocally(sending, home, tools,inputProfile,only);
           }
         }
       }
@@ -9752,7 +10299,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
         prepMark('send');
         providerSentAt = Date.now();
         onSending?.();
-        return brain.escalated ? await sendToProvider(sending, config, { ...roundOptions, tools }) : await answerLocally(sending, config, tools,inputProfile);
+        return brain.escalated ? await sendToProvider(sending, config, { ...roundOptions, tools, only }) : await answerLocally(sending, config, tools,inputProfile,only);
       } catch (error) {
         await task.check();
         if(process.env.HARU_CORE_NATURAL_TURN==='on'){
@@ -9782,7 +10329,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
         console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
         brain = brainFromEntry(candidate!, 'local outage');
         config = spill;
-        return sendToProvider(sending, spill, { ...roundOptions, tools });
+        return sendToProvider(sending, spill, { ...roundOptions, tools, only });
       }
     },
     runTool: async call => {
@@ -9795,8 +10342,12 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
       // conduct at all, so a claim about what she did had nothing behind it to
       // check and she supplied a reason instead (2026-09-08).
       noteDeed(tool, call, result);
-      return result;
+      // A screenshot she took rides beside the words, to be looked at (toolloop.ts).
+      const pictures = turn.takePictures();
+      return pictures.length ? { content: result, pictures } : result;
     },
+    // Her browser stays once a page is read — the one tool that does (toolloop.ts).
+    browseAfterRead: () => readBrowserControlConfig(store.get('browser')).enabled,
     // Read through rather than passed by value: runChatTool sets these while a
     // round is in flight, and a copy taken before the round would miss it.
     pageWasRead: turn.pageWasRead,
@@ -10050,7 +10601,7 @@ function modelBehind(history: { id?: string; role: string; content?: string; rea
  */
 async function openAIModels(endpoint: string, provider: Provider) {
   requireKeyFor(endpoint, provider);
-  const response = await net.fetch(`${trimEndpoint(endpoint)}/models`, { headers: modelHeaders(endpoint) });
+  const response = await trackedFetch(`${trimEndpoint(endpoint)}/models`, { headers: modelHeaders(endpoint) });
   if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), provider));
   const payload = await response.json() as { data?: { id?: string }[] };
   return (payload.data ?? []).map(model => model.id).filter((id): id is string => Boolean(id)).sort();
@@ -10078,7 +10629,7 @@ async function verifyRemoteModel(endpoint: string, provider: Provider, model: st
   } catch (error) {
     console.warn(`[ai] ${provider} would not list models (${error instanceof Error ? error.message : error}) — trying a real request instead`);
   }
-  const response = await net.fetch(`${trimEndpoint(endpoint)}/chat/completions`, {
+  const response = await trackedFetch(`${trimEndpoint(endpoint)}/chat/completions`, {
     method: 'POST',
     headers: modelHeaders(endpoint),
     // Through the same builder as a real request, so a model that wants
@@ -10090,7 +10641,7 @@ async function verifyRemoteModel(endpoint: string, provider: Provider, model: st
 }
 
 async function ollamaTags(endpoint: string) {
-  const response = await net.fetch(`${trimEndpoint(endpoint)}/api/tags`, { headers: modelHeaders(endpoint) });
+  const response = await trackedFetch(`${trimEndpoint(endpoint)}/api/tags`, { headers: modelHeaders(endpoint) });
   // 401 here is the useful one: it means the endpoint is real and the key is
   // wrong, which is a different problem from the server not being there.
   if (response.status === 401 || response.status === 403) throw new Error('That endpoint rejected the key. Check the model API key in setup.');
@@ -10099,10 +10650,22 @@ async function ollamaTags(endpoint: string) {
   return (data.models ?? []).map(model => model.name);
 }
 
+function vrmExpressionNames(file: string): string[] {
+  const bytes = readFileSync(file);
+  if (bytes.length < 20 || bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2) throw new Error('Invalid VRM file.');
+  const length = bytes.readUInt32LE(12);
+  if (bytes.readUInt32LE(16) !== 0x4e4f534a || length > bytes.length - 20) throw new Error('Invalid VRM metadata.');
+  const json = JSON.parse(bytes.toString('utf8', 20, 20 + length));
+  const expressions = json.extensions?.VRMC_vrm?.expressions;
+  if (expressions) return [...Object.keys(expressions.preset ?? {}), ...Object.keys(expressions.custom ?? {})].filter(name => !/\.(eyes|brows|mouth)$/.test(name));
+  return (json.extensions?.VRM?.blendShapeMaster?.blendShapeGroups ?? []).map((group: { name?: string; presetName?: string }) => group.name || group.presetName).filter((name: unknown): name is string => typeof name === 'string');
+}
+
 function readExpressionNames(): string[] {
   const saved = store.get('live2d.model') as { path?: string } | undefined;
   if (!saved?.path) return [];
   try {
+    if (saved.path.toLowerCase().endsWith('.vrm')) return vrmExpressionNames(saved.path);
     const json = JSON.parse(readFileSync(saved.path, 'utf8'));
     const expressions = json?.FileReferences?.Expressions;
     if (!Array.isArray(expressions)) return [];
@@ -10112,26 +10675,14 @@ function readExpressionNames(): string[] {
   }
 }
 
-function combinedDisplayBounds() {
-  const displays = screen.getAllDisplays();
-  return {
-    minX: Math.min(...displays.map(d => d.bounds.x)),
-    minY: Math.min(...displays.map(d => d.bounds.y)),
-    maxX: Math.max(...displays.map(d => d.bounds.x + d.bounds.width)),
-    maxY: Math.max(...displays.map(d => d.bounds.y + d.bounds.height)),
-  };
-}
-
 function clampCompanionWidth(width: number) {
-  return Math.min(Math.max(Math.round(width), COMPANION_MIN_WIDTH), COMPANION_MAX_WIDTH);
+  const work=companionDisplay(companionWindow?.getBounds()).workArea;
+  return Math.min(Math.max(Math.round(width),COMPANION_MIN_WIDTH),COMPANION_MAX_WIDTH,work.width,Math.floor(work.height/COMPANION_ASPECT));
 }
 
 function clampCompanionPosition(x: number, y: number, width: number, height: number) {
-  const { minX, minY, maxX, maxY } = combinedDisplayBounds();
-  return {
-    x: Math.min(Math.max(x, minX - width + COMPANION_MARGIN), maxX - COMPANION_MARGIN),
-    y: Math.min(Math.max(y, minY - height + COMPANION_MARGIN), maxY - COMPANION_MARGIN),
-  };
+  const work=companionDisplay(companionWindow?.getBounds() ?? {x,y,width,height}).workArea;
+  return clampAvatar(work,{x,y,width,height},canPerch()?perchMetrics:null);
 }
 
 /**
@@ -10149,11 +10700,12 @@ function clampCompanionPosition(x: number, y: number, width: number, height: num
  */
 function getCompanionBounds(): Bounds {
   const saved = store.get('companion.bounds') as Bounds | undefined;
+  companionDisplay(saved);
   if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
     let width = clampCompanionWidth(saved.width || COMPANION_DEFAULT_WIDTH);
     let height = Math.round(width * COMPANION_ASPECT);
     // Whichever screen she was mostly on, so a second monitor keeps her.
-    const work = screen.getDisplayMatching({ x: Math.round(saved.x), y: Math.round(saved.y), width, height }).workArea;
+    const work = companionDisplay({ x: Math.round(saved.x), y: Math.round(saved.y), width, height }).workArea;
     // Shrink before moving: something taller than the screen has no position
     // that shows all of it, and clamping alone would just pin it to the top.
     if (height > work.height) {
@@ -10169,7 +10721,7 @@ function getCompanionBounds(): Bounds {
   }
   const width = COMPANION_DEFAULT_WIDTH;
   const height = Math.round(width * COMPANION_ASPECT);
-  const work = screen.getPrimaryDisplay().workArea;
+  const work = companionDisplay().workArea;
   return { x: work.x + work.width - width - 24, y: work.y + work.height - height - 24, width, height };
 }
 
@@ -10193,11 +10745,58 @@ function appIcon(): string | undefined {
   return candidates.find(candidate => existsSync(candidate));
 }
 
+function desktopServer() { return serverOrigin(store.get('desktop.serverUrl')); }
+
+// Twenty seconds is the ceiling for something a person is waiting on. The sync
+// is not that: the day at the desk and its screenshots arrive while she is
+// answering somebody, and the box that merges them is the same one running the
+// model. Every push timed out at twenty seconds on a busy evening and the desk
+// sent nothing for the hour, which is the failure this whole path exists to
+// avoid — so the background routes get the patience the foreground cannot.
+const SLOW_ROUTES = /^\/api\/(chat|activity|memory)/;
+
+const serverRequest: ServerRequest = (route, init = {}) => {
+  const origin = desktopServer();
+  if (!origin || !route.startsWith('/api/')) throw new Error('No Haru server is configured.');
+  return session.fromPartition(SERVER_PARTITION).fetch(origin + route, {
+    ...init, credentials: 'include', redirect: 'error',
+    signal: init.signal ?? AbortSignal.timeout(SLOW_ROUTES.test(route) ? 180_000 : 20_000),
+  });
+};
+
+async function serverMessages() {
+  const body = await serverJson<{ messages: { id?: string; role: string; content: string; at?: string; attachments?: unknown }[] }>(serverRequest, '/api/chat?poll=1');
+  if (!Array.isArray(body.messages)) throw new Error('Haru server did not return its conversation.');
+  return body.messages.filter(message => typeof message.content === 'string' && ['user', 'assistant', 'system'].includes(message.role)).map((message, index) => ({
+    ...message, id: message.id || `server-${message.at || index}-${message.role}`, time: 'now',
+    attachments: readAttachments(message.attachments).map(file => ({ ...file, url: '' })),
+  }));
+}
+
+async function serverChat(messages: { role: string; content: string; attachments?: Attachment[] }[]) {
+  const latest = messages.at(-1);
+  if (!latest || latest.role !== 'user') throw new Error('No user message to send.');
+  const files = ourFiles(latest.attachments);
+  if (files.length !== (latest.attachments?.length ?? 0)) throw new Error('An attachment is no longer available. Attach it again.');
+  const reference = messages.at(-2);
+  const text = reference?.role === 'system' ? `${reference.content}\n\n${latest.content}` : latest.content;
+  const reply = await sendServerChat(serverRequest, text, files.map(attachment => ({ attachment, bytes: readFileSync(attachment.saved) })));
+  void speak(reply.content);
+  // A refresh failing after a successful send must not invite a duplicate send.
+  const history = await serverMessages().catch(() => undefined);
+  const authoritative = history?.some(message => message.role === 'assistant' && message.content === reply.content);
+  console.log('[server] native desktop reply received; ' + files.length + ' attachment(s)');
+  return { ...reply, ...(authoritative ? { messages: history } : {}) };
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({ icon: appIcon(), width: 1240, height: 800, minWidth: 980, minHeight: 640, titleBarStyle: 'hiddenInset', backgroundColor: '#0d0d12', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) mainWindow.loadURL(devUrl); else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   mainWindow.on('focus', syncOnFocus);
+  mainWindow.webContents.on('did-start-loading', () => setMicrophoneListening(false));
+  mainWindow.webContents.on('render-process-gone', () => setMicrophoneListening(false));
+  mainWindow.on('closed', () => setMicrophoneListening(false));
 }
 
 function createCompanionWindow() {
@@ -10231,8 +10830,10 @@ function createCompanionWindow() {
 
   companionWindow.once('ready-to-show', () => {
     // Not when she was hidden on purpose: a headless box registers her model
-    // for the phone's stage and has no display worth drawing her on.
-    if (store.get('live2d.model') && !store.get('companion.hidden', false)) companionWindow?.show();
+    // for the phone's stage and has no display worth drawing her on. The SVG
+    // face needs no model at all, so it keeps the window either way.
+    const svgFace = store.get('avatar.kind', 'svg') !== 'model';
+    if ((store.get('live2d.model') || svgFace) && !store.get('companion.hidden', false)) companionWindow?.show();
   });
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -10244,6 +10845,11 @@ function createCompanionWindow() {
     // video started.
     if (watchingScreen) broadcastWatching();
   };
+  companionWindow.webContents.on('did-start-loading',()=>{
+    detachPerch(false);
+    companionDragging=false;ignoringCompanionMouse=false;perchMetrics=null;
+    companionWindow?.setIgnoreMouseEvents(false);
+  });
   startRoaming();
   companionWindow.on('move', persistBounds);
   companionWindow.on('moved', persistBounds);
@@ -11834,7 +12440,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
   for (const device of devices) {
     try {
       const request = pushRequest(device, payload, keys, { ttlSeconds: spontaneous ? 0 : undefined }, topic);
-      const response = await net.fetch(request.url, { method: 'POST', headers: request.headers, body: new Uint8Array(request.body) });
+      const response = await trackedFetch(request.url, { method: 'POST', headers: request.headers, body: new Uint8Array(request.body) });
       if (response.status === 404 || response.status === 410) {
         savePush({ devices: getPush().devices.filter(d => d.endpoint !== device.endpoint) });
         console.log(`[push] "${device.name}" is gone — dropped its subscription`);
@@ -12724,16 +13330,25 @@ function setHerSleepSchedule(schedule: HerSleepSchedule | null) {
  * per level (venicebalance.ts). Not her voice — she would not know.
  */
 async function checkVeniceBalance(reason: string): Promise<void> {
+  // Either place a Venice model can be set. Gated on the conversation route
+  // alone, a desk whose chat model is Venice — this one — never read its own
+  // balance at all, and the panel that shows it had nothing to show.
   const route = store.get('ai.conversation') as { provider?: string } | undefined;
-  if (route?.provider !== 'venice') return;
+  const chat = store.get('ai.config') as { provider?: string } | undefined;
+  if (route?.provider !== 'venice' && chat?.provider !== 'venice') return;
   const key = getVeniceKey();
   if (!key) return;
   try {
-    const response = await net.fetch('https://api.venice.ai/api/v1/api_keys/rate_limits', { headers: { Authorization: `Bearer ${key}` } });
+    const response = await trackedFetch('https://api.venice.ai/api/v1/api_keys/rate_limits', { headers: { Authorization: `Bearer ${key}` } });
     if (!response.ok) { console.warn(`[venice] could not read the balance (${response.status})`); return; }
     const balances = parseBalances(await response.json());
     if (!balances) { console.warn('[venice] the balance came back in a shape I do not know'); return; }
     store.set('venice.balance', { ...balances, at: new Date().toISOString() });
+    // A month of them behind it. The balance is the only record Venice keeps,
+    // so the drop from one day to the next is the only way to see a day's spend.
+    store.set('venice.balanceHistory', keepSnapshots(
+      (store.get('venice.balanceHistory') as BalanceSnapshot[] | undefined) ?? [],
+      { at: new Date().toISOString(), total: balances.usd + balances.diem }));
     console.log(`[venice] balance $${balances.usd.toFixed(2)}${balances.diem ? ` + ${balances.diem.toFixed(2)} diem` : ''} — checked on ${reason}`);
     const lowUsd = typeof store.get('venice.lowBalanceUsd') === 'number' ? store.get('venice.lowBalanceUsd') as number : 2;
     const warning = balanceWarning(balances, lowUsd, (store.get('venice.warned') as { level?: 'fine' | 'low' | 'empty'; at?: string } | undefined) ?? {}, new Date());
@@ -13524,14 +14139,16 @@ async function herHandsTick(): Promise<void> {
       specialist: store.get('escalate.provider') as ProviderConfig | undefined, vision: readVisionConfig(store.get('vision')) });
     const { content, ran } = await runCoreHands(conversation as Parameters<typeof runToolLoop>[0], config, {
       requireToolContract: true,
-      ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: menu }),
+      ask: (sending, { tools, only }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: only ? menu.filter(tool => only.includes(tool.function.name)) : menu }),
       runTool: async call => {
         const fn = (call as { function?: { name?: string; arguments?: unknown } }).function ?? {};
         const tool = fn.name ?? 'tool';
         const result = await runChatTool(call, '', deps);
         noteDeed(tool, call, result);
-        return result;
+        const pictures = turn.takePictures();
+        return pictures.length ? { content: result, pictures } : result;
       },
+      browseAfterRead: () => readBrowserControlConfig(store.get('browser')).enabled,
       pageWasRead: turn.pageWasRead, handsAllowed: turn.handsAllowed, withdrawHands: turn.withdrawHands,
       hasOpenTask: () => false, canSearch: () => false,
       log: line => console.log(line), warn: line => console.warn(line), maxRounds: 3,
@@ -13848,7 +14465,7 @@ async function haveANight(config: ProviderConfig) {
     const theirs = getMemories().map(memory => memory.text);
     let steamRecent: Awaited<ReturnType<typeof recentlyPlayed>> = [];
     try {
-      steamRecent = await recentlyPlayed(getSteamWebKey(), readSteamWebConfig(store.get('steam')), url => net.fetch(url));
+      steamRecent = await recentlyPlayed(getSteamWebKey(), readSteamWebConfig(store.get('steam')), url => trackedFetch(url));
     } catch (error) {
       console.warn('[night] Steam would not say what they have been playing:', error instanceof Error ? error.message : error);
     }
@@ -13892,7 +14509,7 @@ async function haveANight(config: ProviderConfig) {
       : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[night] she could not settle on anything'); return; }
-    const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, net.fetch, getSearchKey());
+    const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, trackedFetch, getSearchKey());
     const dream = (extra: Partial<Dream>): Dream => ({
       at: new Date().toISOString(), day: nightKey(now), kind: 'free', about,
       sources: found.map(result => ({ title: result.title ?? '', url: result.url })), reading: '', wrote: '', ...extra,
@@ -13917,7 +14534,7 @@ async function haveANight(config: ProviderConfig) {
           reading = `${reading}\n\n${transcriptInstruction(found[0].title || about, transcript.generated, formatTranscript(transcript.captions))}`;
           watched = true;
         } else {
-          const page = await readWebPage(found[0].url, net.fetch);
+          const page = await readWebPage(found[0].url, trackedFetch);
           if (page.text.trim()) reading = `${reading}\n\n${formatPage(page, about)}`;
         }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
@@ -14466,6 +15083,7 @@ function modelExpressions(): string[] {
   const saved = store.get('live2d.model') as { path?: string } | undefined;
   if (!saved?.path || !existsSync(saved.path)) return [];
   try {
+    if (saved.path.toLowerCase().endsWith('.vrm')) return vrmExpressionNames(saved.path);
     const manifest = JSON.parse(readFileSync(saved.path, 'utf8')) as { FileReferences?: { Expressions?: { Name?: string }[] } };
     const declared = manifest.FileReferences?.Expressions;
     if (Array.isArray(declared) && declared.length) return declared.map(e => String(e.Name ?? '')).filter(Boolean);
@@ -15057,7 +15675,7 @@ function webDeps(): WebDeps {
     },
     model: () => {
       const saved = (store.get('live2d.model') as { path?: string } | undefined);
-      if (!saved?.path || !existsSync(saved.path)) return null;
+      if (!saved?.path || !existsSync(saved.path) || saved.path.toLowerCase().endsWith('.vrm')) return null;
       // The folder the entry file sits in is the model's world: every texture and
       // motion it references is relative to that, so it is the only folder the
       // web route is ever allowed to reach into.
@@ -15777,6 +16395,8 @@ let applicationChannelsRegistered=false;
 function registerApplicationChannels() {
   if(applicationChannelsRegistered)return;
   applicationChannelsRegistered=true;
+  ipcMain.handle('usage:get', () => apiUsage.report());
+  ipcMain.handle('usage:spend', (_e, force?: boolean) => spendReport(force === true));
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('world:get', () => workWorld.get());
   ipcMain.handle('world:detail', (_e,id:string,before?:number) => workWorld.detail(id,before));
@@ -15802,11 +16422,13 @@ function registerApplicationChannels() {
     standingDown: whyNotCheck(app.isPackaged, process.platform),
   }));
   ipcMain.handle('chat:getMessages', () => {
+    if (desktopServer()) return serverMessages();
     performChatResetIfDue();
     return store.get('chat.messages') ?? [];
   });
-  ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
+  ipcMain.handle('chat:setMessages', (_e, messages) => { if (!desktopServer()) store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.getArchive());
+  ipcMain.handle('chat:getHeldBack', () => heldBackLines);
   ipcMain.handle('chat:getAsides', () => getAsides());
   ipcMain.handle('chat:nudgeFeedback', async (_e, id: unknown, choice: unknown) => {
     const aside = await saveNudgePreference(id, choice);
@@ -15819,10 +16441,11 @@ function registerApplicationChannels() {
     sendToWindows('chat:asidesCleared');
     return [];
   });
-  ipcMain.handle('chat:newConversation', () => startNewConversation());
+  ipcMain.handle('chat:newConversation', () => { if (desktopServer()) throw new Error('The server keeps one shared conversation.'); return startNewConversation(); });
   // Only ever in flight once: the window asks on mount and again after a reset,
   // and in dev both can land together. Sharing the promise stops two greetings.
   ipcMain.handle('chat:opening', () => {
+    if (desktopServer()) return null;
     if (!openingInFlight) openingInFlight = composeOpening().then(line => {
       // Counted as one of her unprompted lines, because that is what it is.
       //
@@ -15910,6 +16533,10 @@ function registerApplicationChannels() {
     store.set('hearing', kept);
     return kept.corrections;
   });
+  ipcMain.handle('listen:active:get', () => microphoneListening);
+  ipcMain.handle('listen:active:set', (event, active: unknown) => {
+    if (event.sender === mainWindow?.webContents && typeof active === 'boolean') setMicrophoneListening(active);
+  });
   ipcMain.handle('listen:get', () => readListenConfig(store.get('listen')));
   ipcMain.handle('listen:set', (_e, config: ListenConfig) => {
     const saved = readListenConfig(config);
@@ -15924,7 +16551,7 @@ function registerApplicationChannels() {
     const config = readListenConfig(store.get('listen'));
     const vocabulary = wordsToListenFor();
     const [text, voiceReading] = await Promise.all([
-      transcribe(audio, mime, config, net.fetch, remoteAuth(config.endpoint), vocabulary),
+      transcribe(audio, mime, config, trackedFetch, remoteAuth(config.endpoint), vocabulary),
       voiceSense.analyze(audio, mime),
     ]);
     if (looksLikeNothing(text, vocabulary)) {
@@ -16023,7 +16650,7 @@ function registerApplicationChannels() {
    */
   ipcMain.handle('search:locate', async () => {
     const fix = await readWindowsLocation();
-    const place = await lookUpPlace(fix, net.fetch as never);
+    const place = await lookUpPlace(fix, trackedFetch as never);
     // The accuracy is logged; the position is not. A log outlives the moment.
     console.log(`[location] resolved to ${place} (Windows was accurate to ${Math.round(fix.accuracy)}m)`);
     return { place, accuracy: Math.round(fix.accuracy) };
@@ -16032,7 +16659,7 @@ function registerApplicationChannels() {
   // than as her saying she could not look something up.
   ipcMain.handle('search:test', async () => {
     const config = readSearchConfig(store.get('search'));
-    const results = await searchWeb('hello', { ...config, enabled: true }, net.fetch, getSearchKey());
+    const results = await searchWeb('hello', { ...config, enabled: true }, trackedFetch, getSearchKey());
     return results.length;
   });
   ipcMain.handle('roam:get', () => readRoamConfig(store.get('roam')));
@@ -16041,7 +16668,7 @@ function registerApplicationChannels() {
     store.set('roam', saved);
     // Cancelled immediately on being switched off, rather than finishing the walk
     // she was already on — the switch should feel like it did something.
-    if (!saved.enabled) stopWalking();
+    if (!saved.enabled){cancelDesktopVisit();stopWalking();}
     nextWanderAt = 0;
     console.log(`[roam] ${saved.enabled ? `on, restlessness ${saved.restlessness.toFixed(2)}` : 'off'}${saved.avoidFullscreen ? ', avoids fullscreen' : ''}`);
     return saved;
@@ -16050,7 +16677,7 @@ function registerApplicationChannels() {
   ipcMain.handle('roam:nudge', () => {
     if (!companionWindow) return false;
     const bounds = companionWindow.getBounds();
-    const work = screen.getDisplayMatching(bounds).workArea;
+    const work = companionDisplay(bounds).workArea;
     const destination = pickDestination(work, bounds);
     if (!destination) return false;
     // Cleared so the just-been-moved-by-hand rule does not veto a walk the user
@@ -16220,29 +16847,35 @@ function registerApplicationChannels() {
   ipcMain.handle('anilist:test', async () => {
     const config = readAniListConfig(store.get('anilist'));
     if (!config.username) throw new Error('No username to check.');
-    const entries = await userList(config.username, net.fetch);
+    const entries = await userList(config.username, trackedFetch);
     await refreshAniList(true);
     return entries.length;
   });
   ipcMain.handle('character:get', () => getCharacter());
   ipcMain.handle('character:set', (_e, identity: string, style: string) => { store.set('character', { identity, style }); return getCharacter(); });
   ipcMain.handle('character:reset', () => { store.delete('character' as never); return DEFAULT_CHARACTER; });
-  ipcMain.handle('kept:get', () => getKept());
+  ipcMain.handle('kept:get', async () => desktopServer() ? (await serverJson<{ items: KeptItem[] }>(serverRequest, '/api/agenda')).items : getKept());
   // Only tasks can be ticked off — an event happens whether or not you attend,
   // so there is nothing to complete.
-  ipcMain.handle('kept:toggle', (_e, id: string) => {
+  ipcMain.handle('kept:toggle', async (_e, id: string) => {
+    if (desktopServer()) {
+      const body = await serverJson<{ items: KeptItem[] }>(serverRequest, '/api/agenda/done', jsonPost({ id }));
+      sendToWindows('kept:changed', body.items);
+      return;
+    }
     const updated = toggleKept(id);
     // Only on the way into done. Un-ticking is a correction, and being crowed at
     // for fixing a mistake is a different feeling entirely.
     if (process.env.HARU_CORE_AGENDA_LIFECYCLE==='on' ? corePolicySync<boolean>('agenda-life.manualRemark',[updated]) : updated?.done) void remarkOnTickOff(updated!);
   });
-  ipcMain.handle('kept:remove', (_e, id: string) => { removeKept(id); });
-  ipcMain.handle('google:status', () => googleStatus(store));
+  ipcMain.handle('kept:remove', (_e, id: string) => { if (desktopServer()) throw new Error('Ask Haru in chat to remove a server task.'); removeKept(id); });
+  ipcMain.handle('google:status', () => desktopServer() ? serverJson(serverRequest, '/api/google') : googleStatus(store));
   ipcMain.handle('google:saveCredentials', (_e, clientId: string, clientSecret: string) => { saveCredentials(store, clientId, clientSecret); return googleStatus(store); });
   ipcMain.handle('google:connect', async () => { const status = await connectGoogle(store); broadcastGoogleStatus(); return status; });
   ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); broadcastGoogleStatus(); return googleStatus(store); });
   ipcMain.handle('google:sync', () => syncFromGoogle());
-  ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => {
+  ipcMain.handle('ai:send', (_e, messages: { role: string; content: string; attachments?: Attachment[] }[], config: ProviderConfig) => {
+    if (desktopServer()) return serverChat(messages);
     const door = herAsleepNow() ? knockWhileAsleep() : null;
     if (door) return { content: door, ignored: false, irritation: 0, ego: 0 };
     // The lines said over this turn's tools belong to this turn, so they are
@@ -16263,7 +16896,8 @@ function registerApplicationChannels() {
   // they are not printed. The last label is handed over as `mood`: it is how she
   // said the line she ended on, which is the face a terminal should leave her
   // wearing.
-  ipcMain.handle('ai:stream', (_e, turn: string, messages: { role: string; content: string }[], config: ProviderConfig) => {
+  ipcMain.handle('ai:stream', (_e, turn: string, messages: { role: string; content: string; attachments?: Attachment[] }[], config: ProviderConfig) => {
+    if (desktopServer()) return serverChat(messages).then(reply => ({ ...reply, mood: null }));
     const tell = (channel: string, payload: unknown) => { sendToWindows(channel, payload); };
     const door = herAsleepNow() ? knockWhileAsleep() : null;
     if (door) return { content: door, ignored: false, irritation: 0, ego: 0, mood: null };
@@ -16382,7 +17016,11 @@ function registerApplicationChannels() {
   });
   // Rating a reply moves her mood too — being told she got it wrong stings more
   // than a lazy question, and praise buys back some patience.
-  ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down', id?: string) => {
+  ipcMain.handle('mood:react', async (_e, reaction: 'up' | 'down', id?: string) => {
+    if (desktopServer()) {
+      await serverJson(serverRequest, '/api/chat/rate', jsonPost({ id, reaction }));
+      return { ...getMood(), comeback: false };
+    }
     const taken = takeThumb(reaction);
     // Written down for later, when the desk says which reply it was.
     if (id) appendFeedback({ id, reaction, source: 'desktop' });
@@ -16391,12 +17029,15 @@ function registerApplicationChannels() {
   });
   ipcMain.handle('mood:get', () => getMood());
   ipcMain.handle('live2d:import', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, { title: 'Import Live2D Cubism model', properties: ['openFile'], filters: [{ name: 'Live2D model package', extensions: ['zip', 'json'] }] });
+    const result = await dialog.showOpenDialog(mainWindow!, { title: 'Choose companion avatar', properties: ['openFile'], filters: [{ name: 'Avatar (VRM or Live2D)', extensions: ['vrm', 'zip', 'json'] }] });
     if (result.canceled || !result.filePaths[0]) return null;
     const selected = result.filePaths[0];
     const modelPath = selected.toLowerCase().endsWith('.zip') ? unpackModel(selected) : selected;
-    if (!modelPath.toLowerCase().endsWith('.model3.json')) throw new Error('Choose a .model3.json file, or a ZIP that contains one.');
+    if (!/\.(vrm|model3\.json)$/i.test(modelPath)) throw new Error('Choose a .vrm, a .model3.json, or a Live2D ZIP.');
+    if (modelPath.toLowerCase().endsWith('.vrm')) vrmExpressionNames(modelPath);
     const model = modelResult(modelPath);
+    const previous = store.get('live2d.model');
+    if (previous) store.set('avatar.previousModel', previous);
     store.set('live2d.model', { path: model.path, name: model.name });
     broadcastLive2DChange(model);
     store.set('companion.hidden', false);
@@ -16407,29 +17048,44 @@ function registerApplicationChannels() {
   ipcMain.handle('live2d:remove', () => {
     store.delete('live2d.model');
     broadcastLive2DChange(null);
-    companionWindow?.hide();
+    // Taking the 3D model away does not take her away: the SVG face is the
+    // window's avatar in its own right.
+    if (store.get('avatar.kind', 'svg') === 'model') companionWindow?.hide();
   });
-  ipcMain.handle('companion:moveBy', (_e, dx: number, dy: number) => {
-    if (!companionWindow) return;
+  ipcMain.handle('companion:floatBy', (e, dx: number, dy: number) => {
+    if (!companionWindow || e.sender !== companionWindow.webContents || ![dx,dy].every(n => Number.isFinite(n) && Math.abs(n) <= 120)) return;
+    if (!companionWindow.isVisible() || desktopBusy() || walkingTo || perched || perchMove || perchFall) return;
+    const bounds = companionWindow.getBounds();
+    const next = clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height);
+    positionCompanion(next.x, next.y);
+  });
+  ipcMain.handle('companion:moveBy', (e, dx: number, dy: number) => {
+    if (!companionWindow || e.sender!==companionWindow.webContents || ![dx,dy].every(n=>Number.isFinite(n)&&Math.abs(n)<4096)) return;
+    detachPerch(false);perchHoldUntil=Date.now()+90_000;
     // Being moved by hand cancels whatever she was walking toward and buys her
     // a stretch of standing still — see mayWander.
     lastUserMovedAt = Date.now();
     stopWalking();
     const bounds = companionWindow.getBounds();
-    const { x, y } = clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height);
-    companionWindow.setBounds({ ...bounds, x: Math.round(x), y: Math.round(y) });
+    const next=clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height);
+    const {x}=next;let {y}=next;
+    if(canPerch())y=Math.min(y,groundPosition(companionDisplay(bounds).workArea,{...bounds,...next},perchMetrics!.feet).y);
+    positionCompanion(x,y);
   });
-  ipcMain.handle('companion:resizeBy', (_e, factor: number) => {
-    if (!companionWindow) return;
+  ipcMain.handle('companion:resizeBy', (e, factor: number) => {
+    if (!companionWindow || e.sender!==companionWindow.webContents || !Number.isFinite(factor) || factor<.5 || factor>2) return;
+    cancelDesktopVisit(false);clearFall();if(perchMove?.landing)perchMove=null;
     const bounds = companionWindow.getBounds();
     const width = clampCompanionWidth(bounds.width * factor);
     const height = Math.round(width * COMPANION_ASPECT);
-    // Anchor the resize at bottom-center, matching the model's own anchor point,
-    // so growing/shrinking feels like the character scaling in place.
+    if(perched)perched={...perched,size:{width,height}};
+    // Keep the actual seat or soles anchored while her transparent canvas scales.
     const centerX = bounds.x + bounds.width / 2;
-    const bottom = bounds.y + bounds.height;
-    const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height), width, height);
+    const anchor=canPerch()?(perched?perchMetrics!.seat:perchMetrics!.feet):1;
+    const bottom = bounds.y + bounds.height*anchor;
+    const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height*anchor), width, height);
     companionWindow.setBounds({ x, y, width, height });
+    if(!perched)settleOnGround(false);
   });
   ipcMain.handle('companion:poke', (_e, kind: PokeKind) => { void handlePoke(kind === 'right-click' ? 'right-click' : 'poke'); });
   /**
@@ -16462,6 +17118,10 @@ function registerApplicationChannels() {
    * version of her wearing the same face.
    */
   ipcMain.handle('companion:ask', async (_e, text: string) => {
+    if (desktopServer()) {
+      const answer = await serverChat([{ role: 'user', content: text }]);
+      return { reply: answer.content, ignored: answer.ignored, choices: [] };
+    }
     const said = String(text ?? '').trim();
     if (!said) return { reply: '', ignored: false };
     const config = store.get('ai.config') as ProviderConfig | undefined;
@@ -16486,6 +17146,26 @@ function registerApplicationChannels() {
     sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored) });
     console.log(`[summon] answered ${said.length} chars with ${reply.length}${choices.length ? ` and ${choices.length} choices` : ''}`);
     return { reply, ignored: Boolean(answer.ignored), choices };
+  });
+  ipcMain.handle('companion:placement', (e, value: unknown) => {
+    if(!companionWindow || e.sender!==companionWindow.webContents)return;
+    const metrics=readPerchMetrics(value);if(!metrics)return;
+    perchMetrics=metrics;perchReducedMotion=(value as {reduced?:boolean}).reduced===true;
+    if(perchReducedMotion){cancelDesktopVisit();clearFall();}
+    if(perched){const {width,height}=companionWindow.getBounds();perched={...perched,size:{width,height}};}
+  });
+  ipcMain.handle('companion:perching',()=>perchState());
+  ipcMain.handle('companion:dragging',(e, active: boolean, drop: boolean)=>{
+    if(!companionWindow || e.sender!==companionWindow.webContents || typeof active!=='boolean')return;
+    companionDragging=active;perchHoldUntil=Date.now()+90_000;lastUserMovedAt=Date.now();stopWalking();
+    if(active){detachPerch(false);perchHoldUntil=Date.now()+90_000;ignoringCompanionMouse=false;companionWindow.setIgnoreMouseEvents(false);}
+    else if(drop){const target=findPerch(true);if(target)attachPerch(target);}
+  });
+  ipcMain.handle('companion:pointerOver',(e, over:boolean)=>{
+    if(!companionWindow || e.sender!==companionWindow.webContents || typeof over!=='boolean')return;
+    const ignore=canPerch() && !over && !companionDragging;
+    if(ignore===ignoringCompanionMouse)return;
+    ignoringCompanionMouse=ignore;companionWindow.setIgnoreMouseEvents(ignore,{forward:true});
   });
   ipcMain.handle('companion:showMenu', () => {
     const pinned = store.get('companion.pinned', true) as boolean;
@@ -16512,6 +17192,14 @@ function registerApplicationChannels() {
         },
       },
     ];
+    if(process.platform==='win32' && canPerch()) {
+      const target=findPerch(false);
+      template.push({type:'separator'},
+        {label:perched?'Get down':target?'Sit on a window':'No window edge has enough room',enabled:!!perched||!!target,
+          click:()=>{if(perched){detachPerch(true);perchHoldUntil=Date.now()+90_000;}else if(target)attachPerch(target);}},
+        {label:'Choose window seats automatically',type:'checkbox',checked:!!store.get('companion.autoPerch',true),
+          click:()=>{const enabled=!store.get('companion.autoPerch',true);store.set('companion.autoPerch',enabled);if(enabled)perchHoldUntil=Date.now()+1000;}});
+    }
     if (expressions.length) {
       template.push({ label: 'Expression', submenu: expressions.map(name => ({ label: name, click: () => companionWindow?.webContents.send('companion:setExpression', name) })) });
     }
@@ -16572,6 +17260,8 @@ let coreLifeStarted=false;
 function startCoreLifeWork() {
   if(coreLifeStarted)return;
   coreLifeStarted=true;
+  // Her brain's own chores stay where it runs; the life loop below still feeds a server from a desk.
+  if (!desktopServer()) {
   // Her voice is a separate program, and opening Haru is the moment to notice it
   // is not running.
   void reviveVoiceServer();
@@ -16592,6 +17282,7 @@ function startCoreLifeWork() {
   // is a cheap check that does nothing on all but one minute of the day.
   setInterval(() => { void askForJournal(); }, CHAT_RESET_POLL_MS);
   scheduleBackgroundSync();
+  }
   startLifeLoop();
 }
 
@@ -16614,6 +17305,9 @@ function startCoreBackgroundWork() {
   void pullCheckIns().then(syncMemories);
   setInterval(() => void pullCheckIns().then(syncMemories), 15 * 60_000);
 
+  // Her brain, and only where it runs: a desk pointed at her server still feeds
+  // her the day above, but thinking here as well is two of her, disagreeing.
+  if (desktopServer()) return;
 
   // Loaded here rather than at the top because app.getPath needs the app ready
   // — but the file itself is a quiet local read, and a store that cannot be
@@ -16686,7 +17380,8 @@ app.whenReady().then(() => {
     }
     const relative = rest.map(decodeURIComponent).join('/');
     const target = path.resolve(root, `./${relative}`);
-    if (!target.startsWith(root)) {
+    const withinRoot = path.relative(root, target);
+    if (withinRoot === '..' || withinRoot.startsWith('..' + path.sep) || path.isAbsolute(withinRoot)) {
       console.error(`[haru-model] resolved path escapes root: root=${root} target=${target} (requested as ${request.url})`);
       return new Response('Model file not available', { status: 404 });
     }
@@ -16698,7 +17393,7 @@ app.whenReady().then(() => {
         if (added) console.log(`[live2d] model declared no expressions; found ${added} on disk`);
         return new Response(JSON.stringify(model), { headers: { 'Content-Type': 'application/json' } });
       }
-      return await net.fetch(pathToFileURL(target).toString());
+      return await trackedFetch(pathToFileURL(target).toString());
     } catch (error) {
       console.error(`[haru-model] failed to read ${target} (requested as ${request.url}):`, error);
       return new Response('Model file not found on disk', { status: 404 });
@@ -16728,7 +17423,7 @@ app.whenReady().then(() => {
       return new Response('Not available', { status: 404 });
     }
     try {
-      return await net.fetch(pathToFileURL(target).toString());
+      return await trackedFetch(pathToFileURL(target).toString());
     } catch (error) {
       // A thumbnail for a file that has been deleted or moved. Worth a line, not
       // worth an alarm: the conversation still holds what was said about it.
@@ -16749,8 +17444,12 @@ app.whenReady().then(() => {
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
   reportCapabilities();
+  reportSetup();
   startWindowsHelper();
+  // Her eye on this machine, whichever machine is thinking: the description of
+  // a screenshot is what travels to her server (activitylog.ts).
   watchScreenshots();
+  if (!desktopServer()) {
   startWatchingScreen();
   // Opened at boot when it was left on, for the same reason the screen watcher
   // is: doing it inside the settings handler means it only ever starts for
@@ -16760,6 +17459,7 @@ app.whenReady().then(() => {
   // go with it, so nothing of it is left in the config to export or sync.
   for (const key of ['discord', 'discordToken']) {
     if (store.get(key) !== undefined) { store.delete(key as never); console.log(`[startup] removed the old ${key} setting`); }
+  }
   }
   startCoreLifeWork();
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
@@ -16794,6 +17494,29 @@ function noteCrash(kind: string, error: unknown) {
  *
  * Two instances of that were found running at once.
  */
+/**
+ * The console, kept.
+ *
+ * Every reason she has for staying quiet is a console.log, and the console of
+ * a detached app goes nowhere: three days of "why has she not remarked on the
+ * game" came down to one warning nobody could have read. So the console is
+ * copied here, beside the crashes. Rotated once at start so it cannot grow for
+ * ever; the previous run is kept as .1 for the day the question is about it.
+ */
+function keepConsole() {
+  const file = path.join(app.getPath('userData'), 'haru-main.log');
+  try { if (statSync(file).size > 2_000_000) renameSync(file, `${file}.1`); } catch { /* no log yet */ }
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      const text = args.map(arg => arg instanceof Error ? (arg.stack ?? arg.message) : typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' ');
+      try { appendFileSync(file, `${new Date().toISOString()} ${text}\n`); } catch { /* there is nothing further to try */ }
+    };
+  }
+}
+keepConsole();
+
 process.on('uncaughtException', error => {
   noteCrash('uncaught exception', error);
   if (quitting) app.exit(0);
@@ -16809,9 +17532,11 @@ app.on('before-quit', () => {
   // Her state is only written every few minutes now, so the last few minutes
   // of drift are still in memory at this point and would otherwise go with it.
   try { persistVitals(true); } catch (error) { noteCrash('saving her vitals', error); }
+  try { saveApiUsage(); } catch (error) { noteCrash('saving the API tally', error); }
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
+  void ownBrowser?.stop().catch(error => noteCrash('closing her browser', error));
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 

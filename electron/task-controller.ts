@@ -9,7 +9,8 @@ import {coreServiceOptions} from './core-service-client';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChatMessage, ToolCall } from './provider';
 import { promptUsage } from './provider';
-import { runToolLoop, ToolLoopFailure, type ToolLoopDeps, type ToolLoopResult } from './toolloop';
+import { runToolLoop, splitOutcome, ToolLoopFailure, type ToolLoopDeps, type ToolLoopResult } from './toolloop';
+import type { Picture } from './browserctl';
 import { isReadTool, makeToolReceipt, storedToolReceipt, type ToolReceipt } from './tool-receipt';
 import { estimateReservation, isLocalConfig, usageCost, type ModelEntry, type ProviderConfig, type TaskPolicy } from './model-registry';
 import { assertOutboundSafe, guardedRequest } from './outbound';
@@ -213,7 +214,12 @@ export class TaskController {
     }
   }
   async loop(messages: ChatMessage[], deps: ToolLoopDeps, escalation?: (context: HandoffContext) => ProviderConfig | null | Promise<ProviderConfig | null>) {
-    const wrapped: ToolLoopDeps = { ...deps, signal: this.signal, runTool: call => this.operation(call,command=>deps.runTool(command)) };
+    const wrapped: ToolLoopDeps = { ...deps, signal: this.signal, runTool: async call => {
+      // The operation records words; a screenshot rides alongside to the loop.
+      let pictures: Picture[] = [];
+      const receipt = await this.operation(call, async command => { const split = splitOutcome(await deps.runTool(command)); pictures = split.pictures; return split.words; });
+      return pictures.length ? { content: receipt, pictures } : receipt;
+    } };
     const harnessPrefix=process.env.HARU_CORE_HARNESS_PATH_PREFIX;
     const harnessScoped=!harnessPrefix||(typeof this.snapshot?.request==='string'&&this.snapshot.request.startsWith(`Read ${harnessPrefix}/`));
     if(process.env.HARU_CORE_HARNESS==='on'&&harnessScoped){
@@ -227,7 +233,7 @@ export class TaskController {
           await this.check();
           if (process.env.HARU_CORE_TASK_SETTLEMENT==='on'||!this.snapshot.operations.length) {
             const reads=await prefetchCoreReads(messages,{task_id:this.snapshot.id,revision:this.snapshot.revision,request:this.snapshot.request},
-              {...deps.coreReadOnly,priorOperations:this.snapshot.operations.length,active:()=>this.check(),permitted:()=>!deps.pageWasRead(),runTool:wrapped.runTool,log:deps.log});
+              {...deps.coreReadOnly,priorOperations:this.snapshot.operations.length,active:()=>this.check(),permitted:()=>!deps.pageWasRead(),runTool:async call=>splitOutcome(await wrapped.runTool(call)).words,log:deps.log});
             if (reads) { wrapped.toolsAllowed=()=>false;wrapped.initialRan=new Set([...(wrapped.initialRan??[]),...reads]); }
           }
         }

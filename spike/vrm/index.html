@@ -1,0 +1,523 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VRM spike</title>
+<style>
+  /* Nothing paints a background anywhere: if a single pixel of the window is
+     not the desktop behind it, the alpha question has answered itself. */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; left: 8px; top: 8px; z-index: 10;
+    font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #eaeaea;
+    background: rgba(0, 0, 0, 0.55); padding: 6px 8px; border-radius: 5px;
+    white-space: pre; pointer-events: none;
+  }
+</style>
+<div id="hud">loading…</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../../node_modules/three/build/three.module.js",
+    "three/addons/": "../../node_modules/three/examples/jsm/",
+    "@pixiv/three-vrm": "../../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js",
+    "@pixiv/three-vrm-animation": "../../node_modules/@pixiv/three-vrm-animation/lib/three-vrm-animation.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils, MToonMaterial } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { FaceDriver, HEAD_FOR_MOOD } from './gen/face.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const hud = document.getElementById('hud');
+// Frameless and off the taskbar, so this is the way out.
+addEventListener('keydown', (e) => { if (e.key === 'Escape') window.spike?.done(); });
+const say = (line) => { hud.textContent = line; };
+const report = (line) => window.spike?.report(line);
+
+// alpha:true plus a zero clear alpha is the whole transparency contract. If
+// this holds through the render loop the window composites over the desktop.
+// ?opaque=1 paints a solid background instead. It is the control: if she shows
+// up opaque and vanishes transparent, the problem is the alpha channel and not
+// the model, the camera or the lights.
+const params = new URLSearchParams(location.search);
+const opaque = params.get('opaque') === '1';
+// three.js premultiplies by default. MToon writes its own fragment colour, so
+// whether that agrees with the canvas is the thing under test.
+const premultiplied = params.get('premul') !== '0';
+const renderer = new THREE.WebGLRenderer({ alpha: !opaque, antialias: true, premultipliedAlpha: premultiplied });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+if (opaque) renderer.setClearColor(0x334455, 1); else renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = null;
+
+// MToon is unlit-ish but still takes light for its shade ramp, so this is a
+// plain key plus ambient rather than anything clever.
+scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+const key = new THREE.DirectionalLight(0xffffff, 1.5);
+key.position.set(1, 2, 2);
+scene.add(key);
+
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.1, 20);
+camera.position.set(0, 1.28, 2.1);
+
+const loader = new GLTFLoader();
+loader.register((parser) => new VRMLoaderPlugin(parser));
+
+const modelPath = params.get('model');
+const forcedAction = params.get('action') || '';
+const bakeTo = params.get('bake') || '';
+const clock = new THREE.Clock();
+let vrm = null;
+let mixer = null;
+let clips = null;
+let playing = '';
+let current = null;
+let nextClipAt = 0;
+
+/**
+ * Switch to a named action, blending out of whatever was running.
+ *
+ * The crossfade is the part worth proving. Snapping between clips is what makes
+ * a companion look like a puppet, and 0.35s of overlap is the difference
+ * between her changing her mind and her being replaced.
+ */
+function play(name, fade = 0.35) {
+  if (!mixer || !clips?.[name] || playing === name) return;
+  const next = mixer.clipAction(clips[name]);
+  next.reset();
+  next.setLoop(THREE.LoopRepeat);
+  next.enabled = true;
+  next.setEffectiveWeight(1);
+  if (current) next.crossFadeFrom(current, fade, false);
+  next.play();
+  current = next;
+  playing = name;
+  report(`[spike] -> ${name}`);
+}
+
+// Frame times, not FPS: a companion is judged on what it takes away from the
+// game, and a number capped at the refresh rate hides that entirely.
+const frames = [];
+let started = 0;
+let phase = 'warmup';
+// How far the arm strays from where it sat on the first measured frame.
+const travel = { raw: 0, normalized: 0 };
+const restRaw = new THREE.Quaternion();
+const restNorm = new THREE.Quaternion();
+
+function stats(list) {
+  const sorted = [...list].sort((a, b) => a - b);
+  const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+  return { median: at(0.5), p95: at(0.95), worst: sorted[sorted.length - 1] };
+}
+
+loader.load(modelPath, (gltf) => {
+  vrm = gltf.userData.vrm;
+  // Both of these are load-time hygiene the docs insist on: unused nodes cost
+  // frame time for nothing, and a VRM 0.x model faces away from the camera.
+  VRMUtils.removeUnnecessaryVertices(gltf.scene);
+  VRMUtils.combineSkeletons(gltf.scene);
+  VRMUtils.rotateVRM0(vrm);
+  scene.add(vrm.scene);
+
+  const meta = vrm.meta ?? {};
+  const bones = Object.keys(vrm.humanoid?.humanBones ?? {}).length;
+  const expressions = Object.keys(vrm.expressionManager?.expressionMap ?? {});
+  let mtoon = 0, materials = 0, outlines = 0, tris = 0;
+  vrm.scene.traverse((object) => {
+    if (object.isMesh) {
+      tris += (object.geometry?.index?.count ?? object.geometry?.attributes?.position?.count ?? 0) / 3;
+      for (const material of [].concat(object.material)) {
+        materials++;
+        if (material instanceof MToonMaterial) {
+          mtoon++;
+          // The cel outline is a second draw of the mesh, so whether it is on
+          // is both a look question and a cost one.
+          if (material.outlineWidthMode && material.outlineWidthMode !== 'none') outlines++;
+        }
+      }
+    }
+  });
+  report(`[spike] loaded ${meta.name ?? meta.title ?? '?'} — spec ${vrm.meta?.metaVersion ?? '0'}, ${bones} bones, ${Math.round(tris / 1000)}k triangles`);
+  report(`[spike] materials: ${mtoon}/${materials} MToon (cel shader), ${outlines} drawing outlines`);
+  report(`[spike] spring bones (hair/cloth): ${vrm.springBoneManager?.joints?.size ?? 0} joints`);
+  report(`[spike] expressions: ${expressions.join(', ')}`);
+
+  // Where she actually is, in metres, and whether the camera is pointed at
+  // her. A VRM is authored around the origin at roughly human height, so a
+  // camera guessed rather than fitted is the likeliest reason for an empty
+  // window — and an empty window renders just as fast as a working one.
+  // Measured off the skeleton, not off a Box3. setFromObject reads each
+  // geometry's bind-pose bounds and ignores skinning entirely, so on a rigged
+  // VRM it returns a box that is confidently wrong — mine put her a head lower
+  // than the camera thought, which reads exactly like a model that is not
+  // rendering at all.
+  const head = vrm.humanoid?.getNormalizedBoneNode('head');
+  const foot = vrm.humanoid?.getNormalizedBoneNode('leftFoot');
+  const headY = head ? head.getWorldPosition(new THREE.Vector3()).y : 1.4;
+  const footY = foot ? foot.getWorldPosition(new THREE.Vector3()).y : 0;
+  const height = (headY - footY) * 1.15; // head bone sits below the crown.
+  const middle = footY + height / 2;
+  report(`[spike] skeleton: head ${headY.toFixed(2)}m, foot ${footY.toFixed(2)}m, so about ${height.toFixed(2)}m tall`);
+
+  const fitDistance = (height * 0.6) / Math.tan((camera.fov * Math.PI / 180) / 2);
+  camera.position.set(0, middle, fitDistance);
+  camera.lookAt(0, middle, 0);
+  camera.updateProjectionMatrix();
+  report(`[spike] camera at z=${fitDistance.toFixed(2)}m looking at y=${middle.toFixed(2)}`);
+
+  // The seam this whole spike exists to test. In the real app the life loop
+  // already emits an action name every tick and CompanionWindow looks it up in
+  // ACTION_SHAPES; here the same names index a bag of clips instead of a bag of
+  // gaze-and-expression shapes. Nothing else about the flow changes.
+  mixer = new THREE.AnimationMixer(vrm.scene);
+  clips = buildClips(vrm);
+
+  // ?bake writes the built-in clips out as a .glb, purely so the loading path
+  // above can be tested against a real file before anyone opens Blender. If it
+  // cannot read back what it just wrote, the fault is here and not in Blender.
+  if (bakeTo) {
+    new GLTFExporter().parse(vrm.scene, (gltf) => {
+      window.spike?.bake(gltf, bakeTo);
+      report(`[spike] baked ${Object.keys(clips).length} clips into ${bakeTo}`);
+      setTimeout(() => window.spike?.done(), 400);
+    }, (error) => report(`[spike] bake failed: ${error}`),
+      { binary: true, animations: Object.values(clips), onlyVisible: false });
+    return;
+  }
+
+  const external = params.get('clip');
+  if (external) {
+    // One file or a | list. A .vrma has no name inside, so each clip is named
+    // after its file, which is how clips/settle.vrma becomes 'settle'.
+    const files = external.split('|').filter(Boolean);
+    const stem = (file) => file.split('/').pop().split(String.fromCharCode(92)).pop().replace(/[.][^.]*$/, '');
+    Promise.all(files.map((file) => clipsFromFile(file, vrm).then((loaded) => loaded.map((c, i) => [loaded.length > 1 ? `${stem(file)}${i}` : stem(file), c]))))
+      .then((groups) => {
+        const loaded = groups.flat().map(([, c]) => c);
+        clips = Object.fromEntries(groups.flat());
+        const bound = loaded.reduce((n, c) => n + c.tracks.length, 0);
+        report(`[spike] loaded from file: ${Object.keys(clips).join(', ')} (${bound} tracks)`);
+        started = performance.now();
+        play(forcedAction && clips[forcedAction] ? forcedAction : Object.keys(clips)[0], 0);
+      })
+      .catch((error) => {
+        report(`[spike] could not load ${external}: ${error.message}`);
+        started = performance.now();
+        play('settle', 0);
+      });
+    return;
+  }
+
+  const bound = Object.values(clips).reduce((n, c) => n + c.tracks.length, 0);
+  report(`[spike] clips: ${Object.keys(clips).join(', ')} (${bound} tracks bound to the normalized rig)`);
+  play(forcedAction && clips[forcedAction] ? forcedAction : 'settle', 0);
+  started = performance.now();
+}, undefined, (error) => {
+  report(`[spike] FAILED to load: ${error?.message ?? error}`);
+  say('load failed');
+});
+
+/**
+ * Clips, built in code rather than imported.
+ *
+ * The point is not the animation — hand-keyed quaternions will never look like
+ * authored motion. The point is the machinery around it: that a clip can be
+ * named, played, crossfaded into another, and layered under the expression and
+ * look-at passes without any of the three fighting. That is the part the app
+ * has to own, and it is the same whether the keys came from here or Blender.
+ *
+ * Named after entries in ACTION_SHAPES, because those names already exist and
+ * the life loop already emits them.
+ */
+function buildClips(vrm) {
+  const bone = (name) => vrm.humanoid?.getNormalizedBoneNode(name);
+  // Tracks address the normalized rig, which three-vrm keeps under vrm.scene
+  // and syncs onto the real bones each update. Animating the raw bones instead
+  // works until a model is rigged with a different rest pose.
+  const track = (boneName, times, eulers) => {
+    const node = bone(boneName);
+    if (!node) return null;
+    const values = [];
+    for (const [x, y, z] of eulers) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
+      values.push(q.x, q.y, q.z, q.w);
+    }
+    return new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, values);
+  };
+  const clip = (name, duration, tracks) => new THREE.AnimationClip(name, duration, tracks.filter(Boolean));
+
+  // Arms rest at the sides rather than in the T-pose the file ships in. Every
+  // clip starts from this, which is what stops a crossfade snapping.
+  const REST_ARM = 1.25;
+
+  return {
+    settle: clip('settle', 4, [
+      track('chest', [0, 2, 4], [[0.02, 0, 0], [-0.01, 0, 0], [0.02, 0, 0]]),
+      track('head', [0, 1.5, 3, 4], [[0, 0.1, 0], [0.04, -0.05, 0], [0, -0.12, 0], [0, 0.1, 0]]),
+      track('leftUpperArm', [0, 4], [[0, 0, REST_ARM], [0, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 4], [[0, 0, -REST_ARM], [0, 0, -REST_ARM]]),
+      track('leftLowerArm', [0, 2, 4], [[0, 0.15, 0.1], [0, 0.2, 0.14], [0, 0.15, 0.1]]),
+      track('rightLowerArm', [0, 2, 4], [[0, -0.15, -0.1], [0, -0.2, -0.14], [0, -0.15, -0.1]]),
+    ]),
+    // One-shot. The arm that waves is the only thing that leaves rest.
+    'lean-in': clip('lean-in', 2.4, [
+      track('chest', [0, 1.2, 2.4], [[0.02, 0, 0], [0.1, 0, 0], [0.02, 0, 0]]),
+      track('head', [0, 1.2, 2.4], [[0, 0, 0], [0.12, 0, 0.06], [0, 0, 0]]),
+      track('leftUpperArm', [0, 2.4], [[0, 0, REST_ARM], [0, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 0.5, 1.4, 2.4], [[0, 0, -REST_ARM], [0, 0, -0.5], [0, 0, -0.45], [0, 0, -REST_ARM]]),
+      track('rightLowerArm', [0, 0.5, 0.9, 1.3, 1.7, 2.4], [[0, -0.15, -0.1], [0, -0.6, -0.5], [0, -0.2, -0.9], [0, -0.6, -0.5], [0, -0.2, -0.9], [0, -0.15, -0.1]]),
+    ]),
+    // Crude on purpose: a real walk is the thing Blender is for. This only has
+    // to prove the legs move on a loop and the spring bones follow.
+    walk: clip('walk', 1, [
+      track('hips', [0, 0.25, 0.5, 0.75, 1], [[0, 0, 0.02], [0, 0, -0.02], [0, 0, 0.02], [0, 0, -0.02], [0, 0, 0.02]]),
+      track('leftUpperLeg', [0, 0.5, 1], [[0.5, 0, 0], [-0.4, 0, 0], [0.5, 0, 0]]),
+      track('rightUpperLeg', [0, 0.5, 1], [[-0.4, 0, 0], [0.5, 0, 0], [-0.4, 0, 0]]),
+      track('leftLowerLeg', [0, 0.25, 0.5, 1], [[-0.1, 0, 0], [-0.7, 0, 0], [-0.05, 0, 0], [-0.1, 0, 0]]),
+      track('rightLowerLeg', [0, 0.5, 0.75, 1], [[-0.05, 0, 0], [-0.1, 0, 0], [-0.7, 0, 0], [-0.05, 0, 0]]),
+      track('leftUpperArm', [0, 0.5, 1], [[-0.35, 0, REST_ARM], [0.35, 0, REST_ARM], [-0.35, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 0.5, 1], [[0.35, 0, -REST_ARM], [-0.35, 0, -REST_ARM], [0.35, 0, -REST_ARM]]),
+      track('chest', [0, 0.5, 1], [[0.04, 0.05, 0], [0.04, -0.05, 0], [0.04, 0.05, 0]]),
+    ]),
+  };
+}
+
+/**
+ * Clips from a file, which is the point of all of this.
+ *
+ * Two formats, and the difference is whether retargeting has already happened.
+ * A .vrma addresses the VRM humanoid by role — "leftUpperArm" — so it plays on
+ * any VRM regardless of what the bones are called. That is the format to export
+ * from Blender, and it is not a preference.
+ *
+ * A .glb does not work here, and the way it fails is the trap. Blender exports
+ * nodes by name, those names all exist on the loaded model, and every track
+ * binds — 402 of 402. Then three-vrm copies its normalized rig onto those very
+ * nodes inside vrm.update(), every frame, and the animation is gone before it
+ * reaches the screen. Measured at 0.0 degrees of arm travel against 29 for the
+ * same pose authored on the normalized rig: a clip that plays perfectly and
+ * does nothing at all.
+ *
+ * Retargeting the tracks onto the normalized rig by hand was tried and is not
+ * in this file any more. Rewriting each key relative to its rest pose is
+ * arithmetic that looks right, moves the arm the correct 51 degrees, and
+ * renders her upside down with her legs folded over her head, because the root
+ * chain carries an orientation the rest pose does not describe. Skipping hips
+ * made it worse. That is what .vrma is for; do not re-derive it here.
+ */
+async function clipsFromFile(url, vrm) {
+  if (/\.vrma(\?|$)/i.test(url)) {
+    const l = new GLTFLoader();
+    l.register((parser) => new VRMAnimationLoaderPlugin(parser));
+    const gltf = await l.loadAsync(url);
+    const animations = gltf.userData.vrmAnimations ?? [];
+    if (!animations.length) throw new Error('no VRM animation inside the .vrma');
+    // Look-at is animated through a proxy object rather than the camera, so it
+    // has to exist before the clip is built or those tracks bind to nothing.
+    if (!vrm.lookAt?.userData?.vrmLookAtQuaternionProxy) {
+      const proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+      proxy.name = 'lookAtQuaternionProxy';
+      vrm.scene.add(proxy);
+    }
+    return animations.map((animation) => createVRMAnimationClip(animation, vrm));
+  }
+  const gltf = await new GLTFLoader().loadAsync(url);
+  if (!gltf.animations?.length) throw new Error('no animations inside the .glb');
+
+  // What a track points at, and whether the loaded model has anything by that
+  // name. A clip whose targets resolve to nothing plays perfectly and moves
+  // nothing, which is indistinguishable from a bad pose until you look.
+  const inScene = new Set();
+  vrm.scene.traverse((o) => inScene.add(o.name));
+  const sample = gltf.animations[0].tracks.slice(0, 3).map((t) => t.name);
+  const hits = gltf.animations[0].tracks.filter((t) => inScene.has(t.name.split('.')[0])).length;
+  report(`[spike] track targets look like: ${sample.join(' | ')}`);
+  report(`[spike] ${hits}/${gltf.animations[0].tracks.length} track targets exist in the loaded model`);
+
+  return gltf.animations;
+}
+
+/**
+ * The face, which is a separate layer and stays separate.
+ *
+ * Expressions and visemes are driven per frame while a clip plays the body —
+ * the two never touch, which is the whole reason emotions can stay as
+ * expressions while actions become clips.
+ */
+let faceDriver = null;
+const forcedFace = params.get('face') || '';
+// What the life loop would send, cycled so a change can be watched: an
+// expression and the mood whose head angle goes with it. null is a bare face.
+const FACES = [['happy', 'happy'], ['fond', 'happy'], ['smug', 'neutral'], ['determined', 'curious'], ['sleepy', 'sleepy'], [null, 'neutral']];
+let faceIndex = -1;
+let probe = null;
+let probes = 0;
+
+function face(t) {
+  if (!vrm) return;
+  if (!faceDriver) {
+    faceDriver = new FaceDriver({ has: (name) => Boolean(vrm.expressionManager?.getExpression(name)) });
+    const parts = Object.keys(vrm.expressionManager?.expressionMap ?? {}).filter((n) => /\.(eyes|brows|mouth)$/.test(n));
+    report(`[spike] face parts shipped: ${parts.length}`);
+  }
+  const now = performance.now();
+  const wanted = forcedFace ? 0 : started ? Math.floor((now - started) / 1800) % FACES.length : -1;
+  if (wanted !== faceIndex) {
+    faceIndex = wanted;
+    const [name, mood] = forcedFace ? [forcedFace, 'neutral'] : FACES[Math.max(0, wanted)];
+    faceDriver.show(name, HEAD_FOR_MOOD[mood], now);
+    report(`[spike] face -> ${name ?? 'none'} through ${Object.keys(faceDriver.update(now).weights).join(', ') || 'nothing'}`);
+    // The first two changes get traced: what the expression manager actually
+    // holds, frame by frame, for a third of a second. A screenshot can't show
+    // a stagger; this can.
+    if (name && probes < 2) { probe = { name, from: now, rows: [] }; probes++; }
+  }
+  const out = faceDriver.update(now);
+  for (const [name, weight] of Object.entries(out.weights)) vrm.expressionManager?.setValue(name, weight);
+  if (probe) {
+    const em = vrm.expressionManager;
+    const at = Math.round(now - probe.from);
+    if (at <= 360) {
+      probe.rows.push(`${at}ms e${em.getValue(`${probe.name}.eyes`)?.toFixed(1)} b${em.getValue(`${probe.name}.brows`)?.toFixed(1)} m${em.getValue(`${probe.name}.mouth`)?.toFixed(1)} blink${Math.max(out.blink, 0).toFixed(1)} yaw${out.head.yaw.toFixed(1)}`);
+    } else {
+      report(`[spike] trace ${probe.name}: ${probe.rows.join(' | ')}`);
+      probe = null;
+    }
+  }
+  // The cut's blink sits over the idle one; taking the max means neither can half-open the other's lids.
+  const idleBlink = Math.sin(t * 0.9) > 0.985 ? 1 : 0;
+  vrm.expressionManager?.setValue('blink', Math.max(idleBlink, out.blink));
+  vrm.expressionManager?.setValue('aa', Math.max(0, Math.sin(t * 3.1)) * 0.6);
+  // The head turn rides on top of whatever the clip put there: applied after
+  // the mixer, before vrm.update carries it onto the real bones.
+  const head = vrm.humanoid?.getNormalizedBoneNode('head');
+  if (head) {
+    head.quaternion.multiply(new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(THREE.MathUtils.degToRad(out.head.pitch), THREE.MathUtils.degToRad(out.head.yaw), 0)));
+  }
+}
+
+/**
+ * Do not believe this function.
+ *
+ * Kept as a warning. With antialias:true the drawing buffer is multisampled and
+ * only resolved on the swap, so readPixels on the default framebuffer returns
+ * the cleared buffer — it reported "nothing drawn" for a model that a
+ * screenshot showed rendering perfectly, in both transparent and opaque runs,
+ * and cost an hour of chasing an alpha bug that was never there. A screen
+ * capture of the actual window is the only honest instrument here.
+ */
+function alphaHolds() {
+  const gl = renderer.getContext();
+  const pixel = new Uint8Array(4);
+  gl.readPixels(2, 2, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  return { alpha: pixel[3], rgb: [pixel[0], pixel[1], pixel[2]] };
+}
+
+// Uncapped she renders at the monitor's refresh, which for a companion that
+// has to share a card with a game is the wrong question entirely. ?fps=30 is
+// the setting she would actually ship with.
+const fpsCap = Number(params.get('fps')) || 0;
+const minFrameMs = fpsCap ? 1000 / fpsCap - 1 : 0;
+let lastDraw = 0;
+
+let reportedAlpha = false;
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  if (minFrameMs && now - lastDraw < minFrameMs) return;
+  lastDraw = now;
+  const delta = clock.getDelta();
+  const t = clock.elapsedTime;
+  const before = performance.now();
+  // Body from the clip, face from the expression layer, spring bones from
+  // vrm.update — three passes that never touch each other.
+  mixer?.update(delta);
+  face(t);
+  vrm?.update(delta);
+  renderer.render(scene, camera);
+  const cost = performance.now() - before;
+
+  // Cycles through the vocabulary so a crossfade can actually be watched:
+  // each clip runs once through at its own length, then the next comes in
+  // under a crossfade, which is the shape the life loop will drive. ?action=
+  // pins one instead, which is how each was screenshotted.
+  if (!forcedAction && started && clips && performance.now() >= nextClipAt) {
+    const names = Object.keys(clips);
+    const name = names[(names.indexOf(playing) + 1) % names.length];
+    play(name);
+    nextClipAt = performance.now() + Math.max(1200, clips[name].duration * 1000);
+  }
+
+  if (!started) return;
+  const since = performance.now() - started;
+  // Two seconds of warmup: shader compilation and the first spring-bone steps
+  // are not what running all evening costs.
+  if (phase === 'warmup' && since > 2000) {
+    phase = 'measuring';
+    frames.length = 0;
+    // Whatever pose she is in as measuring opens is the datum to measure from.
+    restRaw.copy(vrm?.humanoid?.getRawBoneNode?.('rightUpperArm')?.quaternion ?? restRaw);
+    restNorm.copy(vrm?.humanoid?.getNormalizedBoneNode?.('rightUpperArm')?.quaternion ?? restNorm);
+  }
+  if (phase === 'measuring') {
+    frames.push(cost);
+    if (!reportedAlpha && frames.length > 30) {
+      const { alpha, rgb } = alphaHolds();
+      report(`[spike] corner pixel rgba(${rgb.join(',')},${alpha}) — alpha ${alpha === 0 ? 'HOLDS (window is see-through)' : `LOST (opaque, a=${alpha})`}`);
+      // The corner only proves the window is empty where nothing was drawn.
+      // The middle proves something was.
+      const gl = renderer.getContext();
+      const px = new Uint8Array(4);
+      gl.readPixels(Math.floor(gl.drawingBufferWidth / 2), Math.floor(gl.drawingBufferHeight / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      // Against a transparent clear, "drawn" means the alpha channel survived
+      // her. Against the opaque control it means the pixel stopped being the
+      // clear colour — checking alpha there only ever proves the clear worked.
+      const drawn = opaque ? !(px[0] === 0x33 && px[1] === 0x44 && px[2] === 0x55) : px[3] > 0;
+      report(`[spike] centre pixel rgba(${px[0]},${px[1]},${px[2]},${px[3]}) — ${drawn ? 'SHE IS THERE' : 'nothing drawn at centre'}`);
+      const info = renderer.info.render;
+      report(`[spike] draw calls ${info.calls}, triangles ${info.triangles}`);
+      reportedAlpha = true;
+    }
+    // Is anything actually moving? A clip can bind, play, and be silently
+    // overwritten: three-vrm copies the normalized rig onto the raw bones
+    // inside vrm.update(), so a clip that animates raw bones — which is what
+    // Blender exports, since it knows nothing about VRM's normalized rig — is
+    // undone every frame. Watching both tells the two failures apart.
+    const arm = vrm?.humanoid;
+    if (arm) {
+      const raw = arm.getRawBoneNode?.('rightUpperArm');
+      const norm = arm.getNormalizedBoneNode?.('rightUpperArm');
+      if (raw) travel.raw = Math.max(travel.raw, raw.quaternion.angleTo(restRaw));
+      if (norm) travel.normalized = Math.max(travel.normalized, norm.quaternion.angleTo(restNorm));
+    }
+
+    if (frames.length >= 600) {
+      const s = stats(frames);
+      report(`[spike] cpu frame cost over ${frames.length} frames — median ${s.median.toFixed(2)}ms, p95 ${s.p95.toFixed(2)}ms, worst ${s.worst.toFixed(2)}ms`);
+      const deg = (r) => (r * 180 / Math.PI).toFixed(1);
+      report(`[spike] right upper arm moved: raw ${deg(travel.raw)}deg, normalized ${deg(travel.normalized)}deg`);
+      report('[spike] holding for GPU sampling');
+      phase = 'holding';
+    }
+    const s = stats(frames);
+    say(`${playing}\nframes ${frames.length}\nmedian ${s.median.toFixed(2)}ms\np95    ${s.p95.toFixed(2)}ms`);
+  }
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>

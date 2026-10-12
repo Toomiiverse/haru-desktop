@@ -13,6 +13,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { vrmWardrobe, wardrobeControls } from './vrmWardrobe';
 
 export type WardrobeKind = 'toggle' | 'option' | 'pose';
 
@@ -37,6 +38,8 @@ export type WardrobeControl = {
    * could select it, and two buttons both clamped to the same value.
    */
   values: number[];
+  labels?: string[];
+  default?: number;
 };
 
 /** Real parameter bounds, read from the loaded model rather than guessed. */
@@ -172,6 +175,10 @@ export function readDisplayInfo(modelPath: string): unknown {
 
 /** Everything she can change about her appearance, for the model at this path. */
 export function discoverWardrobe(modelPath: string, ranges?: Record<string, ParameterRange>): WardrobeControl[] {
+  if (path.extname(modelPath).toLowerCase() === '.vrm') {
+    try { return wardrobeControls(vrmWardrobe(JSON.parse(readFileSync(path.join(path.dirname(modelPath), 'wardrobe.json'), 'utf8')))); }
+    catch { return []; }
+  }
   const info = readDisplayInfo(modelPath);
   if (!info) return [];
   return readWardrobe(info, optionCeilings(path.dirname(modelPath)), ranges);

@@ -42,6 +42,107 @@ export type IdleMotion = {
 
 const TAU = Math.PI * 2;
 
+/** Small physics steps keep follow-through consistent on slow and fast displays. */
+export function settleSpring(value: number, speed: number, target: number, stiffness: number, damping: number, dt: number): [number, number] {
+  if (!Number.isFinite(dt) || dt <= 0 || dt > .1) return [value, 0];
+  const steps = Math.ceil(dt * 120), step = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    speed += ((target - value) * stiffness - speed * damping) * step;
+    value += speed * step;
+  }
+  return [value, speed];
+}
+
+/** Head motion drives local lag; gravity keeps a held tilt from looking rigid. */
+export function hairMotionTarget(roll: number, turn: number, vx: number, vy: number, ear: boolean, side: number, limit: number) {
+  const angle = -roll * (ear ? .18 : .45) - turn * (ear ? .085 : .13)
+    - vx * (ear ? .012 : .022) + vy * side * (ear ? .012 : .018);
+  return { angle: Math.max(-limit, Math.min(limit, angle)),
+    stretch: Math.max(-.025, Math.min(.025, -vy * (ear ? .00004 : .00012))) };
+}
+
+/** Bounded directional stretch, in avatar lengths per second, independent of screen size. */
+export function dragMotionTarget(vx: number, vy: number, size: number, held: boolean): number[] {
+  if (!held || ![vx, vy, size].every(Number.isFinite) || size <= 0) return [1, 0, 1, 0];
+  const speed = Math.hypot(vx, vy), amount = Math.min(.3, speed / size * .045);
+  const x = speed ? vx / speed : 0, y = speed ? vy / speed : 0;
+  return [.97 + amount * (2 * x * x - 1), amount * 2 * x * y,
+    1.03 + amount * (2 * y * y - 1), Math.max(-12, Math.min(12, vx / size * 1.8))];
+}
+
+/** Depth has a reason: attention or rest; gaze turns never change her size. */
+export function depthMotionTarget(time: number, x: number, y: number, attentive: boolean, quiet: boolean): number[] {
+  if (![time, x, y].every(Number.isFinite)) return [0, 0, 0];
+  return [attentive ? .1 : quiet ? -.04 : 0,
+    -Math.max(-1, Math.min(1, y)) * 7,
+    Math.max(-1, Math.min(1, x)) * 10];
+}
+
+/** Buoyant local hover; mood changes the pace without choosing a new destination. */
+export function fairyMotion(time: number, emotion: string, speaking: number) {
+  const t = Number.isFinite(time) ? time / 1000 : 0;
+  const talk = Number.isFinite(speaking) ? Math.max(0, Math.min(1, speaking)) : 0;
+  const angry = ['angry','rage','annoyed','irritated'].includes(emotion);
+  const happy = ['happy','excited','playful','triumph','laughing','silly'].includes(emotion);
+  const quiet = ['sleepy','drowsy','sad','disappointed','sick','crying','content'].includes(emotion);
+  const curious = ['curious','thinking','pensive','confused','skeptical'].includes(emotion);
+  const pace = angry ? 2.8 : happy ? 1.7 : quiet ? .4 : curious ? .85 : 1;
+  const amount = (quiet ? .38 : happy || angry ? 1 : .7) * (1 - talk * .8);
+  const burst = .3 + .7 * Math.pow(Math.max(0, Math.sin(t * .32)), 2);
+  const phase = t * pace;
+  const lift = Math.sin(phase * 1.65) * .075 + Math.sin(phase * 3.3 + .65) * .009;
+  const hop = happy ? -Math.pow(Math.abs(Math.sin(phase * 2.2)), 1.5) * .09 : lift;
+  const dart = angry ? Math.tanh(Math.sin(phase * .55) * 2.5) : Math.sin(phase * .47);
+  const breath = (Math.sin(t * 1.3) + 1) / 2;
+  return { x: (Math.sin(phase * .825 + .7) * .035 + Math.sin(phase * 1.65) * .009) * amount, y: hop * amount,
+    z: Math.sin(phase * .53) * .12 * amount, bank: Math.cos(phase * .825 + .7) * (angry ? 7 : happy ? 4.5 : 3) * amount,
+    flightX: dart * amount * burst, flightY: Math.sin(phase * (curious ? .47 : .31) + 1) * amount * burst,
+    glow: .12 + breath * .13 + burst * amount * .11 + talk * .04 };
+}
+
+/** Frame-rate independent jaw attack/release follows audio, never a fake syllable clock. */
+export function speechJaw(open: number, weight: number, previous: number, dt: number): number {
+  const target = Number.isFinite(open) && Number.isFinite(weight) ? Math.max(0, Math.min(1, open)) * Math.max(0, Math.min(1, weight)) : 0;
+  if (!Number.isFinite(dt) || dt <= 0) return previous;
+  return previous + (target - previous) * (1 - Math.exp(-Math.min(dt, .1) / (target > previous ? .035 : .085)));
+}
+
+/** Actual travel/deformation and audio feed a fast attack, soft release envelope. */
+export function glowMotion(previous: { phase: number; energy: number; voice: number; intensity: number }, dt: number,
+  emotion: string, speed: number, audio: number, rest: number) {
+  const unit = (n: number) => Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+  const step = Number.isFinite(dt) && dt > 0 && dt <= .1 ? dt : 0;
+  const asleep = unit(rest);
+  const follow = (value: number, target: number, attack: number, release: number) =>
+    value + (target - value) * (1 - Math.exp(-step / (target > value ? attack : release)));
+  const energy = follow(previous.energy, unit(speed / 1.8), .07, .42);
+  const voice = follow(previous.voice, unit(audio), .028, .14);
+  const angry = ['angry', 'rage', 'annoyed', 'irritated'].includes(emotion);
+  const lively = ['happy', 'excited', 'playful', 'triumph', 'laughing'].includes(emotion);
+  const hz = ((angry ? .52 : lively ? .30 : .22) + energy * .14) * (1 - asleep) + asleep / 5.4;
+  const phase = (previous.phase + step * hz * TAU) % TAU;
+  const breath = (1 - Math.cos(phase)) / 2;
+  const awake = .025 + breath * (angry ? .14 : .045) + energy * .43 + voice * (angry ? .36 : .30);
+  const intensity = follow(previous.intensity, Math.min(.92, awake * (1 - asleep) + (.005 + breath * .009) * asleep), .045, .18);
+  return { phase, energy, voice, intensity, breath };
+}
+
+/** Presentation only: breathing, fighting a nod, and an occasional dream twitch. */
+export function sleepMotion(time: number, level: number, breathing?: number) {
+  const t = Number.isFinite(time) ? time / 1000 : 0;
+  const amount = Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0;
+  const breath = breathing ?? (1 - Math.cos(t * Math.PI * 2 / 5.4)) / 2;
+  const nod = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 13)), 10);
+  const dream = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 19)), 32) * Math.sin(t * 17);
+  const tired = Math.max(0, 1 - Math.max(0, amount - .55) / .45);
+  const yawn = tired * Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 23 + 2)), 18);
+  return { lift: amount * (-.014 * breath + .025 * nod * tired - .018 * yawn),
+    roll: amount * (2.2 + Math.sin(t * .39) * 1.1 + nod * tired * 5),
+    stretch: 1 + amount * (.018 * breath - .025 * nod * tired + .035 * yawn),
+    lid: 1 - amount * Math.min(.98, .25 + .73 * nod * tired + .7 * yawn),
+    ear: amount * (2.4 + dream * 1.5), glow: .14 + breath * .075 };
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }

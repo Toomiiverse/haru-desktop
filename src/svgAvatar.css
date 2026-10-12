@@ -1,0 +1,109 @@
+/* Her, on the desk: the phone page's avatar styles, brought to the companion
+   window. The artwork is one SVG per emotion, put in as itself and crossfaded.
+   Square, sized by --avatar-size (set from JS to the window's shorter side),
+   never stretched; the black square the files ship behind her is hidden, so she
+   sits on the transparent window and the desktop shows around her. The float
+   lives on the outer element and never restarts; the settle on a change of face
+   and the pop when she talks live on the body inside it. Her eyes carry a
+   transform that two variables move, eased, wherever her attention is.
+
+   Scoped under .svg-avatar-canvas so none of it leaks into the rest of the app;
+   the custom properties themselves are registered globally, as @property must
+   be, and are only read here. */
+@property --depth-z { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --depth-pitch { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --depth-yaw { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --idle-bob { syntax:'<length>'; inherits:false; initial-value:4px; }
+@property --idle-sway { syntax:'<angle>'; inherits:false; initial-value:1.2deg; }
+@property --idle-breath { syntax:'<number>'; inherits:false; initial-value:1.015; }
+@property --gaze-x { syntax:'<length>'; inherits:true; initial-value:0px; }
+@property --gaze-y { syntax:'<length>'; inherits:true; initial-value:0px; }
+@property --lid { syntax:'<number>'; inherits:true; initial-value:1; }
+@property --eye-lid { syntax:'<number>'; inherits:false; initial-value:1; }
+@property --tilt { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+@property --drift-x { syntax:'<number>'; inherits:false; initial-value:0; }
+@property --drift-y { syntax:'<number>'; inherits:false; initial-value:0; }
+
+.svg-avatar-canvas{
+  position:absolute;inset:0;
+  display:flex;align-items:flex-end;justify-content:center;
+  padding-bottom:2%;
+  overflow:hidden;
+  pointer-events:none;
+  --avatar-size:min(88vw,88vh);
+}
+.svg-avatar-canvas #avatar{position:relative;width:var(--avatar-size);height:var(--avatar-size);transform-origin:50% 62%;
+  --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px; --lid:1;
+  transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .16s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .2s cubic-bezier(0.33, 1, 0.68, 1); }
+/* How she holds herself: a cock of the head and a small roam from home, eased
+   over a second and a half so a new pose is a movement, not a jump. The roam is
+   a fraction of her own size, so it scales with her. */
+.svg-avatar-canvas #avatar-pose{position:absolute;inset:0;transform-origin:50% 68%;--tilt:0deg;--drift-x:0;--drift-y:0;
+  transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
+  transition:--tilt 1.1s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.4s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.svg-avatar-canvas #avatar-body{position:absolute;inset:0;transform-origin:50% 60%;}
+.svg-avatar-canvas .avatar-boundary{position:absolute;inset:0;}
+.svg-avatar-canvas .avatar-depth{position:absolute;inset:0;transform-origin:50% 50%;--depth-z:0;--depth-pitch:0;--depth-yaw:0;}
+.svg-avatar-canvas .avatar-drag{position:absolute;inset:0;transform-origin:50% 58%;}
+.svg-avatar-canvas .avatar-gesture{position:absolute;inset:0;transform-origin:50% 68%;}
+.svg-avatar-canvas #avatar .face{position:absolute;inset:0;opacity:0;}
+.svg-avatar-canvas #avatar .face svg{display:block;width:100%;height:100%;}
+.svg-avatar-canvas #avatar .face .backdrop{display:none;}
+/* A glance is a translation; a blink is a squash toward the eye's own middle,
+   because the art has no lids to close. */
+.svg-avatar-canvas #avatar .face .eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px)) scaleY(calc(var(--lid) * var(--eye-lid) * var(--rest-lid, 1)));transform-box:fill-box;transform-origin:center;}
+.svg-avatar-canvas #avatar .face .eye.closed-eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px));}
+.svg-avatar-canvas #avatar .face.missing{visibility:hidden;}
+.svg-avatar-canvas .avatar-floating{position:absolute;width:var(--avatar-size);height:var(--avatar-size);pointer-events:none;}
+.svg-avatar-canvas .floating-face{position:absolute;inset:0;opacity:0;}
+.svg-avatar-canvas .floating-face svg{display:block;width:100%;height:100%;overflow:visible;}
+.svg-avatar-canvas [data-reaction-mark]{transform-box:fill-box;transform-origin:center;animation:haru-mark-float 2.2s ease-in-out infinite;animation-delay:var(--mark-delay,0s);}
+.svg-avatar-canvas [data-reaction-mark="dot"]{animation-name:haru-mark-dot;animation-duration:1.3s;}
+.svg-avatar-canvas [data-reaction-mark="ray"]{animation-name:haru-mark-ray;animation-duration:1.7s;}
+.svg-avatar-canvas .avatar-floating.frozen [data-reaction-mark]{animation-play-state:paused;}
+@keyframes haru-mark-float{0%,100%{transform:translateY(4px) rotate(-3deg);}50%{transform:translateY(-17px) rotate(5deg);}}
+@keyframes haru-mark-dot{0%,100%{transform:translateY(0) scale(.9);opacity:.65;}40%{transform:translateY(-22px) scale(1.12);opacity:1;}}
+@keyframes haru-mark-ray{0%,100%{transform:translateY(4px) scale(.85);opacity:.7;}35%{transform:translateY(-12px) scale(1.12);opacity:1;}65%{transform:translateY(-3px) scale(.98);}}
+@media(prefers-reduced-motion:reduce){.svg-avatar-canvas [data-reaction-mark]{animation:none!important;}}
+.svg-avatar-canvas .avatar-symbol-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;}
+.svg-avatar-canvas .avatar-symbol-layer [data-symbol-part]{transform-box:fill-box;transform-origin:center;}
+.svg-avatar-canvas #avatar[data-symbol-eyes] .face .eye{opacity:0;}
+.svg-avatar-canvas #avatar-body.changed{animation:svg-avatar-settle .65s cubic-bezier(.35, 0, .25, 1);}
+.svg-avatar-canvas #avatar-body.pop{animation:svg-avatar-pop .5s cubic-bezier(0.33, 1, 0.68, 1);}
+.svg-avatar-canvas #avatar.frozen,.svg-avatar-canvas #avatar.frozen #avatar-body{animation-play-state:paused;}
+@keyframes svg-avatar-settle{0%,100%{scale:1 1;translate:0 0;}18%{scale:1.035 .965;translate:0 2px;}43%{scale:.975 1.04;translate:0 -2px;}68%{scale:1.015 .985;translate:0 1px;}84%{scale:.995 1.01;translate:0 0;}}
+@keyframes svg-avatar-pop{30%{scale:1.015;}}
+@media (prefers-reduced-motion: reduce){
+  .svg-avatar-canvas #avatar,.svg-avatar-canvas #avatar-pose,.svg-avatar-canvas #avatar-body{animation:none !important;transition:none !important;}
+  .svg-avatar-canvas #avatar .face{transition:none !important;}
+}
+
+.companion-hitbox{touch-action:none;outline:none;}
+.companion-stage[data-keyboard-navigation] .companion-hitbox:focus-visible{outline:2px solid #fec4cc;outline-offset:3px;border-radius:35%;}
+
+/* Small layer offsets suggest volume while keeping the original vector silhouette. */
+.svg-avatar-canvas .face [data-hair]{translate:calc((var(--view-yaw, 0) + var(--depth-yaw)) * var(--layer-depth, 0) * 1px) calc((var(--view-pitch, 0) + var(--depth-pitch)) * var(--layer-depth, 0) * -.7px);}
+
+/* A breathing halo and tiny lower-face stretch keep her mouthless silhouette. */
+.svg-avatar-canvas #avatar-body{filter:drop-shadow(0 0 calc(var(--avatar-size) * (.014 + var(--fairy-glow, .04) * .045)) rgb(254 196 204 / var(--fairy-glow, .04))) drop-shadow(0 0 calc(var(--avatar-size) * (.045 + var(--fairy-glow, .04) * .11)) rgb(222 170 255 / var(--fairy-glow, .04)));}
+/* Fade to transparent before the layer edge; blur must never reveal a rounded plate. */
+.svg-avatar-canvas .avatar-rest::before{content:'';position:absolute;inset:4% -4% -2%;pointer-events:none;background:radial-gradient(ellipse closest-side at 50% 56%,rgb(255 172 205 / .48) 0%,rgb(239 148 207 / .30) 30%,rgb(185 154 255 / .10) 55%,rgb(185 154 255 / 0) 78%);filter:blur(calc(var(--avatar-size) * .055));opacity:var(--fairy-glow,.04);transform:scale(calc(.88 + var(--fairy-glow,.04) * .4 + var(--glow-voice,0) * .05),calc(.92 + var(--fairy-glow,.04) * .26));will-change:transform,opacity;}
+.svg-avatar-canvas .face [data-part="face"]{transform-origin:50% 62%;transform:scaleY(calc(1 + var(--jaw-open, 0) * .035));}
+
+/* Sleep keeps its own layer so breathing and Zs survive a held reaction. */
+.svg-avatar-canvas .avatar-rest{position:absolute;inset:0;transform-origin:50% 68%;}
+.svg-avatar-canvas .avatar-sleep-layer,.svg-avatar-canvas .avatar-sleep-bubble-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;opacity:0;transition:opacity .45s;}
+.svg-avatar-canvas [data-rest="asleep"] :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){opacity:1;}
+.svg-avatar-canvas [data-rest="tired"] :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){opacity:.45;}
+.svg-avatar-canvas .avatar-sleep-layer [data-symbol-part]{transform-box:fill-box;transform-origin:center;animation:haru-sleep-z 5.4s ease-in-out infinite;}
+.svg-avatar-canvas .avatar-sleep-layer > g:nth-child(2) [data-symbol-part]{animation-delay:-1.8s;}
+.svg-avatar-canvas .avatar-sleep-layer > g:nth-child(3) [data-symbol-part]{animation-delay:-3.6s;}
+.svg-avatar-canvas [data-rest="tired"] .avatar-sleep-layer > g:not(:first-child){visibility:hidden;}
+.svg-avatar-canvas .sleep-bubble{transform-box:fill-box;transform-origin:center;scale:.6;animation:haru-sleep-bubble 5.4s ease-in-out infinite;}
+.svg-avatar-canvas .frozen :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer) *{animation-play-state:paused;}
+@keyframes haru-sleep-z{0%{opacity:0;translate:-10px 28px;scale:.6;rotate:-12deg;}25%{opacity:.9;}75%{opacity:.7;}100%{opacity:0;translate:35px -55px;scale:1.16;rotate:8deg;}}
+@keyframes haru-sleep-bubble{0%,100%{scale:.6;opacity:.3;}50%{scale:1;opacity:.75;}}
+@media(prefers-reduced-motion:reduce){.svg-avatar-canvas :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){transition:none;}.svg-avatar-canvas :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer) *{animation:none!important;}}
+
+/* Centre the flight space so downward swoops have the same room as upward ones. */
+.svg-avatar-canvas.avatar-roaming{align-items:center;padding-bottom:0;}

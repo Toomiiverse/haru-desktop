@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AsidesPage, JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
+import { AsidesPage, JournalDrawer, ServicesPage, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
 import { getProvider, testConnection } from './services/ai';
 import { randomGloat, randomRetort } from './retorts';
 import type { Attachment, KeptItem, Message, ProviderConfig, Reaction } from './types';
 import { WorldPage } from './WorldPage';
+import { CalendarDays, MessageSquarePlus, Sparkles } from 'lucide-react';
+import { StudyPage } from './StudyPage';
+import type { Page } from './components';
 
-const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', content: "Hey! About time you showed up. We’ve got work to do. Move it!" };
+const PAGE_COPY: Record<Page, [string, string]> = {
+  chat: ['Conversation', 'A place for whatever’s on your mind.'],
+  study: ['Study', 'Make room for your next small breakthrough.'],
+  asides: ['Asides', 'The little things she says along the way.'],
+  journal: ['Journal', 'A moment to check in with yourself.'],
+  services: ['Services', 'Everything she calls on, and how often.'],
+  profile: ['You & memory', 'The things that make this your space.'],
+  character: ['Character', 'A personality, entirely her own.'],
+  settings: ['Settings', 'Make Haru feel at home.'],
+  world: ['World', 'Where she goes when you are not talking.'],
+};
 const defaultProviderConfig: ProviderConfig = { provider: 'ollama', model: 'qwen2.5:14b', endpoint: 'http://localhost:11434', temperature: 0.7 };
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'|'world'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null); const [staged, setStaged] = useState<Attachment[]>([]);
+  const [showPlans, setShowPlans] = useState(() => window.matchMedia('(min-width: 761px)').matches);
+  const [serverConnected, setServerConnected] = useState(false);
+  useEffect(() => { void window.haru?.settings.get('desktop.serverUrl').then(url => setServerConnected(Boolean(url))); }, []);
+  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<Page>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null); const [staged, setStaged] = useState<Attachment[]>([]);
+  const sendInFlight = useRef(false);
   useEffect(() => { window.haru?.live2d.get().then(model => { if (model) setLive2dModel(model); }); }, []);
   useEffect(() => { window.haru?.settings.get('ai.config').then(saved => { if (saved) setProviderConfig(current => ({ ...current, ...(saved as Partial<ProviderConfig>) })); }); }, []);
   // Kept items are owned by the main process — the chat tool loop writes to them
@@ -99,7 +116,7 @@ export default function App() {
   // Replies land below the fold once the day's history is long enough to scroll,
   // so pin the view to the newest message whenever the list or pending state changes.
   const messagesRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, sending]);
+  useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, sending, page]);
   // Chat is persisted through the main process (electron-store), not localStorage,
   // and gets wiped there once a day — see chat:reset. Loading is gated behind
   // `hydrated` so the persist effect below can't clobber saved messages with the
@@ -131,11 +148,33 @@ export default function App() {
 
   useEffect(() => {
     if (!window.haru) { setHydrated(true); return; }
-    window.haru.chat.getMessages().then(saved => { setMessages(saved); setHydrated(true); askForOpening(); });
+    window.haru.chat.getMessages().then(saved => { setMessages(saved); setHydrated(true); askForOpening(); }).catch(error => {
+      setMessages([{ id: 'connection-error', role: 'system', content: `Could not load the conversation: ${error.message}`, time: 'now' }]);
+      setHydrated(true);
+    });
     return window.haru.chat.onReset(() => { conversation.current++; setMessages([]); askForOpening(); });
   }, [askForOpening]);
+  useEffect(() => {
+    if (!serverConnected || !hydrated || sending || !window.haru) return;
+    let active = true;
+    let loading = false;
+    const refresh = async () => {
+      if (loading || document.visibilityState !== 'visible') return;
+      loading = true;
+      try {
+        const saved = await window.haru!.chat.getMessages();
+        if (active) setMessages(current => JSON.stringify(current) === JSON.stringify(saved) ? current : saved);
+        const items = await window.haru!.kept.get();
+        if (active) setKept(items);
+      } catch (error) { console.warn('Server refresh failed', error); }
+      finally { loading = false; }
+    };
+    window.addEventListener('focus', refresh);
+    const timer = setInterval(refresh, 10_000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [serverConnected, hydrated, sending]);
   async function newChat() {
-    if (sending) return;
+    if (sending || serverConnected) return;
     if (!window.haru) { conversation.current++; setMessages([]); return; }
     await window.haru.chat.newConversation();
   }
@@ -198,8 +237,10 @@ export default function App() {
   }, [stage]);
 
   async function send(content: string, heard?: string) {
+    if (sendInFlight.current || !hydrated) return false;
+    sendInFlight.current = true;
     const epoch = conversation.current;
-    const target = replyingTo;
+    const target = page === 'study' ? null : replyingTo;
     const attachments = staged;
     const user: Message = { id: crypto.randomUUID(), role: 'user', content, time: 'now', at: new Date().toISOString(), ...(heard ? { heard } : {}), ...(target ? { replyTo: target } : {}), ...(attachments.length ? { attachments } : {}) };
     setMessages(current => [...current, user]);
@@ -218,14 +259,17 @@ export default function App() {
         content: `The user's next message is a reply to one specific earlier line of yours: "${target.excerpt}". It is feedback about that line in particular, not a new topic. Take it as a correction and say what you will do differently.`,
       }] : [];
       const reply = await getProvider(providerConfig).send([...messages, ...note, user], providerConfig);
-      if (conversation.current !== epoch) return;
+      if (conversation.current !== epoch) return false;
+      if (reply.messages) { setMessages(reply.messages); return true; }
       // She has stopped answering. Marked rather than left blank so it reads as
       // her ignoring you, not as the app having dropped the message.
       setMessages(current => [...current, reply.ignored
         ? { id: crypto.randomUUID(), role: 'assistant', content: 'Haru is ignoring you.', time: 'now', at: new Date().toISOString(), ignored: true }
         : { id: crypto.randomUUID(), role: 'assistant', content: reply.content, time: 'now', at: new Date().toISOString() }]);
+      return true;
     } catch (error) {
-      if (conversation.current !== epoch) return;
+      if (conversation.current !== epoch) return false;
+      if (attachments.length) setStaged(current => [...attachments, ...current]);
       // Electron prefixes anything thrown across IPC; it means nothing here and
       // pushes the part that matters off the end of the line.
       const detail = (error instanceof Error ? error.message : String(error))
@@ -238,9 +282,11 @@ export default function App() {
       const attributed = / at \S+ —/.test(detail);
       setMessages(current => [...current, {
         id: crypto.randomUUID(), role: 'assistant', time: 'now', at: new Date().toISOString(),
-        content: attributed ? `Couldn't get an answer — ${detail}` : `Couldn't reach ${providerConfig.provider} (${detail}). Check Setup → Where she thinks.`,
+        content: serverConnected ? `Haru server: ${detail} Check the conversation before retrying; the message may have reached her.` : attributed ? `Couldn't get an answer — ${detail}` : `Couldn't reach ${providerConfig.provider} (${detail}). Check Setup → Where she thinks.`,
       }]);
+      return false;
     } finally {
+      sendInFlight.current = false;
       setSending(false);
     }
   }
@@ -250,14 +296,22 @@ export default function App() {
   // they are what explains that saying something is enough to get it saved.
   const onlyOpening = messages.length === 1 && messages[0].role === 'assistant';
   const suggestions = <div className="suggestions"><Suggestion onClick={() => send('Set me a reminder for 8am to take my medication')}>Set a reminder for 8am</Suggestion><Suggestion onClick={() => send('Dentist Thursday at 10, lasts an hour')}>Dentist Thursday at 10</Suggestion><Suggestion onClick={() => send('What have I got coming up?')}>What have I got coming up?</Suggestion></div>;
-  async function importLive2d() { if (!window.haru?.live2d) { alert('Live2D import is available in the desktop app.'); return; } setImporting(true); try { const model = await window.haru.live2d.import(); if (model) setLive2dModel(model); } finally { setImporting(false); } }
+  async function importLive2d() { if (!window.haru?.live2d) { alert('Avatar import is available in the desktop app.'); return; } setImporting(true); try { const model = await window.haru.live2d.import(); if (model) setLive2dModel(model); } finally { setImporting(false); } }
   async function removeLive2d() { await window.haru?.live2d.remove(); setLive2dModel(null); }
   const backToChat = () => setPage('chat');
   // Told on every change; main decides whether it is worth saying anything, and
   // nearly always decides it is not. Kept here rather than inside setPage's
   // callers so a page reached any other way still counts as arriving there.
   useEffect(() => { void window.haru?.ui.page(page); }, [page]);
-  return <main className="haru-app"><Topbar page={page} onNavigate={setPage} canStartNewChat={!!messages.length && !sending} onNewChat={newChat}/>
+  return <main className="haru-app"><Topbar page={page} onNavigate={setPage}/>
+    <div className="app-workspace">
+      <header className="workspace-header"><div><span className="eyebrow">YOUR EVERYDAY, TOGETHER</span><h1>{PAGE_COPY[page][0]}</h1><p>{PAGE_COPY[page][1]}</p></div>
+        <div className="workspace-actions">
+          {page === 'chat' && <><button className="ghost new-chat" aria-label="New chat" onClick={newChat} disabled={serverConnected || !messages.length || sending} title={serverConnected ? 'Shared conversations are managed by your Haru server' : 'Archive this conversation and start fresh'}><MessageSquarePlus size={16}/><span>New chat</span></button><button className="ghost plans-toggle" aria-label="Plans" aria-pressed={showPlans} aria-controls="kept-panel" onClick={() => setShowPlans(!showPlans)}><CalendarDays size={16}/><span>Plans</span></button></>}
+          <span className="workspace-date">{new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short' }).format(new Date())}</span>
+        </div>
+      </header>
+      <div className="page-container" id="workspace" tabIndex={-1}>
     {wardrobeOpen && <WardrobeDrawer onClose={() => setWardrobeOpen(false)}/>}
     {page === 'character' && <CharacterDrawer onClose={backToChat}/>}
     {page === 'profile' && <ProfileDrawer onClose={backToChat}/>}
@@ -265,13 +319,17 @@ export default function App() {
     {page === 'journal' && <JournalDrawer onClose={backToChat}/>}
     {page === 'asides' && <AsidesPage/>}
     {page === 'world' && <WorldPage onOpenChat={backToChat}/>}
+    {page === 'services' && <ServicesPage/>}
+    <StudyPage active={page === 'study'} messages={messages} hydrated={hydrated} sending={sending} staged={staged} onStage={stage} onUnstage={unstage} onSend={send} onReact={react}/>
     {/* The whole chat is the drop target, not a strip at the bottom. Aiming at
         a small zone is the part of drag-and-drop people hate, and there is
         nothing else on this page a file could sensibly be dropped onto.
         dragOver must be prevented or the browser opens the file instead. */}
-    {page === 'chat' && <div className="haru-body"><section className={dragging ? 'chat-panel dropping' : 'chat-panel'}
+    {page === 'chat' && <div className={showPlans ? 'haru-body' : 'haru-body plans-hidden'}><section className={dragging ? 'chat-panel dropping' : 'chat-panel'}
       onDragOver={event => { event.preventDefault(); setDragging(true); }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
-      onDrop={event => void onDrop(event)}><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} staged={staged} onStage={stage} onUnstage={unstage}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div>}
+      onDrop={event => void onDrop(event)}><div className="messages" ref={messagesRef} aria-busy={!hydrated || sending}>{!hydrated ? <div className="chat-skeleton" role="status" aria-label="Loading conversation"><span/><span/><span/></div> : empty ? <div className="empty-state"><span className="welcome-mark"><Sparkles size={27} aria-hidden="true"/></span><span className="eyebrow">YOU’VE GOT COMPANY</span><h2>Your day, a little lighter.</h2><p>Talk it through, make a plan, or just hang out.<br/>This is your space with Haru.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending || !hydrated} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} staged={staged} onStage={stage} onUnstage={unstage}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d} onWardrobe={() => setWardrobeOpen(true)}/></div>}
+      </div>
+    </div>
   </main>;
 }

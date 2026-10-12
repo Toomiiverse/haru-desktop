@@ -1,0 +1,175 @@
+{
+  "fps": 30,
+  "units": "degrees",
+  "frameIndexing": "zero-based",
+  "yawPositive": "toward the character's left",
+  "pitchPositive": "chin down",
+  "headMeasurement": "Composed normalized head direction relative to the avatar's neutral facing/rest orientation, before the app's additional face-layer head offset. These angles are already baked into the body clip; do not add the same values again.",
+  "canonicalBaseHead": {
+    "yaw": 0.0,
+    "pitch": 6.0
+  },
+  "clips": {
+    "neutral": {
+      "file": "blender/clips-emotion/neutral.vrma",
+      "durationSeconds": 3.2,
+      "heldFrame": 34,
+      "heldTimeSeconds": 1.1333333333333333,
+      "yaw": 3.9976,
+      "pitch": 0.1391,
+      "referenceStatus": "partially referenced; complete emotion performance adapted",
+      "references": [
+        "ref.gif",
+        "reffff.gif"
+      ],
+      "sha256": "e9d9ce885ecad4b8322ba6e89180b003fb4c3c183876252a1dccbb955f6e7058"
+    },
+    "happy": {
+      "file": "blender/clips-emotion/happy.vrma",
+      "durationSeconds": 3.4,
+      "heldFrame": 33,
+      "heldTimeSeconds": 1.1,
+      "yaw": 6.411526,
+      "pitch": -4.459147,
+      "referenceStatus": "referenced, with adapted body choreography",
+      "references": [
+        "AnbyFacialExpressions.gif",
+        "yayref.gif",
+        "zzzref.gif",
+        "faceref.gif"
+      ],
+      "sha256": "edd64115288f0d4ced9180cb385667b2555b95a81f3e45c5d7f65654c79fa2e1"
+    },
+    "curious": {
+      "file": "blender/clips-emotion/curious.vrma",
+      "durationSeconds": 3.6,
+      "heldFrame": 34,
+      "heldTimeSeconds": 1.1333333333333333,
+      "yaw": 13.7955,
+      "pitch": 2.4075,
+      "referenceStatus": "referenced",
+      "references": [
+        "qwuestionref.gif",
+        "miyabiref.gif"
+      ],
+      "sha256": "3755a774984daf1cf248bbf4f0bb72f7434bf8ff7df097a4a3d5520b84f4f07d"
+    },
+    "smug": {
+      "file": "blender/clips-emotion/smug.vrma",
+      "durationSeconds": 3.8,
+      "heldFrame": 34,
+      "heldTimeSeconds": 1.1333333333333333,
+      "yaw": -14.8487,
+      "pitch": -6.2544,
+      "referenceStatus": "partially referenced; complete emotion performance adapted",
+      "references": [
+        "nicole.gif",
+        "nicoleani.gif",
+        "faceexpressref.gif"
+      ],
+      "sha256": "db9b4d1c87e5c95f738857d60aa06c7698e40f4fd3bd9bc404470288dc3bc539"
+    },
+    "annoyed": {
+      "file": "blender/clips-emotion/annoyed.vrma",
+      "durationSeconds": 3.7,
+      "heldFrame": 37,
+      "heldTimeSeconds": 1.2333333333333334,
+      "yaw": -24.1106,
+      "pitch": -10.4954,
+      "referenceStatus": "referenced",
+      "references": [
+        "hmphref.gif"
+      ],
+      "sha256": "f717f3534ff18f046cf7f60f75f667488f636bc58afb57be8317c7aa1088440a"
+    },
+    "bored": {
+      "file": "blender/clips-emotion/bored.vrma",
+      "durationSeconds": 3.8,
+      "heldFrame": 39,
+      "heldTimeSeconds": 1.3,
+      "yaw": 17.6183,
+      "pitch": 1.7178,
+      "referenceStatus": "extrapolated",
+      "references": [],
+      "sha256": "76fe50ff1a914fcf5eeed6d3efee361c25e6342b6d8f84f63e1653e581e8e1be"
+    },
+    "sleepy": {
+      "file": "blender/clips-emotion/sleepy.vrma",
+      "durationSeconds": 4.2,
+      "heldFrame": 40,
+      "heldTimeSeconds": 1.3333333333333333,
+      "yaw": 5.7931,
+      "pitch": 12.316,
+      "referenceStatus": "extrapolated",
+      "references": [],
+      "sha256": "d0b1495b05cfa758f5a453daf9aa69af0ceac55709da6324306689421535975e"
+    },
+    "surprised": {
+      "file": "blender/clips-emotion/surprised.vrma",
+      "durationSeconds": 3.3,
+      "heldFrame": 28,
+      "heldTimeSeconds": 0.9333333333333333,
+      "yaw": 2.9297,
+      "pitch": -4.0519,
+      "referenceStatus": "referenced",
+      "references": [
+        "AnbyFacialExpressions.gif",
+        "reffff.gif"
+      ],
+      "sha256": "7faa97cf195d25c47cf7ffdd0d44518181b4e2830dd69c27a92c58b7f473a085"
+    },
+    "affectionate": {
+      "file": "blender/clips-emotion/affectionate.vrma",
+      "durationSeconds": 3.9,
+      "heldFrame": 37,
+      "heldTimeSeconds": 1.2333333333333334,
+      "yaw": -11.5987,
+      "pitch": 3.2558,
+      "referenceStatus": "referenced cheek-side gather, adapted with hand and face clearance",
+      "references": [
+        "ref.gif",
+        "zzzref.gif"
+      ],
+      "sha256": "443b5c4ab850bdd9e86985c473019919b23d29076b1b65ebcc478a5c006185d9"
+    },
+    "embarrassed": {
+      "file": "blender/clips-emotion/embarrassed.vrma",
+      "durationSeconds": 3.7,
+      "heldFrame": 34,
+      "heldTimeSeconds": 1.1333333333333333,
+      "yaw": -15.9363,
+      "pitch": 9.9865,
+      "referenceStatus": "partially referenced; full-body pose extrapolated",
+      "references": [
+        "cuterf.gif",
+        "faceref.gif",
+        "hmphref.gif"
+      ],
+      "sha256": "bde21612244347cc2bee7d2ba859f4a492192ddd65d4a3bb426f798fa8b68f9e"
+    },
+    "determined": {
+      "file": "blender/clips-emotion/determined.vrma",
+      "durationSeconds": 3.5,
+      "heldFrame": 30,
+      "heldTimeSeconds": 1,
+      "yaw": -0.1048,
+      "pitch": 2.9982,
+      "referenceStatus": "extrapolated",
+      "references": [],
+      "sha256": "356fb7deca3a8282ac7b5b81fd82dbdbaddf3283b36e56c35b66ea8460b1ce63"
+    },
+    "worried": {
+      "file": "blender/clips-emotion/worried.vrma",
+      "durationSeconds": 3.8,
+      "heldFrame": 36,
+      "heldTimeSeconds": 1.2,
+      "yaw": -8.1181,
+      "pitch": 8.8936,
+      "referenceStatus": "extrapolated; compression and finger grouping inspired by hmphref",
+      "references": [
+        "hmphref.gif"
+      ],
+      "sha256": "bc2237bf1d3d55c201c1058346e993b2dcc3e0205a30586b7c8a7c2bf44d9555"
+    }
+  }
+}

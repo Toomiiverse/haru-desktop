@@ -364,6 +364,25 @@ export function echoesAside(line: string, asides: Aside[], now: number): boolean
   });
 }
 
+/**
+ * A line she had ready and did not say, and the reason.
+ *
+ * Her failure mode is silence, and silence is indistinguishable from working
+ * perfectly. Every gate in interject already explains itself in plain English
+ * — "she spoke unprompted 40s ago", "it repeats a line she already said" — and
+ * every one of those explanations went to a console that, until recently, went
+ * nowhere. Kept here so the app itself can answer "why has she been quiet all
+ * evening", which is the question a companion is actually asked.
+ */
+export type HeldBack = { at: string; why: string; line: string };
+
+/** Enough to cover an evening. In memory only: the question is about now. */
+export const HELD_BACK_KEPT = 20;
+
+export function keepHeldBack(held: HeldBack[], entry: HeldBack): HeldBack[] {
+  return [...held, entry].slice(-HELD_BACK_KEPT);
+}
+
 // -- a notification he answers is the conversation ------------------------------
 
 /**

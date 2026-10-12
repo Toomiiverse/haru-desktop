@@ -11,6 +11,7 @@
 #   in:   volume <0..1>     set the system output volume
 #   in:   quit
 
+param([int]$HaruPid = 0)
 $ErrorActionPreference = 'Stop'
 
 Add-Type -Namespace Haru -Name Win -MemberDefinition @'
@@ -26,6 +27,67 @@ Add-Type -Namespace Haru -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
 [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int pid);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+static readonly System.Collections.Concurrent.ConcurrentQueue<string> commands = new System.Collections.Concurrent.ConcurrentQueue<string>();
+public static volatile bool InputEnded;
+public static string ReadCommand() { string line; return commands.TryDequeue(out line) ? line : null; }
+// Native moves must not wait for the slower desktop/volume polling loop.
+public static void StartCommands(int haruPid) {
+  var reader = new System.Threading.Thread(delegate() {
+    SetThreadDpiAwarenessContext(new IntPtr(-4));
+    try {
+      string line;
+      while((line=Console.ReadLine())!=null) {
+        if(!line.StartsWith("move ")) { commands.Enqueue(line); continue; }
+        var p=line.Split(' '); long id; int x,y,pid;
+        if(p.Length!=4 || !long.TryParse(p[1],out id) || !int.TryParse(p[2],out x) || !int.TryParse(p[3],out y)
+          || id<=0 || x < -100000 || x > 100000 || y < -100000 || y > 100000)continue;
+        var hwnd=new IntPtr(id);GetWindowThreadProcessId(hwnd,out pid);
+        if(haruPid>0 && pid==haruPid)SetWindowPos(hwnd,IntPtr.Zero,x,y,0,0,0x0215);
+      }
+    } finally { InputEnded=true; }
+  });
+  reader.IsBackground=true;reader.Start();
+}
+public delegate bool EnumWindowCallback(IntPtr hwnd, IntPtr data);
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowCallback callback, IntPtr data);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hwnd, int index);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int count);
+[DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+[DllImport("dwmapi.dll", EntryPoint="DwmGetWindowAttribute")] public static extern int DwmRect(IntPtr hwnd, int attribute, out RECT rect, int size);
+[DllImport("dwmapi.dll", EntryPoint="DwmGetWindowAttribute")] public static extern int DwmInt(IntPtr hwnd, int attribute, out int value, int size);
+
+// Native coordinates are physical pixels. Electron converts each rectangle to DIPs.
+public static string Surfaces(int haruPid) {
+  var json=new System.Text.StringBuilder("["); int count=0;
+  IntPtr oldDpi=SetThreadDpiAwarenessContext(new IntPtr(-4));
+  try {
+    EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+      if(count>=128)return false;
+      int pid; GetWindowThreadProcessId(hwnd,out pid);
+      if(pid==haruPid || !IsWindowVisible(hwnd) || IsIconic(hwnd) || hwnd==GetShellWindow())return true;
+      int cloaked; if(DwmInt(hwnd,14,out cloaked,4)==0 && cloaked!=0)return true;
+      if((GetWindowLong(hwnd,-20)&0x80)!=0)return true;
+      var name=new System.Text.StringBuilder(128);GetClassName(hwnd,name,name.Capacity);
+      string cls=name.ToString();
+      if(cls=="Progman" || cls=="WorkerW" || cls=="Shell_TrayWnd" || cls=="Shell_SecondaryTrayWnd")return true;
+      RECT r;if(DwmRect(hwnd,9,out r,16)!=0 && !GetWindowRect(hwnd,out r))return true;
+      int width=r.Right-r.Left,height=r.Bottom-r.Top;
+      if(width<32 || height<24)return true;
+      if(count++>0)json.Append(',');
+      json.Append("{\"id\":\"").Append(hwnd.ToInt64()).Append(':').Append(pid)
+        .Append("\",\"x\":").Append(r.Left).Append(",\"y\":").Append(r.Top)
+        .Append(",\"width\":").Append(width).Append(",\"height\":").Append(height)
+        .Append(",\"eligible\":").Append(!IsZoomed(hwnd)&&width>=160&&height>=100?"true":"false").Append('}');
+      return true;
+    },IntPtr.Zero);
+  } finally { if(oldDpi!=IntPtr.Zero)SetThreadDpiAwarenessContext(oldDpi); }
+  return json.Append(']').ToString();
+}
+
 public struct RECT { public int Left, Top, Right, Bottom; }
 public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
 '@
@@ -121,6 +183,7 @@ function Send-Event([string]$text) {
 }
 
 Send-Event "volume $(Get-Volume)"
+[Haru.Win]::StartCommands($HaruPid)
 Send-Event 'ready'
 
 # What is in front of them, as "<process>|<title>". Reported on change so the app
@@ -186,16 +249,15 @@ function Get-BrowserUrl([IntPtr]$hwnd) {
   } catch { return '' }
 }
 
-$stdin = [System.IO.StreamReader]::new([Console]::OpenStandardInput())
-$pending = $stdin.ReadLineAsync()
 $wasFullscreen = $false
 $lastForeground = ''
 $sinceForeground = 0
+$surfaceTicks = 0
+$lastSurfaces = ''
 
-while ($true) {
-  if ($pending.IsCompleted) {
-    $line = $pending.Result
-    if ($null -eq $line) { break }
+while (-not [Haru.Win]::InputEnded) {
+  $line = [Haru.Win]::ReadCommand()
+  if ($null -ne $line) {
     $parts = $line.Trim().Split(' ')
     switch ($parts[0]) {
       # Acknowledged, not just done. The app raises her own gain to compensate
@@ -204,9 +266,14 @@ while ($true) {
       'volume' { if ($parts.Length -gt 1) { Set-Volume ([double]$parts[1]); Send-Event "volume-set $($parts[1])" } }
       'quit'   { break }
     }
-    $pending = $stdin.ReadLineAsync()
   }
 
+  $surfaces = [Haru.Win]::Surfaces($HaruPid)
+  $surfaceTicks++
+  if ($surfaces -ne $lastSurfaces -or $surfaceTicks -ge 5) {
+    Send-Event "surfaces $surfaces"
+    $lastSurfaces = $surfaces; $surfaceTicks = 0
+  }
   $found = Test-Fullscreen
   $now = $null -ne $found
   if ($now -ne $wasFullscreen) {
@@ -214,11 +281,11 @@ while ($true) {
     if ($now) { Send-Event "fullscreen on $($found.Left) $($found.Top) $($found.Right) $($found.Bottom) $($found.Title)" }
     else { Send-Event 'fullscreen off' }
   }
-  # Every fourth pass, so roughly every two seconds. Switching windows is not
+  # Every twentieth pass, so roughly every two seconds. Switching windows is not
   # something that needs catching within half a second, and Get-Process is far
   # from free.
   $sinceForeground++
-  if ($sinceForeground -ge 4) {
+  if ($sinceForeground -ge 20) {
     $sinceForeground = 0
     $current = Get-Foreground
     if ($current -and $current -ne $lastForeground) {
@@ -227,5 +294,5 @@ while ($true) {
     }
   }
 
-  Start-Sleep -Milliseconds 500
+  Start-Sleep -Milliseconds 100
 }

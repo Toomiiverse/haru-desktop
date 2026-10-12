@@ -12,10 +12,12 @@
     "start": "electron .",
     "package": "npm run build && electron-builder --win --config electron-builder.config.cjs",
     "sign:dev": "node scripts/sign-dev-electron.cjs",
-    "test": "node -e \"require('fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tests/tsconfig.json && node --test dist-test/tests/*.test.js"
+    "test": "node -e \"require('fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tests/tsconfig.json && node --test dist-test/tests/*.test.js",
+    "build:face": "tsc --ignoreConfig src/companion/face.ts --module es2022 --target es2022 --strict --outDir spike/vrm/gen"
   },
   "dependencies": {
     "@pixi/unsafe-eval": "^6.5.10",
+    "@playwright/mcp": "0.0.83",
     "adm-zip": "0.5.16",
     "electron-store": "11.0.2",
     "electron-updater": "^6.8.9",
@@ -28,6 +30,8 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
     "@types/adm-zip": "0.5.7",
     "@types/node": "26.1.2",
     "@types/react": "19.2.18",
@@ -39,6 +43,7 @@
     "cross-env": "10.1.0",
     "electron": "43.2.0",
     "electron-builder": "26.15.3",
+    "three": "^0.180.0",
     "typescript": "7.0.2",
     "vite": "8.2.0",
     "wait-on": "9.1.0"

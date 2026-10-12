@@ -269,15 +269,54 @@ export class HaruStore {
   /** Same shape as electron-store's get: a default value and unknown results,
    *  so call sites that check `get(key, fallback) === x` or cast the result
    *  keep compiling unchanged. */
+  /**
+   * True while config.json cannot be parsed. See get, below.
+   */
+  private unreadable = false;
+
+  /**
+   * A read that cannot take the app down with it.
+   *
+   * conf parses the whole file on every get, so a config.json that is briefly
+   * unreadable takes out whichever timer happens to read next — and every
+   * timer after it. Measured once: 720 uncaught SyntaxErrors in 23 seconds,
+   * one per roam tick, from an app that was otherwise perfectly well. The
+   * cause is still on disk as a leftover config.json.tmp-*, which is what an
+   * atomic write leaves behind when the process dies between the write and
+   * the rename.
+   *
+   * So a failed read answers with the default — every read*Config in this
+   * codebase already treats undefined as "use the defaults" — and latches,
+   * because the far worse failure is the one after it: a chat history read as
+   * empty and then written back over the real one. Nothing is written until a
+   * read succeeds again, which the next tick usually manages.
+   */
   get(key: string, defaultValue?: unknown): unknown {
     const owned = coreIdentityValue(key);
     if (owned) return owned.value ?? defaultValue;
     if (this.core) {
       return this.core.getPath('config', key.split('.'), defaultValue);
     }
-    return defaultValue === undefined
-      ? this.electron.get(key)
-      : this.electron.get(key, defaultValue);
+    try {
+      const value = defaultValue === undefined
+        ? this.electron.get(key)
+        : this.electron.get(key, defaultValue);
+      if (this.unreadable) {
+        console.log('[store] readable again — writing resumes');
+        this.unreadable = false;
+      }
+      return value;
+    } catch (error) {
+      // Once per spell, not once per tick: this is called several times a second.
+      if (!this.unreadable) console.error(`[store] cannot be read, so nothing will be saved until it can: ${error instanceof Error ? error.message : String(error)}`);
+      this.unreadable = true;
+      return defaultValue;
+    }
+  }
+
+  /** Whether the store is currently readable. False means writes are being refused. */
+  get healthy(): boolean {
+    return !this.unreadable;
   }
 
   set(key: string, value: unknown): void;
@@ -292,6 +331,13 @@ export class HaruStore {
         target[parts.at(-1)!] = entry;
       }
       this.core.set('config', config); return;
+    }
+    // Refused rather than attempted: what is in memory was read through the
+    // same broken file, so writing it back replaces real data with defaults.
+    // A dropped write can be made again; an overwritten transcript cannot.
+    if (this.unreadable) {
+      console.warn(`[store] not writing ${typeof keyOrObject === 'string' ? keyOrObject : Object.keys(keyOrObject).join(', ')} — the store cannot be read`);
+      return;
     }
     if (typeof keyOrObject === 'string') {
       this.electron.set(keyOrObject, value);

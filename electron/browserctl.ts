@@ -1,9 +1,14 @@
-// Driving the browser on this machine, through Chrome DevTools Protocol.
+// Her browser, and the two ways of having one.
 //
-// Chrome runs with --remote-debugging-port and answers CDP over HTTP (for the
-// target list) and a WebSocket per target (for commands). This client is a thin
-// JSON-RPC bridge over the built-in WebSocket — no dependency, matching how
-// everything else here talks to its servers. Works for any Chromium browser.
+// The default is her own: Playwright MCP, run headless as a child of this
+// process (playwright.ts), with no window and no debug port. The other is a
+// Chrome somebody started on the desk with --remote-debugging-port, driven over
+// Chrome DevTools Protocol — the client for that is the second half of this
+// file, a thin JSON-RPC bridge over the built-in WebSocket with no dependency.
+// Both answer the same questions through the Browser interface below, so the
+// tool that drives them (tools.ts) does not know which one it has.
+
+import type { PageReading } from './pagesnapshot';
 
 export type CdpTarget = {
   id: string;
@@ -15,15 +20,72 @@ export type CdpTarget = {
 
 export const DEFAULT_BROWSER_PORT = 9222;
 
-export type BrowserControlConfig = { enabled: boolean; port: number };
+export type BrowserBackend = 'playwright' | 'chrome';
 
-export const DEFAULT_BROWSER_CONTROL: BrowserControlConfig = { enabled: false, port: DEFAULT_BROWSER_PORT };
+export type BrowserControlConfig = {
+  enabled: boolean;
+  /** `playwright`: her own headless browser, inside this process. `chrome`: a Chrome on the desk, over its debug port. */
+  backend: BrowserBackend;
+  /** The CDP port, for the chrome backend. */
+  port: number;
+  /** A Chromium to use instead of the one Playwright downloads — the system one on a server, say. */
+  executablePath: string;
+};
+
+export const DEFAULT_BROWSER_CONTROL: BrowserControlConfig = { enabled: false, backend: 'playwright', port: DEFAULT_BROWSER_PORT, executablePath: '' };
 
 export function readBrowserControlConfig(saved: unknown): BrowserControlConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_BROWSER_CONTROL;
   const record = saved as Partial<BrowserControlConfig>;
   const port = typeof record.port === 'number' && Number.isInteger(record.port) && record.port > 0 ? record.port : DEFAULT_BROWSER_PORT;
-  return { enabled: record.enabled === true, port };
+  const backend: BrowserBackend = record.backend === 'chrome' ? 'chrome' : 'playwright';
+  return { enabled: record.enabled === true, backend, port, executablePath: typeof record.executablePath === 'string' ? record.executablePath.trim() : '' };
+}
+
+/** A picture she took, for the conversation. */
+export type Picture = { image: string; mimeType: string; caption: string };
+
+/**
+ * What either backend can do. Every method that moves the page answers with a
+ * reading of where it ended up, so one call is one round for her. Numbers are
+ * the numbers of the last reading — a link or an element she was shown.
+ */
+export interface Browser {
+  readonly backend: BrowserBackend;
+  /** Open an address, or search for some words. */
+  open(url: string): Promise<PageReading>;
+  /** The page as it is now. */
+  read(): Promise<PageReading>;
+  /** Follow link number `n` of the last reading. */
+  follow(n: number): Promise<PageReading>;
+  /** One screen up or down, for pages that load as they scroll. */
+  scroll(direction: 'up' | 'down'): Promise<PageReading>;
+  back(): Promise<PageReading>;
+  /** Click element number `n` of the last reading. */
+  click(n: number): Promise<PageReading>;
+  /** Type into element number `n`, and press Enter when `submit`. */
+  type(n: number, text: string, submit: boolean): Promise<PageReading>;
+  screenshot(full: boolean): Promise<Picture>;
+  /** The host of the page she is on, for captions and logs; empty when nowhere. */
+  where(): string;
+  /** Close the page, and the browser with it when it is hers. */
+  close(): Promise<void>;
+}
+
+/** The error for an action a backend cannot do. */
+export class Unsupported extends Error {}
+
+/** An address, or words to look up. Bare "youtube.com" becomes https; a phrase becomes a search. */
+export function asAddress(input: string): string {
+  const text = input.trim();
+  if (/^https?:\/\//i.test(text)) return text;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) throw new Error('Only http and https addresses can be opened.');
+  if (!/\s/.test(text) && /^[\w-]+(?:\.[\w-]+)+(?:[/?#].*)?$/.test(text)) return `https://${text}`;
+  return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(text)}`;
+}
+
+export function hostOf(url: string): string {
+  try { return new URL(url).hostname; } catch { return ''; }
 }
 
 type FetchLike = (url: string, init?: unknown) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
@@ -151,4 +213,61 @@ export async function screenshot(port: number, id: string, fetchImpl: FetchLike)
     if (!result.data) return null;
     return new Uint8Array(Buffer.from(result.data, 'base64'));
   });
+}
+
+/**
+ * The desk Chrome as a Browser. It reads text and takes pictures; it has no
+ * accessibility tree to number links and buttons from, so following, clicking
+ * and typing are not on offer — she opens addresses instead.
+ */
+export function cdpBrowser(port: number, fetchImpl: FetchLike, settleMs = 1500): Browser {
+  let tab = '';
+  let url = '';
+  const current = async () => {
+    if (tab) return tab;
+    const targets = await listTargets(port, fetchImpl);
+    tab = targets[0]?.id ?? '';
+    url = targets[0]?.url ?? url;
+    if (!tab) throw new Error('no tab is open — open one first.');
+    return tab;
+  };
+  const reading = async (): Promise<PageReading> => {
+    const id = await current();
+    const text = await pageText(port, id, fetchImpl, 120_000);
+    const target = (await listTargets(port, fetchImpl)).find(item => item.id === id);
+    url = target?.url ?? url;
+    return { url, title: target?.title ?? '', text, links: [], elements: [] };
+  };
+  const settle = () => new Promise<void>(resolve => setTimeout(resolve, settleMs));
+  const not = (what: string) => Promise.reject(new Unsupported(`${what} is not possible with the desk browser — open the address you want instead.`));
+  return {
+    backend: 'chrome',
+    async open(input) {
+      const address = asAddress(input);
+      if (tab) await navigate(port, tab, address, fetchImpl);
+      else tab = await openTab(port, address, fetchImpl);
+      url = address;
+      await settle();
+      return reading();
+    },
+    read: reading,
+    follow: () => not('following a link by number'),
+    scroll: () => not('scrolling'),
+    back: () => not('going back'),
+    click: () => not('clicking'),
+    type: () => not('typing'),
+    async screenshot() {
+      const id = await current();
+      const png = await screenshot(port, id, fetchImpl);
+      if (!png) throw new Error('the screenshot came back empty.');
+      return { image: Buffer.from(png).toString('base64'), mimeType: 'image/png', caption: hostOf(url) };
+    },
+    where: () => hostOf(url),
+    async close() {
+      if (!tab) return;
+      await closeTab(port, tab, fetchImpl);
+      tab = '';
+      url = '';
+    },
+  };
 }

@@ -1,50 +1,46 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import { Activity, ArrowUp, Settings2, UserRound, BookOpen, Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, ServiceSpend, UsageRow, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, clockInZone, datesInView, dayLabel, rangeLabel, shiftISODate, todayInZone, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
 import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
 import { randomWait } from './retorts';
-export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
+import { studyRequest } from './study';
+export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the avatar renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export type Page = 'chat' | 'asides' | 'character' | 'profile' | 'settings' | 'journal' | 'world';
+export type Page = 'chat' | 'study' | 'asides' | 'character' | 'profile' | 'settings' | 'journal' | 'services' | 'world';
 
-// Chat is a tab like the rest rather than the thing the others cover up. That is
-// the whole difference between a panel that slides over your conversation and a
-// set of pages you move between: somewhere to go back to that is named.
-const TABS: { page: Page; label: string; icon?: typeof NotebookPen }[] = [
-  { page: 'chat', label: 'Chat', icon: MessageSquare },
-  // Next to the chat rather than off with the settings: it is the other half of
-  // what she has said today, and somebody looking for a line they half heard her
-  // say will look beside the conversation, not behind a gear.
+// Keep the everyday pages together and personal settings below them.
+const TABS: { page: Page; label: string; icon: typeof NotebookPen }[] = [
+  { page: 'chat', label: 'Conversation', icon: MessageSquare },
+  { page: 'study', label: 'Study', icon: BookOpen },
   { page: 'asides', label: 'Asides', icon: Quote },
   { page: 'world', label: 'World', icon: Sparkles },
   { page: 'journal', label: 'Journal', icon: NotebookPen },
-  { page: 'profile', label: 'You' },
-  { page: 'character', label: 'Character' },
-  { page: 'settings', label: 'Setup' },
+  { page: 'services', label: 'Services', icon: Activity },
+  { page: 'profile', label: 'You & memory', icon: UserRound },
+  { page: 'character', label: 'Character', icon: Sparkles },
+  { page: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
-export function Topbar({ page, onNavigate, canStartNewChat, onNewChat }: { page: Page; onNavigate(page: Page): void; canStartNewChat: boolean; onNewChat(): void }) {
-  return <header className="topbar">
-    <div className="wordmark">はる <span>· Haru</span></div>
-    <div className="connection"><i/><span>local companion</span></div>
-    <nav className="tabs" role="tablist">
-      {TABS.map(tab => {
-        const Icon = tab.icon;
-        return <button key={tab.page} role="tab" aria-selected={page === tab.page}
-          className={page === tab.page ? 'tab selected' : 'tab'} onClick={() => onNavigate(tab.page)}>
-          {Icon && <Icon size={13}/>} {tab.label}
-        </button>;
-      })}
+interface TopbarProps { page: Page; onNavigate(page: Page): void; className?: string }
+// Navigation is static; loading and empty states belong to the selected page.
+export function Topbar({ page, onNavigate, className = '' }: TopbarProps) {
+  return <aside className={`app-sidebar ${className}`} aria-label="Haru navigation">
+    <a className="skip-link" href="#workspace">Skip to content</a>
+    <div className="brand"><span className="brand-mark" aria-hidden="true">は</span><div><strong>Haru<span> / はる</span></strong><small>Your everyday companion</small></div></div>
+    <span className="nav-label">YOUR SPACE</span>
+    <nav className="app-nav" aria-label="Main navigation">
+      {TABS.map(tab => <div key={tab.page} className={tab.page === 'settings' ? 'nav-settings' : ''}>
+        {tab.page === 'profile' && <span className="nav-label">MAKE IT YOURS</span>}
+        <button className={page === tab.page ? 'nav-item selected' : 'nav-item'} aria-current={page === tab.page ? 'page' : undefined} aria-label={tab.label} title={tab.label} onClick={() => onNavigate(tab.page)}>
+          <tab.icon size={19} aria-hidden="true"/><span>{tab.label}</span>{page === tab.page && <i aria-hidden="true"/>}
+        </button>
+      </div>)}
     </nav>
-    <div className="top-actions">
-      {/* Only on the chat page: archiving a conversation from inside the journal
-          is an action with no visible effect, which is how you press it twice. */}
-      {page === 'chat' && <button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button>}
-    </div>
-  </header>;
+    <div className="sidebar-note"><Sparkles size={16} aria-hidden="true"/><p>A little company.<br/>A little more headspace.</p></div>
+  </aside>;
 }
 
 // Grouped because an undifferentiated list reads as trivia, while "how they like
@@ -647,10 +643,10 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
     setTimeout(() => setSaved(false), 2000);
   }
 
-  return <section className="page"><div className="field"><h2>Where she thinks</h2><p>Ollama runs on this machine and nothing leaves it. The others are companies you send the conversation to.</p>
+  return <section className="page settings-page"><details className="settings-group" open><summary><span><strong>Brain & conversation</strong><small>Choose where Haru thinks and how she answers.</small></span><ChevronDown size={18}/></summary><div className="field"><h2>Where she thinks</h2><p>Ollama runs on this machine and nothing leaves it. The others are companies you send the conversation to.</p>
     <div className="form-grid brain-presets"><span className="status-note">Switch brain:</span>{BRAIN_PRESETS.map(preset => <button key={preset.name} type="button" className={config.provider === preset.provider && config.model === preset.model ? 'solid' : 'ghost'} title={`${preset.note} ? ${preset.model}`} onClick={() => applyPreset(preset)}>{preset.name}</button>)}</div>
     <div className="form-grid">
-      <select value={config.provider} onChange={event => void chooseProvider(event.target.value as ProviderConfig['provider'])}>
+      <select aria-label="AI provider" value={config.provider} onChange={event => void chooseProvider(event.target.value as ProviderConfig['provider'])}>
         <option value="ollama">Ollama — on this machine</option>
         <option value="xai">xAI — Grok</option>
         <option value="openai">OpenAI</option>
@@ -664,13 +660,18 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
         ? (remote ? 'Ollama, but not on this machine — see below.' : 'Local. No key, no account, nothing sent anywhere.')
         : 'Everything she is given goes to them with every message — the conversation, her memory of you, your list and your journal ratings.'}</span>
     </div>
-    <div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder={config.provider === 'xai' ? 'grok-4' : config.provider === 'openai' ? 'gpt-4o' : config.provider === 'venice' ? 'llama-3.3-70b' : 'qwen3:8b'}/></div>{remote && <>
+    <div className="form-grid"><input aria-label="Server endpoint" value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input aria-label="AI model" value={model} onChange={event => setModel(event.target.value)} placeholder={config.provider === 'xai' ? 'grok-4' : config.provider === 'openai' ? 'gpt-4o' : config.provider === 'venice' ? 'llama-3.3-70b' : 'qwen3:8b'}/></div>{remote && <>
     <p className="status-note">That is not this machine. Everything she is given goes there with every message — the conversation, what she remembers about you, your profile and your list — so it wants to be somewhere you trust, over https, and behind a token. Ollama has no password of its own: an endpoint on the open internet can be used, and read, by anyone who finds it.</p>
     <div className="form-grid">
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><NudgeField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><WebField/><CheckInSourceField/><JellyfinField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><SecondBrainField/><NudgeField/></details>
+    <details className="settings-group"><summary><span><strong>Voice & listening</strong><small>How she sounds, and how she hears you.</small></span><ChevronDown size={18}/></summary><VoiceField registerSave={registerVoiceSave}/><ListenField/></details>
+    <details className="settings-group"><summary><span><strong>Your desktop</strong><small>Appearance, movement and startup.</small></span><ChevronDown size={18}/></summary><ThemeField/><RoamField/><StartupField/></details>
+    <details className="settings-group"><summary><span><strong>Awareness & files</strong><small>Manage what Haru can see and read.</small></span><ChevronDown size={18}/></summary><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/></details>
+    <details className="settings-group"><summary><span><strong>Connected services</strong><small>Calendar, search, media and your other devices.</small></span><ChevronDown size={18}/></summary><SearchField/><AniListField/><GoogleCalendarField/><WebField/><CheckInSourceField/><JellyfinField/></details>
+    <div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -701,6 +702,7 @@ export function WardrobeDrawer({ onClose }: { onClose(): void }) {
     void load();
     const stop = [
       window.haru.wardrobe.onChange(setValues),
+      window.haru.live2d.onChange(() => { void load(); }),
       // The companion window reports the model's real parameter bounds shortly
       // after it loads, which can change what each control offers.
       window.haru.wardrobe.onRefresh(() => { void load(); }),
@@ -716,7 +718,7 @@ export function WardrobeDrawer({ onClose }: { onClose(): void }) {
   // Compared against the offered values rather than assumed, since they can run
   // negative. Nothing chosen shows the model's own default as selected.
   const chosenIndex = (control: WardrobeControl) => {
-    const current = values[control.id];
+    const current = values[control.id] ?? control.default;
     if (current === undefined) return -1;
     let best = 0;
     control.values.forEach((candidate, index) => { if (Math.abs(candidate - current) < Math.abs(control.values[best] - current)) best = index; });
@@ -733,16 +735,16 @@ export function WardrobeDrawer({ onClose }: { onClose(): void }) {
                 parameter's business, not something to make anyone read. */}
             {options.map(control => <div className="wardrobe-row" key={control.id}>
               <label>{control.name}</label>
-              <div className="wardrobe-options">
+              <div className="wardrobe-options" role="group" aria-label={control.name}>
                 {control.values.map((value, index) =>
-                  <button key={value} className={chosenIndex(control) === index ? 'chip selected' : 'chip'} onClick={() => set(control.id, value)}>{index + 1}</button>)}
+                  <button key={value} className={chosenIndex(control) === index ? 'chip selected' : 'chip'} aria-pressed={chosenIndex(control) === index} onClick={() => set(control.id, value)}>{control.labels?.[index] ?? index + 1}</button>)}
               </div>
             </div>)}
             {toggles.map(control => <div className="wardrobe-row" key={control.id}>
               <label>{control.name}</label>
-              <div className="wardrobe-options">
-                <button className={chosenIndex(control) === 0 ? 'chip selected' : 'chip'} onClick={() => set(control.id, control.values[0] ?? 0)}>Off</button>
-                <button className={chosenIndex(control) === control.values.length - 1 ? 'chip selected' : 'chip'} onClick={() => set(control.id, control.values[control.values.length - 1] ?? 1)}>On</button>
+              <div className="wardrobe-options" role="group" aria-label={control.name}>
+                <button className={chosenIndex(control) === 0 ? 'chip selected' : 'chip'} aria-pressed={chosenIndex(control) === 0} onClick={() => set(control.id, control.values[0] ?? 0)}>Off</button>
+                <button className={chosenIndex(control) === control.values.length - 1 ? 'chip selected' : 'chip'} aria-pressed={chosenIndex(control) === control.values.length - 1} onClick={() => set(control.id, control.values[control.values.length - 1] ?? 1)}>On</button>
               </div>
             </div>)}
             {/* Sliders, not buttons: an elbow is a position rather than a
@@ -1588,6 +1590,142 @@ function AniListField() {
  */
 
 /**
+ * Every service she calls on, what it has cost, and what is left in it.
+ *
+ * Four questions with four different answers, and the panel says which is
+ * which rather than setting them all in the same typeface. OpenCode's figures
+ * are billed ones out of its own database; Claude's are its own token counts
+ * priced at the published rates, which is an estimate and is called one; Venice
+ * reports the balance, and the spending is read out of its fall; OpenAI and
+ * Google will tell an ordinary key nothing at all, so what is shown for them is
+ * the only thing that is true — how often she called.
+ *
+ * Read-only on purpose. The services themselves are set up in Settings, and a
+ * button that reset the tally would only ever be pressed by accident.
+ */
+const BASIS_WORDS: Record<ServiceSpend['basis'], string> = {
+  billed: 'billed',
+  estimated: 'estimated',
+  balance: 'from the balance',
+  calls: 'calls only',
+};
+
+const money = (amount: number) => amount >= 1000 ? '$' + Math.round(amount).toLocaleString()
+  : amount >= 1 ? '$' + amount.toFixed(2)
+  : amount > 0 ? '$' + amount.toFixed(3)
+  : '$0';
+
+const compact = (count: number) => count >= 1e9 ? (count / 1e9).toFixed(1) + 'B'
+  : count >= 1e6 ? (count / 1e6).toFixed(1) + 'M'
+  : count >= 1e3 ? (count / 1e3).toFixed(1) + 'k'
+  : String(count);
+
+/** The last thirty days as keys, so a day with nothing in it still holds its place. */
+function spendSlots(days = 30): string[] {
+  const today = todayInZone();
+  return Array.from({ length: days }, (_, index) => shiftISODate(today, index - (days - 1)));
+}
+
+/**
+ * A month of daily spend, one bar a day.
+ *
+ * One series, so one colour and no legend. The tallest day is labelled and the
+ * rest are not — a number over every bar is a table that nobody can read as a
+ * shape. A day with nothing keeps its slot as a baseline tick: gaps that close
+ * up would make a quiet fortnight look like a busy one.
+ */
+function SpendChart({ spend }: { spend: ServiceSpend }) {
+  const slots = spendSlots();
+  const byDay = new Map(spend.days.map(day => [day.day, day]));
+  const peak = spend.days.reduce((most, day) => (day.cost > most.cost ? day : most), { day: '', cost: 0, tokens: 0 });
+  if (!peak.cost) return <p className="spend-quiet">Nothing in the last thirty days.</p>;
+  const width = 6;
+  const gap = 3;
+  const height = 46;
+  return <svg className="spend-chart" width={slots.length * (width + gap) - gap} height={height + 15} role="img"
+    aria-label={'Daily spend over thirty days. Highest ' + money(peak.cost) + ' on ' + dayLabel(peak.day) + ', ' + money(spend.month) + ' in all.'}>
+    {slots.map((day, index) => {
+      const cost = byDay.get(day)?.cost ?? 0;
+      const tall = cost > 0 ? Math.max(3, Math.round((cost / peak.cost) * height)) : 1;
+      return <rect key={day} x={index * (width + gap)} y={height - tall} width={width} height={tall} rx={2}
+        className={cost > 0 ? 'spend-bar' : 'spend-bar none'}>
+        <title>{dayLabel(day) + ' — ' + (cost > 0 ? money(cost) : 'nothing')}</title>
+      </rect>;
+    })}
+    <text className="spend-peak" x={0} y={height + 13}>{money(peak.cost)} on {dayLabel(peak.day)}</text>
+  </svg>;
+}
+
+function SpendCard({ spend }: { spend: ServiceSpend }) {
+  const balance = spend.balance;
+  return <article className="spend-card">
+    <header>
+      <h3>{spend.service}</h3>
+      <span className={'basis ' + spend.basis}>{BASIS_WORDS[spend.basis]}</span>
+    </header>
+    {balance
+      ? <p className={'spend-hero ' + balance.level}>{money(balance.amount)}<small>left{balance.unit === 'USD' ? '' : ' · ' + balance.unit}</small></p>
+      : spend.basis === 'calls'
+        ? <p className="spend-hero">{spend.calls.toLocaleString()}<small>calls in 30 days</small></p>
+        : <p className="spend-hero">{money(spend.month)}<small>in 30 days</small></p>}
+    {spend.basis !== 'calls' && <>
+      <SpendChart spend={spend}/>
+      <dl className="spend-figures">
+        <div><dt>Today</dt><dd>{money(spend.today)}</dd></div>
+        <div><dt>7 days</dt><dd>{money(spend.week)}</dd></div>
+        <div><dt>30 days</dt><dd>{money(spend.month)}</dd></div>
+        {spend.tokens > 0 && <div><dt>Tokens</dt><dd>{compact(spend.tokens)}</dd></div>}
+      </dl>
+    </>}
+    <p className="status-note">{spend.note}</p>
+    {spend.days.length > 0 && <details className="spend-days">
+      <summary>Day by day</summary>
+      <ul className="memory-list">{[...spend.days].reverse().map(day => <li key={day.day}>
+        <span>{dayLabel(day.day)}</span>
+        <span className="memory-meta-inline">{money(day.cost)}{day.tokens ? ' · ' + compact(day.tokens) + ' tokens' : ''}</span>
+      </li>)}</ul>
+    </details>}
+  </article>;
+}
+
+export function ServicesPage() {
+  const [rows, setRows] = useState<UsageRow[] | null>(null);
+  const [spend, setSpend] = useState<ServiceSpend[] | null>(null);
+  const load = useCallback(() => {
+    void window.haru?.usage?.get?.().then(setRows).catch(() => setRows([]));
+    void window.haru?.usage?.spend?.().then(setSpend).catch(() => setSpend([]));
+  }, []);
+  // The tally moves while the page is open — she calls out on her own — so it is
+  // re-read on a timer rather than only on the way in. What the spend costs to
+  // gather is paid in the main process and held there for ten minutes, so this
+  // is a message and not a second of reading.
+  useEffect(() => { load(); const timer = setInterval(load, 30_000); return () => clearInterval(timer); }, [load]);
+
+  if (!window.haru?.usage) return <section className="page services"><div className="field">
+    <h2>What she calls on</h2>
+    <p>Only the desktop app counts her calls.</p>
+  </div></section>;
+
+  return <section className="page services">
+    <div className="field">
+      <h2>What it costs</h2>
+      <p>The services she is pointed at, what each has cost over thirty days, and what is left in the ones that will say. Every figure carries where it came from — billed, estimated, or simply counted.</p>
+    </div>
+    <div className="spend-grid">{(spend ?? []).map(service => <SpendCard key={service.service} spend={service}/>)}</div>
+    <div className="field">
+      <h2>Everything she reached</h2>
+      <p>Her own calls, counted by host. Nothing about what was asked for, or what came back.</p>
+    </div>
+    {rows && !rows.length
+      ? <div className="quiet-empty"><Activity size={28} aria-hidden="true"/><h3>Nothing called yet.</h3><p>The first time she looks something up, it will show up here.</p></div>
+      : <ul className="memory-list">{(rows ?? []).map(row => <li key={row.service}>
+          <span>{row.service}{row.service !== row.host && <em> · {row.host}</em>}</span>
+          <span className="memory-meta-inline">{row.today} today · {row.week} this week · {row.month} in 30 days{row.failed ? ' · ' + row.failed + ' failed' : ''} · last {row.last}</span>
+        </li>)}</ul>}
+  </section>;
+}
+
+/**
  * Where her other self is, and how to sign in to it.
  *
  * The phone talks to the server, so a note sent from it is written there and
@@ -1866,17 +2004,18 @@ function GoogleCalendarField() {
   </div>;
 }
 
-export function CharacterModelRow({ model, importing, onImport, onRemove }: {
+export function CharacterModelRow({ model, importing, onImport, onRemove, onWardrobe }: {
   model: { name: string; url: string } | null;
-  importing: boolean; onImport(): void; onRemove(): void;
+  importing: boolean; onImport(): void; onRemove(): void; onWardrobe?(): void;
 }) {
   return <>
-    <div className="model-row" aria-label="Live2D character model">
+    <div className="model-row" aria-label="Companion avatar">
       <Sparkles size={13}/>
       {model
-        ? <><span className="model-name" title={model.name}>{model.name}</span><button className="remove-model" onClick={onRemove}><Trash2 size={12}/> Remove</button></>
-        : <><span className="model-name muted">No Live2D model</span><button className="import-model" onClick={onImport} disabled={importing}><Import size={13}/>{importing ? 'Opening…' : 'Import Live2D'}</button></>}
+        ? <><span className="model-name" title={model.name}>{model.name}</span><button className="import-model" onClick={onImport} disabled={importing}><Import size={13}/>{importing ? 'Opening…' : 'Change'}</button><button className="remove-model" onClick={onRemove}><Trash2 size={12}/> Remove</button></>
+        : <><span className="model-name muted">No avatar selected</span><button className="import-model" onClick={onImport} disabled={importing}><Import size={13}/>{importing ? 'Opening…' : 'Choose avatar'}</button></>}
     </div>
+    {model && onWardrobe && <button className="ghost" onClick={onWardrobe}>Wardrobe</button>}
   </>;
 }
 
@@ -2025,16 +2164,20 @@ export function AsidesPage() {
   const [asides, setAsides] = useState<Aside[]>([]);
   const [nudgeSaving, setNudgeSaving] = useState<string[]>([]);
   const [nudgeError, setNudgeError] = useState('');
+  const [held, setHeld] = useState<HeldBack[]>([]);
+  const [showHeld, setShowHeld] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     if (!window.haru) { setLoaded(true); return; }
     void window.haru.chat.getAsides().then(list => { setAsides(list); setLoaded(true); });
+    void window.haru.chat.getHeldBack().then(setHeld);
     // Main owns the list and hands over each line as it happens, so the page
     // fills in while it is open rather than only on the way in.
     const stopAdding = window.haru.chat.onAside(aside => setAsides(current => [...current, aside]));
     const stopClearing = window.haru.chat.onAsidesCleared(() => setAsides([]));
     const stopChanging = window.haru.chat.onAsidesChanged(setAsides);
-    return () => { stopAdding(); stopClearing(); stopChanging(); };
+    const stopHolding = window.haru.chat.onHeldBack(setHeld);
+    return () => { stopAdding(); stopClearing(); stopChanging(); stopHolding(); };
   }, []);
   const today = todayInZone();
   const days = [...new Set(asides.map(aside => aside.day || today))].sort().reverse();
@@ -2043,7 +2186,25 @@ export function AsidesPage() {
       <h2>Off her own back</h2>
       <p>Everything Haru says without being prompted, kept apart from your conversation. Use the buttons under a nudge to steer her future subjects; choose the same button again to undo it. The log keeps a week.</p>
     </div>
-    {loaded && !asides.length && <p className="nothing">Nothing yet. She has not said anything off her own back.</p>}
+    {loaded && !asides.length && <div className="quiet-empty"><Quote size={28} aria-hidden="true"/><h3>A quiet moment.</h3><p>When Haru has something to say, you’ll find it here.</p></div>}
+    {/* The other half of the question. A companion that has gone quiet looks
+        exactly like one that is working, and every rule that stops her already
+        explains itself — so the explanations are here rather than only in a
+        log. Folded away, because on a normal evening it is not the point. */}
+    {held.length > 0 && <div className="held-back">
+      <button className="ghost" onClick={() => setShowHeld(!showHeld)}>
+        {showHeld ? 'Hide' : 'Show'} what she bit back ({held.length})
+      </button>
+      {showHeld && <ol className="aside-list">
+        {held.slice().reverse().map(entry => <li className="aside held" key={`${entry.at}-${entry.line.slice(0, 24)}`}>
+          <div className="aside-meta">
+            <time>{asideClock(entry.at)}</time>
+            <span className="aside-why">{entry.why}</span>
+          </div>
+          <p>{entry.line}</p>
+        </li>)}
+      </ol>}
+    </div>}
     {days.map(day => <div className="aside-day" key={day}>
       <h3>{asideDayLabel(day, today)}</h3>
       <ol className="aside-list">
@@ -2146,24 +2307,27 @@ function PrivatePicture({ file }: { file: Attachment }) {
 
 function Attached({ files }: { files: Attachment[] }) {
   return <div className="attached">
-    {files.map(file => file.kind === 'image'
+    {files.map(file => file.kind === 'image' && (file.private || file.url)
       ? (file.private ? <PrivatePicture key={file.id} file={file}/> : <img key={file.id} className="attached-picture" src={file.url} alt={file.name} title={file.name}/>)
       : <FileChip key={file.id} file={file}/>)}
   </div>;
 }
 
 export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {
+  const studyText = message.role === 'user' ? studyRequest(message.content) : null;
+  const content = studyText ?? message.content;
   // Only Haru's own replies can be rated or replied to, and the greeting is not
   // a real reply. Nothing to act on when she did not actually say anything.
   const actionable = message.role === 'assistant' && message.id !== 'greeting' && !message.ignored;
-  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack">
+  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true">は</div><div className="bubble-stack">
     {/* Kept on the message itself, so which reply was meant stays readable long
         after the exchange rather than only while it is being written. */}
     {message.replyTo && <div className="reply-quote"><CornerDownRight size={11}/><span>{message.replyTo.excerpt}</span></div>}
     {message.attachments?.length ? <Attached files={message.attachments}/> : null}
     {/* A picture on its own is a whole message, so an empty bubble under it would
         be an empty bubble rather than a missing one. */}
-    {message.content.trim() ? <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{withEmphasis(message.content)}</div> : null}
+    {studyText !== null && <span className="study-message-label">Study</span>}
+    {content.trim() ? <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{withEmphasis(content)}</div> : null}
     {/* Only under what she heard, and only for the person who said it. */}
     {message.role === 'user' && message.heard && <HeardCheck heard={message.heard}/>}
     {actionable && onReact && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
@@ -2184,7 +2348,7 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
  */
 const COMPOSER_MAX_HEIGHT = 168;
 
-export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, onStage, onUnstage }: {
+export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, onStage, onUnstage, draft: suppliedDraft, onDraftChange, placeholder, waitingText }: {
   sending: boolean;
   replyingTo?: { id: string; excerpt: string } | null;
   onCancelReply?(): void;
@@ -2193,8 +2357,14 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
   staged: Attachment[];
   onStage(files: Attachment[]): void;
   onUnstage(file: Attachment): void;
+  draft?: string;
+  onDraftChange?(value: string): void;
+  placeholder?: string;
+  waitingText?: string;
 }) {
-  const [draft, setDraft] = useState('');
+  const [localDraft, setLocalDraft] = useState('');
+  const draft = suppliedDraft ?? localDraft;
+  const setDraft = (value: string) => onDraftChange ? onDraftChange(value) : setLocalDraft(value);
   const box = useRef<HTMLTextAreaElement>(null);
   // Which line she is waiting behind this time. Picked when the send goes out
   // rather than per render, so it does not shuffle while you are reading it.
@@ -2243,7 +2413,7 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
       onSend(text, text);
       return;
     }
-    setDraft(current => (current.trim() ? `${current.replace(/\s+$/, '')} ${text}` : text));
+    setDraft(draft.trim() ? `${draft.replace(/\s+$/, '')} ${text}` : text);
   }
   /**
    * A pasted picture, which is the way a screenshot actually arrives.
@@ -2289,9 +2459,10 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
           she thinks — so the line cannot replace it and has to sit over it, the
           way a placeholder does, and get out of the way the moment you type. */}
       <div className="compose-field">
-      {sending && !draft && !replyingTo && <div className="compose-waiting" aria-hidden="true"><span>{waitingLine || 'Haru is thinking…'}</span></div>}
+      {sending && !draft && !replyingTo && <div className="compose-waiting" aria-hidden="true"><span>{waitingText || waitingLine || 'Haru is thinking…'}</span></div>}
       <textarea ref={box} rows={1} value={draft}
-        placeholder={replyingTo ? 'What did she get wrong?' : sending ? '' : staged.length ? 'What do you want her to do with it?' : 'Say something to Haru…'}
+        aria-label={placeholder || 'Message Haru'}
+        placeholder={replyingTo ? 'What did she get wrong?' : sending ? '' : placeholder || (staged.length ? 'What do you want her to do with it?' : 'Say something to Haru…')}
         onChange={event => setDraft(event.target.value)}
         onPaste={event => void paste(event)}
         onKeyDown={event => {
@@ -2303,8 +2474,9 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
           submit(event);
         }}/>
       </div>
-      <button disabled={sending || (!draft.trim() && !staged.length)}>{sending ? 'Thinking…' : 'Send'}</button>
+      <button className="send-button" aria-label={sending ? 'Waiting for Haru' : 'Send message'} title="Send message · Enter" disabled={sending || (!draft.trim() && !staged.length)}><ArrowUp size={20}/></button>
     </form>
+    <div className="compose-hint"><span>Make yourself heard.</span><span>Enter to send <b>·</b> Shift + Enter for a new line</span></div>
   </div>;
 }
 
@@ -2518,6 +2690,9 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
   // Transitions only, so a re-render is silent.
   const soundedAt = useRef(false);
   const openEar = state === 'recording' || heard;
+  const activelyListening = openEar && !muted && !!config && config.engine !== 'off';
+  useEffect(() => { void window.haru?.listen.setActive(activelyListening); }, [activelyListening]);
+  useEffect(() => () => { void window.haru?.listen.setActive(false); }, []);
   useEffect(() => {
     if (openEar === soundedAt.current) return;
     soundedAt.current = openEar;
@@ -2921,7 +3096,7 @@ export function Agenda({ items, selected, view, onToggle, onJump }: { items: Kep
   </div>;
 }
 
-export function Kept({ items, model, importing, onImport, onRemove, onToggle }: { items: KeptItem[]; model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void; onToggle(id: string): void }) {
+export function Kept({ items, model, importing, onImport, onRemove, onWardrobe, onToggle }: { items: KeptItem[]; model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void; onWardrobe(): void; onToggle(id: string): void }) {
   const [selected, setSelected] = useState(() => toISODate(new Date()));
   const [view, setView] = useState<CalendarView>('month');
   // Whether anything ticked here is actually reaching Google.
@@ -2938,8 +3113,8 @@ export function Kept({ items, model, importing, onImport, onRemove, onToggle }: 
     return window.haru.google.onChange(status => setSyncError(status.connected ? status.lastError ?? '' : ''));
   }, []);
   const pending = items.filter(item => !item.done).length;
-  return <aside className="kept"><h2>Kept{pending > 0 && <span className="kept-count">{pending}</span>}</h2>
+  return <aside className="kept" id="kept-panel" aria-label="Your plans"><div className="kept-heading"><div><span className="eyebrow">A LITTLE STRUCTURE</span><h2>Your plans{pending > 0 && <span className="kept-count">{pending}</span>}</h2></div><CalendarDays size={20} aria-hidden="true"/></div>
     {syncError && <p className="kept-sync-error" title={syncError}>Not reaching Google — ticking things here will not update your phone. Reconnect in Setup.</p>}
-    <Calendar items={items} selected={selected} view={view} onSelect={setSelected} onView={setView}/><Agenda items={items} selected={selected} view={view} onToggle={onToggle} onJump={date => { setSelected(date); setView('day'); }}/><div className="stage-slot"><CharacterModelRow model={model} importing={importing} onImport={onImport} onRemove={onRemove}/></div></aside>;
+    <Calendar items={items} selected={selected} view={view} onSelect={setSelected} onView={setView}/><Agenda items={items} selected={selected} view={view} onToggle={onToggle} onJump={date => { setSelected(date); setView('day'); }}/><div className="stage-slot"><span className="eyebrow">DESKTOP COMPANION</span><CharacterModelRow model={model} importing={importing} onImport={onImport} onRemove={onRemove} onWardrobe={onWardrobe}/></div></aside>;
 }
 export function Suggestion({ children, onClick }: { children: React.ReactNode; onClick(): void }) { return <button className="suggestion" onClick={onClick}>{children}</button>; }

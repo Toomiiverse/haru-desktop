@@ -7,6 +7,7 @@
 // ahead. Pure, so the blending can be checked without a canvas.
 
 import type { Emotion, EmotionName, FocusTarget, Vitals } from '../types';
+import { referenceClip, referenceClips } from './referenceClips';
 
 export type Gaze = { x: number; y: number };
 export type Layer = { target: Gaze; weight: number };
@@ -156,8 +157,13 @@ const EXPRESSION_HINTS: Record<ActionShape['expressionMood'], RegExp[]> = {
   neutral: [/(neutral|normal|default|idle)/i],
 };
 
+// A face may ship as three: `happy.eyes`, `happy.brows`, `happy.mouth`, so the
+// face layer can move them in turn. Selection is by the whole name; the parts
+// are how it is driven, not what it is.
+const PART = /\.(eyes|brows|mouth)$/;
+
 function selectExpression(patterns: RegExp[], available: string[]): string | null {
-  const usable = available.filter(name => !COSMETIC.test(name));
+  const usable = available.filter(name => !COSMETIC.test(name) && !PART.test(name));
   if (!usable.length) return null;
   // Each pattern is tried against the curated set before the loose one, so a
   // rough match in Emotions/ beats an exact match among the wardrobe files.
@@ -214,10 +220,14 @@ const EMOTION_HINTS: Record<EmotionName, RegExp[]> = {
   worried: [/(worr|anxious|concern|nervous|uneasy|sad)/i, /(frown|upset|cry)/i, /(curious|question)/i],
 };
 
-// Neutral resolves to nothing on purpose: with no explicit neutral expression to
-// return to, leaving the current one alone reads better than forcing an
-// unrelated face on every level-headed reply.
+// Installed reference clips take priority; other models retain their existing
+// name-based matching and return nothing when they have no suitable face.
 export function expressionForEmotion(emotion: Emotion, available: string[]): string | null {
+  const references = referenceClips.filter(clip => clip.tag === emotion.emotion && available.includes(clip.name)).map(clip => clip.name);
+  // Reserve the original restrained smirk for quieter smug beats. Shared tags
+  // choose a steadier or livelier reference from the same declared order.
+  if (emotion.emotion === 'smug' && available.includes('Wolfram Smug')) references.unshift('Wolfram Smug');
+  if (references.length) return references[Math.min(references.length - 1, Math.max(0, Math.floor(emotion.energy * references.length)))];
   return selectExpression(EMOTION_HINTS[emotion.emotion] ?? [], available);
 }
 
@@ -242,9 +252,11 @@ export function emotionWeight(emotion: Emotion) {
 
 // An emotional beat should fade rather than latch: this is how long the reading
 // stays fully applied before the idle layers take back over. Livelier readings
-// hold longer, because a flat one has less to show.
-export function emotionHoldMs(emotion: Emotion) {
-  return 2500 + emotion.energy * 3500;
+// hold longer, because a flat one has less to show. Reference clips also get
+// enough time to finish and settle before their automatic release.
+export function emotionHoldMs(emotion: Emotion, expression: string | null = null) {
+  const clip = expression ? referenceClip(expression) : undefined;
+  return Math.max(2500 + emotion.energy * 3500, clip ? clip.duration * 1000 + 650 : 0);
 }
 
 // --- gesture layer ---------------------------------------------------------

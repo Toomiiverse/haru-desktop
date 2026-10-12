@@ -193,7 +193,7 @@ test('the two pages are the same shell, so a change lands on both', () => {
 // backdrop, dark eyes in fill groups, pink blush beneath them. And the
 // renderer, in a vm with a document of stubs and a fetch that answers at once.
 type Stub = any;
-function drive({ reduced = false, transition, frozenAt, missing = [] as string[] }: { reduced?: boolean; transition?: string; frozenAt?: string; missing?: string[] } = {}) {
+function drive({ reduced = false, transition, frozenAt, missing = [] as string[], namedEyes = false }: { reduced?: boolean; transition?: string; frozenAt?: string; missing?: string[]; namedEyes?: boolean } = {}) {
   const app = appPage();
   const anchor = app.indexOf('window.haruAvatar = {');
   const start = anchor < 0 ? -1 : app.lastIndexOf('(() => {', app.indexOf('window.HaruEmotionEngine ='));
@@ -205,6 +205,7 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
     const el: Stub = { nodeName: name, attrs: { ...attrs }, classList: classes(), style: {} as Record<string, string>, children: kids, parentNode: null,
       getAttribute(k: string) { return this.attrs[k] ?? null; }, setAttribute(k: string, v: string) { this.attrs[k] = v; }, removeAttribute(k: string) { delete this.attrs[k]; },
       replaceChildren(...nodes: Stub[]) { this.children = nodes; for (const n of nodes) n.parentNode = this; },
+      querySelector(sel: string) { const part = sel.match(/data-part="([^"]+)"/)?.[1]; return this.querySelectorAll('path').find((p: Stub) => p.attrs['data-part'] === part); },
       querySelectorAll(sel: string) { const out: Stub[] = []; const walk = (n: Stub) => { for (const c of n.children) { if (sel.split(/,\s*/).includes(c.nodeName)) out.push(c); walk(c); } }; walk(this); return out; } };
     for (const k of kids) k.parentNode = el;
     return el;
@@ -214,8 +215,8 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   const faceTree = () => element('svg', { viewBox: '0.00 0.00 1254.00 1254.00' }, [
     element('path', { fill: '#000000', d: 'M 1254.00 0.00 L 1254.00 1254.00 L 0.00 1254.00 L 0.00 0.00 L 1254.00 0.00 Z' }),
     element('g', { fill: '#2d2b30' }, [
-      element('path', { d: 'M 455 788 l 60 0 l 0 112 l -60 0 Z' }),
-      element('path', { d: 'M 726 788 L 783 788 L 783 900 L 726 900 Z' }),
+      element('path', namedEyes ? { d: 'M 455 847 a 29 61 0 1 0 58 0 a 29 61 0 1 0 -58 0 Z', 'data-part': 'eye-left' } : { d: 'M 455 788 l 60 0 l 0 112 l -60 0 Z' }),
+      element('path', namedEyes ? { d: 'M 726 847 a 29 61 0 1 0 58 0 a 29 61 0 1 0 -58 0 Z', 'data-part': 'eye-right' } : { d: 'M 726 788 L 783 788 L 783 900 L 726 900 Z' }),
     ]),
     element('g', { fill: '#f9bac9' }, [
       element('path', { d: 'M 398 895 L 448 895 L 448 919 L 398 919 Z' }),
@@ -252,6 +253,15 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, body, poseEl, faces, host, shown, flush, tick: (ms: number) => { now += ms; }, fire: () => { const due = [...timers.values()]; timers.clear(); for (const cb of due) cb(); }, pending: () => timers.size };
 }
 const plain = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+test('named vector eyes on the new faces animate on the phone even when arc bounds are flat', async () => {
+  const d = drive({ namedEyes: true }); await d.flush();
+  const paths = d.shown().querySelectorAll('path');
+  const eyes = paths.filter((p: Stub) => p.attrs['data-part']?.startsWith('eye-'));
+  assert.equal(eyes.length, 2);
+  assert.ok(eyes.every((p: Stub) => p.attrs.class === 'eye'));
+  assert.ok(paths.filter((p: Stub) => p.attrs.class === 'eye').length === 2, 'blush is not mistaken for eyes');
+});
 
 test('the engine is clock-free: a time in, a frame out, eased and never overshooting', () => {
   const { Engine } = drive();
@@ -323,8 +333,8 @@ test('her attention: them typing, her talking, her thinking, a face with no eyes
 test('the mood engine’s word becomes the face for it, as the SVG itself, with the black square hidden', async () => {
   const { avatar, box, shown, flush } = drive();
   avatar.express('determined'); await flush();
-  assert.equal(avatar.state().emotion, 'excited');
-  assert.equal(box.getAttribute('aria-label'), 'Haru feeling excited');
+  assert.equal(avatar.state().emotion, 'determined');
+  assert.equal(box.getAttribute('aria-label'), 'Haru feeling determined');
   const svg = shown()?.children[0];
   assert.equal(svg?.nodeName, 'svg'); assert.equal(svg.getAttribute('viewBox'), '0.00 0.00 1254.00 1254.00'); assert.equal(svg.getAttribute('preserveAspectRatio'), 'xMidYMid meet');
   assert.equal(svg.children[0].getAttribute('class'), 'backdrop');

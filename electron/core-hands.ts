@@ -6,7 +6,7 @@ import {CoreServiceClient,coreServiceOptions} from './core-service-client';
 import {whyNotAct,HANDS_TURN,type Moment} from './herhands';
 import {TaskController} from './task-controller';
 import {isLocalConfig,type ModelEntry,type TaskPolicy,type ProviderConfig} from './model-registry';
-import {runToolLoop,type ToolLoopDeps} from './toolloop';
+import {runToolLoop,splitOutcome,type ToolLoopDeps} from './toolloop';
 import type {ChatMessage} from './provider';
 import {makeToolReceipt,type ToolReceipt} from './tool-receipt';
 import type {ToolCall} from './provider';
@@ -43,7 +43,7 @@ export async function runCoreHands(conversation:ChatMessage[],config:ProviderCon
     policy:{...authority.policy,taskBudgetMicros:0,dailyBudgetMicros:0,maxToolCalls:1,maxEscalations:0,deadlineMs:900000},request:HANDS_TURN,maxRounds:3,maxToolCalls:1};
   const task=new TaskController(handsTaskRPC(authority.rpc),authority.registry,limits.policy,false);
   await task.start(limits.request,config.model,'background');
-  const result=await task.loop(conversation,{...deps,runTool:async call=>ownTimeReceipt(call,await deps.runTool(call)),maxRounds:limits.maxRounds,maxToolCalls:limits.maxToolCalls});
+  const result=await task.loop(conversation,{...deps,runTool:async call=>ownTimeReceipt(call,splitOutcome(await deps.runTool(call)).words),maxRounds:limits.maxRounds,maxToolCalls:limits.maxToolCalls});
   console.log('[core-hands] '+JSON.stringify({event:'returned',rounds:result.rounds,toolCount:result.ran.size,localOnly:true}));
   return result;
 }
