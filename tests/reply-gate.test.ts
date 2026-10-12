@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { ReplyGate } from '../electron/reply-gate';
 
 test('an opening goes out at once and the commit sends only the rest', () => {
-  const out: string[] = [];
-  const gate = new ReplyGate(t => out.push(t));
+  const out: string[] = [], logged: string[] = [];
+  const gate = new ReplyGate(t => out.push(t), l => logged.push(l));
   gate.opening('[neutral] Morning.');
   gate.commit('[neutral] Morning. [curious] Sleep at all?');
   assert.deepEqual(out, ['[neutral] Morning.', ' [curious] Sleep at all?']);
+  assert.deepEqual(logged, ['[reply-gate] {"opening":"kept","chars":18}']);
 });
 
 test('a final text that no longer starts with the opening is reset and shown whole, not failed', () => {
@@ -16,7 +17,7 @@ test('a final text that no longer starts with the opening is reset and shown who
   gate.opening('[neutral] Morning.');
   gate.commit('[annoyed] Took you long enough.');
   assert.deepEqual(out, ['[neutral] Morning.', '�', '[annoyed] Took you long enough.']);
-  assert.equal(warned.length, 1);
+  assert.deepEqual(warned, ['[reply-gate] {"opening":"replaced","chars":18}']);
   assert.throws(() => gate.commit('x'), /reply_already_published/);
 });
 
@@ -28,10 +29,11 @@ test('without an opening the commit publishes everything', () => {
 });
 
 test('a reset takes the opening back and the next round may open again', () => {
-  const out: string[] = [];
-  const gate = new ReplyGate(t => out.push(t));
+  const out: string[] = [], logged: string[] = [];
+  const gate = new ReplyGate(t => out.push(t), l => logged.push(l));
   gate.opening('[smug] Odokawa.');
   gate.reset();
+  assert.deepEqual(logged, ['[reply-gate] {"opening":"reset","chars":15}']);
   gate.reset();   // idle resets publish nothing more
   gate.opening('[neutral] Two things.');
   gate.commit('[neutral] Two things. [happy] The walrus.');

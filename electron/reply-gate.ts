@@ -3,7 +3,7 @@ export class ReplyGate {
   private committed = false;
   private prefix = "";
   private held = false;
-  constructor(private readonly publish?: (text: string) => void, private readonly warn: (line: string) => void = () => {}) {}
+  constructor(private readonly publish?: (text: string) => void, private readonly log: (line: string) => void = () => {}) {}
   /** 3320 speak-first: her line while a tool runs, shown at once and never part of the reply \u2014 the first real text
    *  (an opening, the commit, a reset) takes it back with the reset marker. One a turn; a later tool keeps the first. */
   hold = (text: string): void => {
@@ -29,6 +29,7 @@ export class ReplyGate {
     if (this.committed) return;
     this.release();
     if (!this.prefix) return;
+    this.log('[reply-gate] ' + JSON.stringify({ opening: 'reset', chars: this.prefix.length }));
     this.prefix = '';
     this.publish?.('\uFFFD');
   };
@@ -36,11 +37,12 @@ export class ReplyGate {
     if (this.committed) throw new Error('reply_already_published');
     this.committed = true;
     this.release();
+    // 3340: whether the published opening survived, from the one place that knows (the Core's own record never printed).
+    if (this.prefix) this.log('[reply-gate] ' + JSON.stringify({ opening: content.startsWith(this.prefix) ? 'kept' : 'replaced', chars: this.prefix.length }));
     if (this.prefix && !content.startsWith(this.prefix)) {
       // 3240: a published opening the final text no longer starts with (a repair, an inspector edit, the publication
       // voice) is taken back the way a discarded round is — a reset marker, then the whole reply — not a failed turn.
-      this.warn(`[reply-gate] the opening was taken back (${this.prefix.length} chars); the reply is shown whole`);
-      this.publish?.('�');
+      this.publish?.('\uFFFD');
       this.publish?.(content);
       return;
     }
