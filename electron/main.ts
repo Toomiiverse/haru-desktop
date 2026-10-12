@@ -6724,13 +6724,15 @@ function herBrowser(): Browser | null {
     ownBrowser = playwrightBrowser({
       startProxy: () => startGuardProxy({ log: line => console.log(line) }),
       spawn: proxyPort => {
-        const cli = require.resolve('@playwright/mcp/cli.js');
+        // Through package.json: the package exports no ./cli.js subpath, so resolving it directly throws.
+        const cli = path.join(path.dirname(require.resolve('@playwright/mcp/package.json')), 'cli.js');
         const env: NodeJS.ProcessEnv = {
           PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
           HOME: process.env.HOME ?? app.getPath('home'),
           USER: process.env.USER ?? '',
           LANG: 'C.UTF-8',
-          TMPDIR: app.getPath('temp'),
+          // os, not app: the Core brain worker's app shim has no 'temp' path.
+          TMPDIR: os.tmpdir(),
           ELECTRON_RUN_AS_NODE: '1',
           ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
         };
