@@ -140,3 +140,41 @@ test('hanging up during a hold writes a dropped [call-hold] line', async () => {
   const end = lines.findIndex(l => l.startsWith('[call-end] '));
   assert.ok(end > lines.indexOf(hold[0]), 'the hold line comes before the call end');
 });
+
+test('filter on: another voice is preview-checked once per utterance, and a failed preview check is logged', async () => {
+  const table: Record<string, unknown> = { 'speech-boundary.unfinished': false, 'speech-boundary.continued': null, 'speech-boundary.echoOfHers': false,
+    'speech-boundary.settleTake': { report: false }, 'speech-boundary.callMicCheckReply': null, 'speech-boundary.callInputCommand': null, 'speech-boundary.unfinishedHold': 0 };
+  (policy as any).corePolicySync = (op: string) => table[op];
+  const FRAME_MS = 40, FRAME_BYTES = (CALL_RATE * FRAME_MS / 1000) * 2;
+  const frame = (level: number) => { const out = new Int16Array(FRAME_BYTES / 2), a = Math.round(level * 32767); for (let i = 0; i < out.length; i++) out[i] = i % 2 ? a : -a; return new Uint8Array(out.buffer); };
+  const run = async (fail: boolean) => {
+    let clock = 1_000_000, previews = 0; const lines: string[] = [];
+    const speaker = { enabled: true, check: async (_w: unknown, final: boolean) => { if (!final) { previews++; if (fail) throw Error('voice_session_expired'); }
+        return { allow: false, enforcing: true, speaker: 'other', reason: 'different_voice', notice: null }; },
+      confirm: async () => ({ current: true }), notice: async () => ({ notice: null }), frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
+    const deps: LocalCallDeps = { speaker, hear: async () => 'tv talking', prepareHear: async () => Object.assign(() => 'tv talking', { text: 'tv talking' }),
+      prepareAfterMs: 150, answer: async () => ({ reply: '' }), speak: async () => ({ stream: new ReadableStream(), sampleRate: 24000 }),
+      filler: () => '', moodNow: () => 'neutral', said: () => {}, now: () => clock, vad: { endAfterMs: 500 }, log: (l: string) => lines.push(l) } as any;
+    const c = openLocalCall({ onEvent: () => {}, onAudio: () => {}, onClose: () => {} }, deps);
+    const feed = (level: number, ms: number) => { for (let i = 0; i < ms / FRAME_MS; i++) { c.feed(frame(level)); clock += FRAME_MS; } };
+    feed(0.002, 1000); feed(0.3, 1000);
+    for (let p = 0; p < 3; p++) { feed(0.002, 240); for (let j = 0; j < 20; j++) await new Promise(r => setImmediate(r)); feed(0.3, 400); }   // pauses shorter than the endpoint
+    feed(0.002, 700); for (let j = 0; j < 40; j++) await new Promise(r => setImmediate(r));
+    c.close('test');
+    return { previews, lines };
+  };
+  const refused = await run(false);
+  assert.equal(refused.previews, 1, `one preview check for one utterance of another voice (${refused.previews})`);
+  const failed = await run(true);
+  const line = failed.lines.find(l => l.startsWith('[call-speaker] ') && l.includes('"error"'));
+  assert.ok(line && JSON.parse(line.slice(15)).final === false && JSON.parse(line.slice(15)).error === 'voice_session_expired');
+});
+
+test('main.ts keeps a published call reply only under the narrow condition, with a [turn-failed] trace', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(require.resolve('../../electron/main.ts'), 'utf8');
+  assert.ok(src.includes('if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;'));
+  assert.ok(src.includes("console.log('[turn-failed] '+JSON.stringify({id:trace.id,callId:options.callTrace?.id??null,turn:options.callTrace?.turn??null,kept:true,"));
+  const rethrow = src.indexOf('if (flushError) throw flushError;'), finalFlush = src.indexOf('voice.flush();', rethrow);
+  assert.ok(rethrow > 0 && finalFlush > rethrow);
+});

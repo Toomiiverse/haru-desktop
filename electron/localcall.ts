@@ -212,7 +212,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let pendingTiming: HeardTiming | null = null;
   let holdUntil = 0;              // sample time; a held fragment is answered alone once this passes in quiet
   let transcribing = 0;           // utterances at her ears right now; a held fragment waits for them
-  let preparation: {from:number;to:number;result:Promise<PreparedHearing|null>;settled:boolean} | null = null;
+  let preparation: {from:number;to:number;result:Promise<PreparedHearing|null>;settled:boolean;refused?:boolean} | null = null;
   let ears:Promise<unknown> = Promise.resolve();
   function atEars<T>(read:() => Promise<T>):Promise<T> {
     const job=ears.then(()=>{if(closed)throw Error('call_closed');return read();});
@@ -321,14 +321,18 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const event = vad.feed(pcm16Level(frame), t, hers() ? OVER_HER_RATIO : undefined);
     const preview = !event && !hers() && !transcribing && deps.prepareHear && deps.prepareAfterMs
       ? vad.preview(t, deps.prepareAfterMs) : null;
-    if (preview && (!preparation || preparation.settled && (preparation.from !== preview.from || preparation.to !== preview.to))) {
-      const item = {from:preview.from,to:preview.to,settled:false,result:Promise.resolve(null) as Promise<PreparedHearing|null>};
+    // 3760: with the filter on, no preview of a stretch too short to recognise (the final check refuses it anyway), and once a
+    // voice was refused for this utterance it is not checked again at every pause.
+    const recognisable = !deps.speaker?.enabled || (preview && preview.speechEnd-(preview.from+(deps.vad?.prerollMs??DEFAULT_VAD.prerollMs))>=650);
+    if (preview && recognisable && !(preparation?.refused && preparation.from===preview.from) && (!preparation || preparation.settled && (preparation.from !== preview.from || preparation.to !== preview.to))) {
+      const item: NonNullable<typeof preparation> = {from:preview.from,to:preview.to,settled:false,result:Promise.resolve(null) as Promise<PreparedHearing|null>};
       const wav=cut(preview.from,preview.to);
       // 3760 (user choice): with the voice filter on, the early transcript too — but only once a non-final voice check says it is
       // him, so nobody else's speech is transcribed; the final check and confirm in heard() still decide (~0.3 s off a turn).
       const prepare=()=>atEars(()=>deps.prepareHear!(wav,listening.signal));
       item.result = (deps.speaker?.enabled
-        ? atEars(()=>deps.speaker!.check(wav,false,false,listening.signal)).then(verdict=>{speakerLine(verdict,false,false,false);return verdict.allow?prepare():null;})
+        ? atEars(()=>deps.speaker!.check(wav,false,false,listening.signal)).catch(error=>{speakerFailed(false,error);throw error;})
+          .then(verdict=>{speakerLine(verdict,false,false,false);if(!verdict.allow&&verdict.reason!=='too_little_speech')item.refused=true;return verdict.allow?prepare():null;})
         : prepare()).catch(() => null).finally(() => {item.settled=true;});
       preparation = item;
     }

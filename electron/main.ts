@@ -9439,7 +9439,7 @@ function webDeps(): WebDeps {
         onChunkReset: () => { receivedReplyChunks=false; trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
       }); } catch (error) {
         if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;
-        console.warn('[web] call turn failed after its reply was published; keeping the reply:', error instanceof Error ? error.message : 'error');
+        console.log('[turn-failed] '+JSON.stringify({id:trace.id,callId:options.callTrace?.id??null,turn:options.callTrace?.turn??null,kept:true,reason:(error instanceof Error?error.name+': '+error.message:String(error)).slice(0,300)}));   // 3760: the reply was kept
         answer = { content: published as unknown as string, ignored: false, irritation: undefined, ego: undefined, choices: [], attachments: [] };
       }
       if (flushError) throw flushError;
