@@ -248,7 +248,7 @@ export function changedKeys(patches:Record<string,any>|undefined,before:Record<s
  return Object.keys(patches).map(name=>{
   if(name!=='config'||!patches.config||typeof patches.config!=='object')return name;
   const was=before.config??{};const now=patches.config;
-  const differ=(a:any,b:any)=>[...new Set([...Object.keys(a??{}),...Object.keys(b??{})])].filter(k=>JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));
+  const differ=(a:any,b:any)=>[...new Set([...Object.keys(a??{}),...Object.keys(b??{})])].filter(k=>a?.[k]!==b?.[k]&&JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));   // same object: unchanged, no serialising
   const keys=differ(was,now).flatMap(k=>k==='her'&&was.her&&now.her?differ(was.her,now.her).map(h=>'her.'+h):[k]);
   return 'config:'+keys.slice(0,12).join(' ');
  }).join(' ');
