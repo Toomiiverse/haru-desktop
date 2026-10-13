@@ -143,7 +143,8 @@ export class CoreStore {
   *  was cloned three times a turn to learn its day names and sizes). Only fresh arrays leave the store. */
  sizesOf(name:string):{key:string;length:any}[]{
   this.refreshPending(name);const doc=this.view(name)[name];
-  return doc&&typeof doc==='object'?Object.entries(doc).map(([key,value])=>({key,length:(value as any).length})):[];
+  // A non-number .length (never written today) is cloned, so no internal object can leave; an absent document reads as [].
+  return doc&&typeof doc==='object'?Object.entries(doc).map(([key,value])=>{const n=(value as any).length;return {key,length:typeof n==='number'?n:structuredClone(n)};}):[];
  }
  set(name:string,value:any):void{
   this.refreshPending();

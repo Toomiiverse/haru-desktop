@@ -75,6 +75,8 @@ test('sizesOf reads keys and lengths without cloning, from whatever view get() w
   assert.deepEqual(s.sizesOf('archive'), [{ key: '2026-10-13', length: 1 }]);   // the pending write, as get() would serve it
   t.release(); await s.asyncTail;
   assert.deepEqual(s.sizesOf('archive'), shape('archive'));
-  assert.deepEqual(s.sizesOf('absent'), []);
+  assert.deepEqual(s.sizesOf('absent'), []);   // the old Object.entries(getArchive()) threw on an absent archive; an empty list is the benign reading
   const out = s.sizesOf('archive'); out[0].length = 99; assert.equal(s.get('archive')['2026-10-13'].length, 1);   // nothing internal leaves
+  const odd = make({ archive: { d: { length: { n: 1 } } } }).s; const r = odd.sizesOf('archive'); r[0].length.n = 2;
+  assert.deepEqual(odd.get('archive'), { d: { length: { n: 1 } } });   // a non-number length is a clone
 });
