@@ -19,3 +19,9 @@ test('main.ts starts the memory read on every turn and writes the life tick in o
   const i = src.indexOf('function persistVitals(force = false) {'); const body = src.slice(i, src.indexOf('\n}', i));
   assert.ok(body.includes('store.transaction(() => {') && body.split('store.set(').length - 1 === 3);
 });
+
+test('asides send the config by digest', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(require.resolve('../../electron/core-asides.ts'), 'utf8');
+  assert.ok(src.includes("const config=core.docRef('config',{});") && !src.includes("core.get('config'"));
+});
