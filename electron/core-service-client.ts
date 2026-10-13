@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import type { ReadOnlyInput } from './core-read-only';
 
-export type CoreServiceOptions = { endpoint: string; tokenFile: string; timeoutMs?: number };
+export type CoreServiceOptions = { endpoint: string; tokenFile: string; timeoutMs?: number; socket?: string };
 export class CoreServiceError extends Error {
   constructor(readonly code: string, readonly requestId: string) { super(code); }
 }
 export function coreServiceOptions(env: NodeJS.ProcessEnv = process.env): CoreServiceOptions | undefined {
   if (!env.HARU_CORE_SERVICE_ENDPOINT) return;
   if (!env.HARU_CORE_SERVICE_TOKEN_FILE) throw Error('core_service_token_required');
-  return { endpoint: env.HARU_CORE_SERVICE_ENDPOINT, tokenFile: env.HARU_CORE_SERVICE_TOKEN_FILE };
+  return { endpoint: env.HARU_CORE_SERVICE_ENDPOINT, tokenFile: env.HARU_CORE_SERVICE_TOKEN_FILE,
+    ...(env.HARU_CORE_POLICY_SOCKET ? { socket: env.HARU_CORE_POLICY_SOCKET } : {}) };   // 3720: policy calls only; everything else stays HTTP
 }
 
 /** Internal loopback transport. No retry, local-worker fallback, or service shutdown. */
