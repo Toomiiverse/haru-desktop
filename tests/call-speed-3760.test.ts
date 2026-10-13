@@ -175,6 +175,8 @@ test('main.ts keeps a published call reply only under the narrow condition, with
   const src = readFileSync(require.resolve('../../electron/main.ts'), 'utf8');
   assert.ok(src.includes('if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;'));
   assert.ok(src.includes("console.log('[turn-failed] '+JSON.stringify({id:trace.id,callId:options.callTrace?.id??null,turn:options.callTrace?.turn??null,kept:true,"));
-  const rethrow = src.indexOf('if (flushError) throw flushError;'), finalFlush = src.indexOf('voice.flush();', rethrow);
-  assert.ok(rethrow > 0 && finalFlush > rethrow);
+  // within sayStream, from the early flush to the reply mark: the rethrow comes before the final flush
+  const from = src.indexOf('onPublished: content => { published = content; try { voice.flush(); }');
+  const seg = src.slice(from, src.indexOf("trace.mark('reply')", from));
+  assert.ok(from > 0 && seg.indexOf('if (flushError) throw flushError;') > 0 && seg.indexOf('if (flushError) throw flushError;') < seg.lastIndexOf('voice.flush();'));
 });
