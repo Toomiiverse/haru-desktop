@@ -233,6 +233,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let herEndMs = -1;              // 3750: sample time the phone last said her playback ended
   let holdStarted: {reason:'still_talking'|'unfinished';at:number;ending:string}|null = null;   // 3760: for the [call-hold] line
   let frameMs = 0;                // 3760: the last microphone frame's length
+  // 3770 (user choice): words she was still thinking about, with nothing of her reply queued yet, when he carried on are merged
+  // into what he says next instead of dropped (the dropped turn never reached the conversation).
+  let turnText = '', turnQueued = false, turnWasInterrupted = false;
+  let unvoiced: { text: string; at: number; interrupted: boolean } | null = null;
+  const UNVOICED_MERGE_MS = 15000;
+  const dropUnvoiced = () => { if (thinking && !turnQueued && turnText) unvoiced = { text: turnText, at: now(), interrupted: turnWasInterrupted }; };
   const herLines: string[] = [];  // the last few lines sent to the phone
 
   const emit = (event: CallEvent) => { if (!closed) handlers.onEvent({...event,callId}); };
@@ -456,6 +462,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     } else if (action==='preempt') {
       // Nothing of hers has gone out yet: the reply on its way is not spoken,
       // and what they are saying now is the turn that counts.
+      dropUnvoiced();   // 3770: its words join his next turn
       generation++;
       activeAnswer?.abort();
       queue = [];
@@ -564,8 +571,16 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       localReply = callMicCheckReply(text) ?? undefined;
       if (localReply) log('[call-response] '+JSON.stringify({callId,turn:turns+1,route:'local_mic_check',model:null,at:Date.now()}));
     }
+    if (thinking) dropUnvoiced();
+    const merged = !localReply && unvoiced && now() - unvoiced.at <= UNVOICED_MERGE_MS ? unvoiced : null;
+    unvoiced = null;
+    if (merged) {
+      if (merged.interrupted) interrupted = true;   // the dropped turn's context goes with its words
+      log('[call-merge] '+JSON.stringify({callId,turn:turns+1,afterMs:Math.round(now()-merged.at)}));
+    }
     stopReaction();react('thinking');
     activeAnswer?.abort();
+    // The phone already shows the first part as its own bubble: it gets the new words; she answers the whole.
     emit({ type: 'user_message', text, interim: false, turn:turns+1,speechEndSample:timing.speechEndSample });
     if (thinking) {
       // Two things said before she could answer the first: the second is the
@@ -574,7 +589,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       queue = [];
       activeSpeech?.abort();
     }
-    void turn(text, timing, localReply);
+    void turn(merged ? `${merged.text} ${text}` : text, timing, localReply);
   }
 
   async function turn(text: string, heardTiming: HeardTiming, localReply?:string) {
@@ -583,6 +598,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const mine = ++turns;
     const wasInterrupted = interrupted;
     interrupted = false;
+    turnText = text; turnQueued = false; turnWasInterrupted = wasInterrupted;
     thinking = true;
     spokeThisTurn = false;
     fillerThisTurn = false;
@@ -672,6 +688,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     function say(line: Line) {
       if(!line.filler){stopReaction();react('replyStart');}
+      if (!line.filler && turns === mine) turnQueued = true;
       if (!line.filler && firstQueuedAt === null) {
         firstQueuedAt = now();
         take.timing.queuedAt = firstQueuedAt;

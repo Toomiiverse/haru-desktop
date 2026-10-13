@@ -5476,6 +5476,26 @@ const finishLocalReply: typeof finishLocalReplyUntimed = (...args) => timeTurnRe
 const naturalPreferences = new ConversationPreferenceCache();
 
 configureAffect(() => remainingStore(app.getPath('userData')));
+/** 3770: a call turn's memory read, started at turn entry with the same inputs the retrieval step will use (its time, request and
+ *  the texts to embed; the recall text is asked for whenever the embedder can make it, and dropped later if recall is not used). */
+function startCallMemory(latest: string, recentUserContext: string) {
+  const config = readCoreMemoryConfig();
+  const sourceRevision = store.memorySourceRevision();
+  const model = getKnowledgeEmbedder();
+  if (config.transport !== 'service' || config.mode !== 'on' || !sourceRevision || !model
+    || model.cacheKey !== `${config.endpoint.replace(/\/+$/, '')}\u0000${config.embedModel}`) return null;
+  const at = new Date();
+  const request: CoreMemoryRequest = {
+    protocol: 1, query: recentUserContext ? `${recentUserContext} ${latest}` : latest, latest,
+    expectedSourceRevision: sourceRevision, now: at.toISOString(), expectedSlateAt: getSlate()?.at ?? null,
+    ...(config.expectedEpochId ? { expectedEpochId: config.expectedEpochId } : {}),
+  };
+  const texts = [`${recentUserContext} ${latest}`.trim(), recentUserContext.trim() ? latest.trim() : null,
+    embedFormat(model.model) === recallFormat ? embedText(model.model, 'query', latest).trim() : null];
+  const result = prepareCoreMemory(config, request, texts.flatMap((text, index) => text ? [{ id: String(index), text }] : []), model.model)
+    .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+  return { at, config: JSON.stringify(config), request: JSON.stringify(request), model: model.model, texts, result };
+}
 async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>): ReturnType<typeof ollamaChatTurn> {
   markTurn('foreground_queued');
   return inferencePriority.runForeground(() => affectTurn(args[0], args[2] ?? {}, options => ollamaChatTurn(args[0], args[1], options)));
@@ -5510,6 +5530,16 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // quoted back at her, she said the line again word for word (asides.ts spliceRecentAsides).
   const notified = spliceRecentAsides(messages, getAsides(), Date.now());
   if (notified.spliced.length) { messages = notified.messages; console.log(`[ai] his message answers ${notified.spliced.length} line(s) she sent unprompted — they are in the conversation for this turn`); }
+  // What they said just before this, so a memory search on "how did we fix
+  // it?" has something to go on besides a pronoun. Their words only — folding
+  // her replies in too would just as often paper over a message with no
+  // keywords of its own with ones that were never theirs. (3770: computed here; `messages` is not reassigned after this point.)
+  const recentUserContext = messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-3).join(' ');
+  // 3770: on a call, the memory read (embeddings + Core memory) starts now instead of ~0.5 s later, after the policy steps below;
+  // it is used only if the request built at the retrieval step is the same one, else that step reads afresh as before. Not
+  // aborted with the turn: cancelling stops the Core's memory worker and the next turn would pay its cold start.
+  const earlyMemory = voiceCall ? startCallMemory(latest, recentUserContext) : null;
+  if (earlyMemory) await new Promise<void>(resolve => setImmediate(resolve));   // let the request leave before the blocking policy calls
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
   tickOffSpoken(latest);
@@ -5681,11 +5711,6 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // of her repeating herself, and feeding the whole exchange back would be the
   // thing asides.ts found makes replies worse.
   const herRecentReplies = messages.filter(message => message.role === 'assistant').map(message => message.content).filter(Boolean);
-  // What they said just before this, so a memory search on "how did we fix
-  // it?" has something to go on besides a pronoun. Their words only — folding
-  // her replies in too would just as often paper over a message with no
-  // keywords of its own with ones that were never theirs.
-  const recentUserContext = messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-3).join(' ');
   // Decide before system inspection, retrieval or full prompt construction.
   // Interaction-state writes above remain authoritative on both paths.
   let compactConversation: OllamaMessage[] | null = null;
@@ -5845,7 +5870,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   markTurn('retrieval_start');
   const retrievalStartedAt = Date.now();
   const coreMemoryConfig = readCoreMemoryConfig();
-  const coreReadAt = new Date();
+  const coreReadAt = earlyMemory?.at ?? new Date();
   const sourceRevision = store.memorySourceRevision();
   const memoryRequest: CoreMemoryRequest = {
     protocol: 1, query: recentUserContext ? `${recentUserContext} ${latest}` : latest, latest,
@@ -5856,15 +5881,20 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     recentUserContext.trim() ? latest.trim() : null,
     recallModel && embedFormat(recallModel) === recallFormat ? embedText(recallModel, 'query', latest).trim() : null];
   const embeddingModel = getKnowledgeEmbedder();
-  const combinedMemory = !sourceOnlyLookup && coreMemoryConfig.transport === 'service' && coreMemoryConfig.mode === 'on' && sourceRevision
-    && embeddingModel?.cacheKey === `${coreMemoryConfig.endpoint.replace(/\/+$/, '')}\u0000${coreMemoryConfig.embedModel}`
-    ? prepareCoreMemory(coreMemoryConfig, memoryRequest, auxiliaryTexts.flatMap((text, index) => text ? [{ id: String(index), text }] : []), embeddingModel.model)
-      .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error })) : null;
+  const combinedEligible = !sourceOnlyLookup && coreMemoryConfig.transport === 'service' && coreMemoryConfig.mode === 'on' && sourceRevision
+    && embeddingModel?.cacheKey === `${coreMemoryConfig.endpoint.replace(/\/+$/, '')}\u0000${coreMemoryConfig.embedModel}`;
+  // 3770: the call's early read stands in only for exactly this request (same config, request, model and every text asked for).
+  const earlyMatches = combinedEligible && earlyMemory && embeddingModel && earlyMemory.config === JSON.stringify(coreMemoryConfig) && earlyMemory.request === JSON.stringify(memoryRequest)
+    && earlyMemory.model === embeddingModel.model && auxiliaryTexts.every((text, index) => !text || earlyMemory.texts[index] === text);
+  if (earlyMemory) markTurn('memory_early', { status: earlyMatches ? 'ok' : 'error' });
+  const combinedMemory = !combinedEligible || !embeddingModel ? null : earlyMatches ? earlyMemory!.result
+    : prepareCoreMemory(coreMemoryConfig, memoryRequest, auxiliaryTexts.flatMap((text, index) => text ? [{ id: String(index), text }] : []), embeddingModel.model)
+      .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
   const readMemoryForTurn = sourceOnlyLookup ? undefined : prefetchCoreMemory(coreMemoryConfig, memoryRequest, combinedMemory ? async () => {
     const result = await combinedMemory; if (!result.ok) throw result.error; return result.value.memory;
   } : undefined);
   const [queryVector, latestVector, recallVector] = combinedMemory ? await combinedMemory.then(result =>
-    auxiliaryTexts.map((_, index) => result.ok ? result.value.vectors[String(index)] ?? null : null)) : await Promise.all([
+    auxiliaryTexts.map((text, index) => text && result.ok ? result.value.vectors[String(index)] ?? null : null)) : await Promise.all([
     (naturalKind || sourceOnlyLookup) ? Promise.resolve(null) : tryEmbedQuery(`${recentUserContext} ${latest}`),
     !naturalKind && !sourceOnlyLookup && recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
     !sourceOnlyLookup && recallModel && embedFormat(recallModel) === recallFormat ? tryEmbedQuery(embedText(recallModel, 'query', latest)) : Promise.resolve(null),

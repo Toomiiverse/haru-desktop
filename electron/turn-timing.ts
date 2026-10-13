@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 export type TurnStage = 'received' | 'admitted' | 'admission_failed' | 'runner_start' | 'runner_end'
   | 'foreground_queued' | 'harness_start' | 'preparation_checkpoint'
   | 'policy_span' | 'storage_span' | 'routing_candidates'
-  | 'retrieval_start' | 'retrieval_end' | 'retrieval_skipped'
+  | 'retrieval_start' | 'retrieval_end' | 'retrieval_skipped' | 'memory_early'
   | 'dispatch' | 'first_provider_text' | 'provider_complete' | 'settled' | 'provider_failed'
   | 'review_start' | 'review_end' | 'published' | 'harness_end'
   | 'completion_start' | 'completion_saved' | 'completion_failed'
