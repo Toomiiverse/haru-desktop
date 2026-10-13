@@ -59,3 +59,32 @@ for (const kind of ['acted', 'tool'] as const) {
     h.c.close('test');
   });
 }
+
+test('main.ts: every durable write of a call turn is behind an abort check and signals that the turn acted', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(require.resolve('../../electron/main.ts'), 'utf8');
+  const between = (a: string, b: string) => { const i = src.indexOf(a); const j = src.indexOf(b, i); assert.ok(i > 0 && j > i, `${a} .. ${b}`); return src.slice(i, j); };
+  // turn entry: check, then the ticks, then acted if any agenda write committed
+  const entry = between('signal?.throwIfAborted();\n  const agendaWritesAtEntry = agendaWrites;', 'if (agendaWrites !== agendaWritesAtEntry) onActed?.();');
+  for (const step of ['tickOffSpoken(latest)', 'startedSpoken(latest)', 'putOffSpoken(latest)', 'noteTheyAccounted(latest)']) assert.ok(entry.includes(step), step);
+  assert.ok(!/await /.test(entry), 'nothing awaited between the check and the writes');
+  const direct = between("signal?.throwIfAborted();   // 3770: see the turn-entry note\n    const packet=corePolicySync<any>('agenda-life.directReminder'", 'if(packet.plan)onActed?.();');
+  assert.ok(!/await /.test(direct));
+  const fin = between("signal?.throwIfAborted();   // 3770: see the turn-entry note\n    const packet=corePolicySync<any>('agenda-life.final'", 'if(packet.plan)onActed?.();');
+  assert.ok(!/await /.test(fin));
+  assert.ok(src.includes("signal?.throwIfAborted();   // 3770: a dropped turn runs no tool (it would run again in the merged turn)\n      onToolCall?.(tool);"));
+  assert.ok(/function ownedAgendaChanged\(packet:any\)\{\n  if\(packet\.plan\)agendaWrites\+\+;/.test(src));
+  assert.equal(src.split('options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing').length - 1, 3);
+});
+
+test('a mic check or mode command while she thinks keeps the dropped words for his next turn', async () => {
+  const h = call(true, false);
+  table['speech-boundary.callMicCheckReply'] = null;
+  h.feed(0.002, 1000); h.feed(0.3, 1000); h.feed(0.002, 700); await settle();
+  table['speech-boundary.callMicCheckReply'] = 'Your words came through.';
+  h.feed(0.3, 1000); h.feed(0.002, 700); await settle();
+  table['speech-boundary.callMicCheckReply'] = null;
+  h.feed(0.3, 1000); h.feed(0.002, 700); await settle();
+  assert.equal(h.asked.at(-1)?.startsWith('I went to the shops yesterday '), true, `the dropped words joined his next turn (${h.asked.at(-1)})`);
+  h.c.close('test');
+});

@@ -163,8 +163,9 @@ export function withoutWavHeader(body: ReadableStream<Uint8Array>): ReadableStre
 
 /** 3760: how a held transcript ended, as a class only: terminal punctuation, a soft mark (, ; : - …), or nothing. */
 export function endingOf(text: string): string {
-  const end = text.trimEnd().slice(-1);
-  return /[.!?]/.test(end) ? 'punctuation' : /[,;:\-…—]/.test(end) ? 'mark' : 'none';
+  // the same classes as the hold rule (speech_boundary.looksUnfinished): a soft mark first, so '...' is a mark
+  const end = text.trimEnd().replace(/["'”’)]+$/, '');
+  return /(?:\.\.\.|[-–—…,:;])$/.test(end) ? 'mark' : /[.!?]$/.test(end) ? 'punctuation' : 'none';
 }
 
 /** One buffer as a stream, for a voice that only renders whole. */

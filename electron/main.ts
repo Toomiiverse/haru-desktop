@@ -1142,7 +1142,9 @@ async function ownedComposeOpening():Promise<string|null>{
 }
 
 function ownedAgendaCore(){return remainingStore(app.getPath('userData'));}
+let agendaWrites=0;   // 3770: committed agenda writes, so a call turn can tell that it acted
 function ownedAgendaChanged(packet:any){
+  if(packet.plan)agendaWrites++;
   if(packet.plan){sendToWindows('kept:changed',corePolicySync<any>('agenda-life.get',[packet.plan.config.kept?.items??[]]));broadcastGoogleStatus();}
   if(packet.memoryChanged){memoryStore.scheduleVectorRefresh();memoryStore.scheduleSort();sendToWindows('memory:changed',packet.plan.memory.memories);}
 }
@@ -5540,6 +5542,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // aborted with the turn: cancelling stops the Core's memory worker and the next turn would pay its cold start.
   const earlyMemory = voiceCall ? startCallMemory(latest, recentUserContext) : null;
   if (earlyMemory) await new Promise<void>(resolve => setImmediate(resolve));   // let the request leave before the blocking policy calls
+  // 3770: every durable write below a check runs synchronously after it, so a turn dropped on a call either stops before
+  // writing or has signalled that it acted (it is then never merged into his next words and asked again).
+  signal?.throwIfAborted();
+  const agendaWritesAtEntry = agendaWrites;
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
   tickOffSpoken(latest);
@@ -5549,6 +5555,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // Separate from ticking off, and it has to be: an event is never ticked off,
   // and the answer to "how did it go" rarely looks like a completion.
   noteTheyAccounted(latest);
+  if (agendaWrites !== agendaWritesAtEntry) onActed?.();
   // They have spoken, which is what every escalation was trying to achieve.
   // Asked for somewhere real — a steakhouse, a barber, a place to eat — the
   // search runs before she answers and the results ride in beside the message,
@@ -5667,6 +5674,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   const theirRecent = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
   let reminder: ReturnType<typeof reminderAsk> = null;
   {
+    signal?.throwIfAborted();   // 3770: see the turn-entry note
     const packet=corePolicySync<any>('agenda-life.directReminder',[agendaFacts(ownedAgendaCore()),{lastIsUser:messages.at(-1)?.role==='user',latest,previous:typeof herPrevious==='string'?herPrevious:null,recentUsers:theirRecent,clock:agendaClock(zonedNow(CHAT_TIMEZONE))},new Date().toISOString(),randomUUID()]);
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
     if(packet.plan)onActed?.();   // 3770: a reminder written from his words: this turn acted (a call does not merge it into the next)
@@ -6359,6 +6367,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     runTool: async call => {
       // A call in progress says something while this runs (localcall.ts).
       const tool = (call as { function?: { name?: string } }).function?.name ?? 'tool';
+      signal?.throwIfAborted();   // 3770: a dropped turn runs no tool (it would run again in the merged turn)
       onToolCall?.(tool);
       try {
           const packet=corePolicySync<{line:string;speak:boolean}>('conversation-program.toolNarration',[tool,narratedTools,{call}]);
@@ -6469,8 +6478,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // Not when she already wrote it down herself this turn: the tool ran and
   // she said "reminder set", and the net caught the sentence a second time.
   {
+    signal?.throwIfAborted();   // 3770: see the turn-entry note
     const packet=corePolicySync<any>('agenda-life.final',[agendaFacts(ownedAgendaCore()),getAsides(),{lastIsUser:messages.at(-1)?.role==='user',hasReminder:Boolean(reminder),ran:[...ran],latest,reply:cleaned,previous:typeof herPrevious==='string'?herPrevious:'',recentUsers:messages.filter(m=>m.role==='user').slice(-4).map(m=>String(m.content??'')),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),now:Date.now()},new Date().toISOString(),randomUUID()]);
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+    if(packet.plan)onActed?.();
     if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
   }
   // The eye-roll in thirty-five of forty replies: the wording that caused it is
@@ -9376,6 +9387,7 @@ function webDeps(): WebDeps {
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
       const files = readAttachments(attachments).slice(0, 6);
       const affect = await admitAffect([...history, { role: 'user', content: text }], { eventId: options?.requestId ?? (options?.callTrace?.id ? ('call-' + options.callTrace.id + '-' + options.callTrace.turn) : undefined), call: options?.call, signal: options?.signal });
+      options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
       if (affect?.reply) {
         const reply = stripDelivery(affect.reply);
         rememberDelivery(affect.reply, reply);
@@ -9397,6 +9409,7 @@ function webDeps(): WebDeps {
       const door = saidSettingDesk ? null : herAsleepNow() ? knockWhileAsleep() : null;
       if (door) {
         await affectOutcome(affect, 'completed');
+        options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
         const trace = newTrace();
         const raw = affectDelivery(affect, door);
         const line = stripDelivery(raw);
@@ -9415,6 +9428,7 @@ function webDeps(): WebDeps {
       trace.mark('intent');
       if (quick) {
         await affectOutcome(affect, 'completed');
+        options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
         onChunk(quick.reply);
         // Fed whole and flushed: a quick line has no stream behind it to end
         // the last sentence, and unflushed it was never voiced on a call.

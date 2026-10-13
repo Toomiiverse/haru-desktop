@@ -25,6 +25,9 @@ test('a held transcript is classed by how it ended, never quoted', () => {
   assert.equal(endingOf('I went to the shops,'), 'mark');
   assert.equal(endingOf('and then I went to the'), 'none');
   assert.equal(endingOf('wait — '), 'mark');
+  assert.equal(endingOf('I was thinking...'), 'mark');
+  assert.equal(endingOf('and then I said “wait,”'), 'mark');
+  assert.equal(endingOf('He said “stop.”'), 'punctuation');
 });
 
 import { openLocalCall, CALL_RATE, type LocalCallDeps } from '../electron/localcall';
