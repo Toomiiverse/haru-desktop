@@ -85,3 +85,41 @@ test('a failed voice check is logged by its code, and the call end carries the c
   const speakerId = JSON.parse(failed!.slice(15)).callId;
   assert.ok(end && JSON.parse(end.slice(11)).callId === speakerId && JSON.parse(end.slice(11)).reason === 'the phone hung up');
 });
+
+import * as policy from '../electron/core-policy-sync';
+function stubPolicy() {
+  const table: Record<string, unknown> = { 'speech-boundary.unfinished': false, 'speech-boundary.continued': null, 'speech-boundary.echoOfHers': false,
+    'speech-boundary.settleTake': { report: false }, 'speech-boundary.callMicCheckReply': null, 'speech-boundary.callInputCommand': null, 'speech-boundary.unfinishedHold': 0 };
+  (policy as any).corePolicySync = (op: string) => table[op];
+}
+
+test('an utterance that began over her reaches the voice check as busy', async () => {
+  stubPolicy();
+  const calls: { final: unknown; busy: unknown }[] = [];
+  const speaker = { enabled: true, check: async (_w: unknown, final: unknown, busy: unknown) => { calls.push({ final, busy }); return { allow: false, enforcing: true, speaker: 'uncertain', reason: 'too_little_speech', notice: null }; },
+    confirm: async () => ({ current: true }), notice: async () => ({ notice: null }), frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
+  const h = call({ speaker });
+  h.feed(0.002, 1000);
+  h.c.herSpeaking(true); h.feed(0.3, 400); h.c.herSpeaking(false); h.feed(0.3, 300); h.feed(0.002, 900);
+  await settle();
+  const final = calls.find(c => c.final === true);
+  assert.ok(final, 'a final voice check ran');
+  assert.equal(final!.busy, true);
+  h.c.close('test');
+});
+
+test('filter on: a refused sound while she is still on his turn does not end her wait', async () => {
+  stubPolicy();
+  let n = 0;
+  const speaker = { enabled: true, check: async () => (++n === 1 ? { allow: true, enforcing: true, speaker: 'owner', reason: 'voice_match', notice: null } : { allow: false, enforcing: true, speaker: 'other', reason: 'different_voice', notice: null }),
+    confirm: async () => ({ current: true }), notice: async () => ({ notice: null }), frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
+  const h = call({ speaker, hear: async () => 'What time is it there?', prepareHear: undefined, answer: () => new Promise(() => {}) } as any);
+  h.feed(0.002, 1000); h.feed(0.3, 1200); h.feed(0.002, 900);   // his question: accepted and committed; her answer never comes back
+  await settle(60);
+  h.feed(0.3, 800); h.feed(0.002, 900);                           // the TV, refused
+  await settle(60);
+  const after = h.plans.slice(h.plans.findIndex(p => p.event === 'speechEnd'));
+  assert.ok(after.length, 'his turn reached the policy');
+  assert.ok(!after.some(p => p.event === 'hearingRejected'), 'the refusal did not reach the policy as hearingRejected while she was thinking');
+  h.c.close('test');
+});

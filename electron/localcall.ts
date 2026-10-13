@@ -23,7 +23,7 @@ import { addressedText, callInputCommand, callMicCheckReply, type CallInputMode 
 // can feed a call without a clock; the phone's clock only decides how long a
 // call ran.
 
-import { makeVad, pcm16Level, type VadOptions } from './vad';
+import { makeVad, pcm16Level, DEFAULT_VAD, type VadOptions } from './vad';
 import { pcmToWav } from './voice';
 import { looksUnfinished } from './call';
 import { completeNaturalUtterance } from './natural-conversation';
@@ -236,6 +236,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   const hers = () => (!reactionAudible && phoneHearsHer) || (!activeReaction && sending) || now() < herEchoUntil;
   function react(event:string) {
     if(!deps.engagement || engagementFailed || closed || !engagementStarted && event!=='ready')return;
+    // 3750: filter on, a refused sound while her brain is on his turn must not end her wait (the waiting filler was lost). Filter off
+    // keeps the old event: there the refused sound is usually her filler's own echo, and re-arming it would loop.
+    if(event==='hearingRejected'&&deps.speaker?.enabled&&thinking&&!spokeThisTurn)event='thinking';
     if(reactionTimer){clearTimeout(reactionTimer);reactionTimer=null;}
     try {
       const plan=deps.engagement.plan(engagementState,event,{nowMs:now(),closed,
@@ -330,7 +333,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     if (!event) return;
     if (event.type === 'start') {
-      overHerAt = t; probing = false; startMs = t;   // 3750: a probe only ever covers this utterance (it could reach a stale anchor)
+      overHerAt = t; probing = false; startMs = event.t + (deps.vad?.prerollMs ?? DEFAULT_VAD.prerollMs);   // 3750: a probe only covers this utterance; startMs is the voice onset
       startedOverHer = phoneHearsHer || sending;
       if (hers()) { overHer = 'suspect';if(!deps.speaker?.enabled)react('speechStart'); }       else {
         const echo=phoneHearsHer&&reactionAudible || now()<reactionEchoUntil;
@@ -361,10 +364,11 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const strict=path==='probe'&&!deps.speaker?.enabled;
     const echo=!!corePolicySync<boolean>('speech-boundary.echoOfHers',[text,herLines,strict]);
     log('[call-echo] '+JSON.stringify({callId,path,verdict:echo?(strict?'undecided':'echo'):'his',words:text.split(/\s+/).filter(Boolean).length,
-      ...(timing?.startMs!==undefined&&herEndMs>=0?{afterHerEndMs:Math.round(timing.startMs-herEndMs)}:{})}));
+      ...(timing?.startedOverHer?{startedOverHer:true}:timing?.startMs!==undefined&&herEndMs>=0?{afterHerEndMs:Math.round(timing.startMs-herEndMs)}:{})}));
     return echo;
   }
   function speakerFailed(final:boolean, error:unknown) {
+    if(closed)return;   // a hang-up aborts the pending check: not a failure
     const m=error instanceof Error?error.message:'';
     log('[call-speaker] '+JSON.stringify({callId,final,error:/^[a-z_]{1,48}$/.test(m)?m:'other'}));
   }
@@ -471,7 +475,8 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         speakerLine(verdict,true,busy,suspect);
         if(stale())return;
         emit({type:'speaker_identity',speaker:verdict.speaker,reason:verdict.reason});
-        if(!verdict.allow){speakerNotice(verdict.notice);react('hearingRejected');return;}
+        // 3750: began over her and refused with no notice: Core held it as 'busy'; ask again once he has spoken on past her end
+        if(!verdict.allow){speakerNotice(verdict.notice);if(!verdict.notice&&timing.startedOverHer&&timing.speechEndSample*1000/CALL_RATE-herEndMs>=HER_ECHO_MS)pollSpeakerNotice();react('hearingRejected');return;}
         if(deps.speaker.enabled){react('speechStart');react('speechEnd');}
       }
       const commit = prepared ? await prepared.result : null;
