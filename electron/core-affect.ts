@@ -55,6 +55,7 @@ export async function admitAffect(messages:any[],options:any={}){
   options.signal?.throwIfAborted();
   const latest=messages.at(-1)??{};
   const eventId=String(options.eventId??latest.id??randomUUID());
+  storage?.()?.fence?.();   // 3600: the Core reads config from storage for its plan; let this side's write-behind land first
   const packet=await transport({op:'admit',eventId,text:String(latest.content??''),
     history:messages.slice(0,-1).slice(-8).map(m=>({role:m.role,content:String(m.content??'').slice(-2000)})),
     call:options.call===true,cloudAllowed:options.cloudAllowed!==false},options.signal);

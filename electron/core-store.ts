@@ -221,6 +221,9 @@ export class CoreStore {
   })();
   this.asyncTail=operation.catch(()=>{});return value!;
  }
+ /** 3600: wait for a write-behind commit to land. The Core reads documents from the store itself for an affect plan; a plan read
+  *  while this side's commit was still in flight names the old config and the commit is refused as stale (3 turns failed 2026-10-12/13). */
+ fence(){this.refreshPending();}
  sourceRevision():string{this.refreshPending('config');this.refreshPending('memories');this.refreshPending('graph');const d=this.staged??(this.pendingAsync&&this.pendingPatches?{...this.state.documents,...this.pendingPatches}:this.state.documents);return memorySourceRevision(d.config,d.memories,d.graph);}
  health(){return this.call('health',{});}
  backup(reason:string):string{return this.call('backup',{reason});}
