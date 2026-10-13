@@ -75,7 +75,7 @@ function conversationRun(kind:string,args:any,onChunk?: (text:string)=>void,sign
   });
 }
 
-function conversationRevoiceFacts(){return {...conversationPolicyFacts(),busy:revoicing,retryAt:revoiceRetryAt,archive:store.getArchive(),today:localDateKey(zonedNow(CHAT_TIMEZONE)),profile:getProfile(),herName:herNameFrom(getActiveCharacter().identity)};}
+function conversationRevoiceFacts(){return {...conversationPolicyFacts(),busy:revoicing,retryAt:revoiceRetryAt,archive:remainingStore(app.getPath('userData')).docRef('archive',{}),today:localDateKey(zonedNow(CHAT_TIMEZONE)),profile:getProfile(),herName:herNameFrom(getActiveCharacter().identity)};}
 function conversationSecondFacts(){return {...conversationPolicyFacts(),asleep:herAsleepNow(),knocked:herKnockedAwakeNow(),lastUser:lastUserActivityAt,silenced:isSilenced(store.get('pushback') as Pushback|undefined,Date.now()),quiet:inQuietHours(getPush().prefs,zonedNow(CHAT_TIMEZONE))};}
 import {hearingPolicy,applyCoreHearing} from './core-hearing-policy';
 import {coreEveryday,coreProactiveRecall,coreRefreshRecall,recallFrames} from './core-final-recall';
@@ -1129,7 +1129,7 @@ async function ownedReminder(phone:boolean,idleSeconds:number):Promise<any>{
  }catch(error){console.warn('[remind]',error instanceof Error?error.message:'failed');return phone?null:false;}
  finally{chasing=false;}
 }
-function ownedOpeningFacts(){const now=zonedNow(CHAT_TIMEZONE);return {now:Date.now(),clock:agendaClock(now),weekday:new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(now),zone:CHAT_TIMEZONE,chatday:currentChatDayKey(),asleep:herAsleepNow(),goodnight:herHasSaidGoodnight(),up:theyAreUpNow(),brainWorker:(true as boolean),idleSeconds:powerMonitor.getSystemIdleTime(),mood:getMood(),character:getActiveCharacter(),archive:store.getArchive(),asides:getAsides(),hasHistory:getSessions().length>0,random:Math.random(),profile:profileSummary(''),following:summariseFollowing(getFollowing(),Date.now()),unprompted:unpromptedContext(),slateOpening:blankSlateOpening(getSlate(),knownSinceSlate())};}
+function ownedOpeningFacts(){const now=zonedNow(CHAT_TIMEZONE);return {now:Date.now(),clock:agendaClock(now),weekday:new Intl.DateTimeFormat('en-US',{weekday:'long'}).format(now),zone:CHAT_TIMEZONE,chatday:currentChatDayKey(),asleep:herAsleepNow(),goodnight:herHasSaidGoodnight(),up:theyAreUpNow(),brainWorker:(true as boolean),idleSeconds:powerMonitor.getSystemIdleTime(),mood:getMood(),character:getActiveCharacter(),archive:remainingStore(app.getPath('userData')).docRef('archive',{}),asides:getAsides(),hasHistory:getSessions().length>0,random:Math.random(),profile:profileSummary(''),following:summariseFollowing(getFollowing(),Date.now()),unprompted:unpromptedContext(),slateOpening:blankSlateOpening(getSlate(),knownSinceSlate())};}
 async function ownedComposeOpening():Promise<string|null>{
  try{
   const core=ownedAgendaCore(),packet=corePolicySync<any>('agenda-life.openingStart',[agendaFacts(core),ownedOpeningFacts()]);
@@ -3618,7 +3618,7 @@ function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
  * so any of it can be put back (his call, 2026-09-19).
  */
 function growAtFold(month: string) {
-  conversationApply(corePolicySync<any>('conversation-program.growth',['fold',remainingStore(app.getPath('userData')).docRef('config',{}),store.getArchive(),currentChatDayKey(),month]));return;
+  conversationApply(corePolicySync<any>('conversation-program.growth',['fold',remainingStore(app.getPath('userData')).docRef('config',{}),remainingStore(app.getPath('userData')).docRef('archive',{}),currentChatDayKey(),month]));return;
 }
 
 /**
@@ -3631,7 +3631,7 @@ function ordinaryHanging(): number {
 
 /** The months before growth existed, read off the archive once so she has a norm. */
 function backfillMonths() {
-  conversationApply(corePolicySync<any>('conversation-program.growth',['backfill',remainingStore(app.getPath('userData')).docRef('config',{}),store.getArchive(),currentChatDayKey()]));return;
+  conversationApply(corePolicySync<any>('conversation-program.growth',['backfill',remainingStore(app.getPath('userData')).docRef('config',{}),remainingStore(app.getPath('userData')).docRef('archive',{}),currentChatDayKey()]));return;
 }
 
 /**
@@ -6026,7 +6026,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // the raw day and byte-stable, so the cached head shrinks and stretches.
   // markTimeGaps writes the seam between today and any raw turns, so she can
   // tell yesterday from now rather than reading it all as one flat conversation.
-  const earlier = naturalKind ? { turns: [], notes: [] } : earlierDaysContext(getSessions(), getMonthNotes(), store.getArchive(), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
+  // 3690: the archive by digest (707 KB raw on every full turn before; the Core keeps the body until it changes).
+  const earlier = naturalKind ? { turns: [], notes: [] } : earlierDaysContext(getSessions(), getMonthNotes(), remainingStore(app.getPath('userData')).docRef('archive', {}), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
   prepMark('earlierDays');
   const before = earlier.turns
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];

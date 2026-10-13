@@ -1,4 +1,5 @@
 import {corePolicySync} from './core-policy-sync';
+import type {DocRef} from './core-store';
 // Telling old messages from new ones.
 //
 // Every message in the store carried `time: "now"` — the literal string, on all
@@ -146,7 +147,7 @@ export function earlierMonthNotes(monthNotes: MonthNote[], todayKey: string, cou
 export function earlierDaysContext(
   sessions: DayNote[],
   monthNotes: MonthNote[],
-  archive: Record<string, unknown[]>,
+  archive: Record<string, unknown[]> | DocRef,
   todayKey: string,
   opts: { days?: number; months?: number; budget?: number; turnsDays?: number } = {},
 ): { notes: string[]; turns: Dated[] } {

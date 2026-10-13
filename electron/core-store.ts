@@ -34,7 +34,7 @@ export class CoreStore {
  private worker:Worker;private buffer=new SharedArrayBuffer(64*1024*1024);private state!:Snapshot;private broken=false;
  private depth=0;private staged:Record<string,any>|null=null;private touched=new Set<string>();
  private captured:Record<string,any>|undefined;
- private pendingAsync=false;private pendingPatches:Record<string,any>|null=null;private digests=new Map<string,{revision:number;digest:string}>();private asyncTail:Promise<unknown>=Promise.resolve();
+ private pendingAsync=false;private pendingPatches:Record<string,any>|null=null;private digests=new WeakMap<object,string>();private asyncTail:Promise<unknown>=Promise.resolve();
  private finishPendingCommit:(()=>any)|undefined;
  constructor(readonly options:CoreStoreOptions,userData:string){
   if(![options.root,options.db,options.node,userData].every(path.isAbsolute))throw Error('absolute_paths_required');
@@ -122,19 +122,22 @@ export class CoreStore {
   for(const part of parts){if(value==null||!Object.hasOwn(value,part))return fallback;value=value[part];}
   return value===undefined?fallback:structuredClone(value);
  }
- /** 3520: the digest of a committed document is kept per revision (hashing the 361 KB config took 2 ms, twelve times a turn)
-  *  and the body is a getter, cloned only when the bridge actually sends it (another 2 ms each time before). */
- private digestOf(name:string,fallback:any):string{
+ /** 3520: a document's digest is cached, and the body is a getter, cloned only when the bridge actually sends it.
+  *  3690: the digest is kept per document OBJECT, not per store revision: every commit to any document bumped the revision,
+  *  so the 707 KB archive was re-hashed (~4 ms) on nearly every use though it changes once a day. Sound because a document
+  *  object held by the store is never changed in place — set() stores a clone, commits and staging replace objects, reads
+  *  return clones. The body getter clones the very object that was hashed, so a commit landing between docRef() and the
+  *  send can no longer put new content under the old digest (the Core caches a body under the digest it is given). */
+ private digestOf(name:string,fallback:any):{digest:string;doc:any}{
   this.refreshPending(name);
-  const settled=!this.staged&&!(this.pendingAsync&&this.pendingPatches&&Object.hasOwn(this.pendingPatches,name));
-  const held=settled?this.digests.get(name):undefined;
-  if(held&&held.revision===this.state.revision)return held.digest;
-  const digest=docDigest(this.view(name)[name]??fallback);
-  if(settled)this.digests.set(name,{revision:this.state.revision,digest});
-  return digest;
+  const doc=this.view(name)[name];
+  if(doc===undefined||doc===null||typeof doc!=='object')return {digest:docDigest(doc??fallback),doc};
+  let digest=this.digests.get(doc);
+  if(digest===undefined){digest=docDigest(doc);this.digests.set(doc,digest);}
+  return {digest,doc};
  }
- docRef(name:string,fallback?:any):DocRef{const store=this;const digest=this.digestOf(name,fallback);return {$doc:name,digest,get body(){return store.get(name,fallback);}};}
- sameDoc(name:string,expected:unknown,fallback?:any):boolean{return isDigestRef(expected)?this.digestOf(name,fallback)===expected.$digest:sameDocument(this.get(name,fallback),expected);}
+ docRef(name:string,fallback?:any):DocRef{const {digest,doc}=this.digestOf(name,fallback);return {$doc:name,digest,get body(){return structuredClone(doc??fallback);}};}
+ sameDoc(name:string,expected:unknown,fallback?:any):boolean{return isDigestRef(expected)?this.digestOf(name,fallback).digest===expected.$digest:sameDocument(this.get(name,fallback),expected);}
  has(name:string):boolean{this.refreshPending(name);return Object.hasOwn(this.view(name),name);}
  set(name:string,value:any):void{
   this.refreshPending();
