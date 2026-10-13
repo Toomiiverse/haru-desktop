@@ -1,6 +1,6 @@
 /** Worker-side loopback HTTP or the Core's private policy socket only. Inputs cannot choose an endpoint or execute policy. */
 import {parentPort,workerData} from 'node:worker_threads';
-import {readFileSync,statSync} from 'node:fs';
+import {readFileSync,statSync,realpathSync} from 'node:fs';
 import {Agent,request} from 'node:http';
 import {connect,type Socket} from 'node:net';
 import path from 'node:path';
@@ -8,13 +8,18 @@ const address=new URL(workerData.endpoint);
 if(address.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(address.hostname)||address.username||address.password||address.search||address.hash||address.pathname!=='/')throw Error('core_policy_loopback_required');
 if(statSync(workerData.tokenFile).mode&0o077)throw Error('core_policy_token_not_private');
 const token=readFileSync(workerData.tokenFile,'utf8').trim();if(token.length<32)throw Error('core_policy_token_invalid');
-// 3720: the token goes only to a socket in a directory this user owns and nobody else can enter.
-const place=workerData.socket?statSync(path.dirname(workerData.socket)):undefined;
-if(place&&(!path.isAbsolute(workerData.socket)||place.uid!==process.getuid!()||place.mode&0o077))throw Error('core_policy_socket_not_private');
+// 3720: the token goes only to a socket in a directory this user owns and nobody else can enter, checked (symlinks
+// resolved) before every connect; anything else means HTTP for that call, never the token to an unknown place.
+function privateDir():boolean{
+ try{
+  const dir=path.dirname(workerData.socket);if(!path.isAbsolute(workerData.socket)||realpathSync(dir)!==dir)return false;
+  const place=statSync(dir);return place.isDirectory()&&place.uid===process.getuid!()&&!(place.mode&0o077);
+ }catch{return false;}
+}
 // A single persistent loopback socket avoids fetch's per-request machinery.
 // No retries or redirects: every policy call remains a distinct owned request.
 const agent=new Agent({keepAlive:true,maxSockets:1,maxFreeSockets:1});
-function viaHttp(encoded:string,limit:number):Promise<unknown>{
+function viaHttp(encoded:string,limit:number,within=1200):Promise<unknown>{
  return new Promise((resolve,reject)=>{
   const req=request(address.origin+'/v1/policy/evaluate',{method:'POST',agent,
    headers:{'content-type':'application/json','content-length':Buffer.byteLength(encoded),authorization:'Bearer '+token}},res=>{
@@ -26,7 +31,7 @@ function viaHttp(encoded:string,limit:number):Promise<unknown>{
   });
   // Absolute deadline includes queueing, headers and body. An idle-socket
   // timeout alone would incorrectly let a slow trickle extend the deadline.
-  const deadline=setTimeout(()=>req.destroy(Error('policy_request_timeout')),1200);
+  const deadline=setTimeout(()=>req.destroy(Error('policy_request_timeout')),Math.max(1,within));
   req.on('error',reject);req.on('close',()=>clearTimeout(deadline));req.end(encoded);
  });
 }
@@ -39,6 +44,7 @@ let socket:Socket|undefined,opening:Promise<Socket|undefined>|undefined;
 function frame(text:string){const n=Buffer.byteLength(text),out=Buffer.allocUnsafe(4+n);out.writeUInt32BE(n,0);out.write(text,4,'utf8');return out;}
 function open():Promise<Socket|undefined>{
  if(socket)return Promise.resolve(socket);
+ if(!privateDir())return Promise.resolve(undefined);
  return opening??=new Promise<Socket|undefined>(resolve=>{
   const s=connect(workerData.socket);const timer=setTimeout(()=>{s.destroy();resolve(undefined);},300);
   s.once('connect',()=>{clearTimeout(timer);s.on('error',()=>{});s.on('close',()=>{if(socket===s)socket=undefined;});s.write(frame('Bearer '+token));socket=s;resolve(s);});
@@ -48,7 +54,7 @@ function open():Promise<Socket|undefined>{
 async function evaluate(encoded:string,limit:number):Promise<unknown>{
  if(!workerData.socket)return viaHttp(encoded,limit);
  const started=performance.now();const s=await open();
- if(!s)return viaHttp(encoded,limit);
+ if(!s)return viaHttp(encoded,limit,1200-(performance.now()-started));   // the same absolute deadline
  return new Promise((resolve,reject)=>{
   let chunks:Buffer[]=[],size=0,length=-1,status=0;
   const finish=(error:Error|null,value?:unknown)=>{

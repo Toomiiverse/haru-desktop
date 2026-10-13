@@ -74,10 +74,18 @@ test('a socket that cannot be opened sends the call over HTTP instead', async ()
   finally { await w.terminate(); http.close(); }
 });
 
-test('the worker refuses to send the token to a socket in a directory others can enter', async () => {
-  const f = fixture(); chmodSync(f.dir, 0o755);
-  const w = new Worker(workerFile, { workerData: { endpoint: 'http://127.0.0.1:1/', tokenFile: f.tokenFile, socket: f.socket } });
-  const error = await new Promise<Error>(r => w.once('error', r));
-  assert.match(error.message, /core_policy_socket_not_private/);
-  chmodSync(f.dir, 0o700);
+test('a socket in a directory others can enter, or behind a symlink, gets no token: the call goes over HTTP', async () => {
+  for (const variant of ['open-dir', 'symlink'] as const) {
+    const f = fixture(); let socketFrames = 0, posts = 0;
+    const listener = createNet(s => frames(() => { socketFrames++; })(s));
+    await new Promise<void>(r => listener.listen(f.socket, r));
+    let socketPath = f.socket;
+    if (variant === 'open-dir') chmodSync(f.dir, 0o755);
+    else { const link = path.join(mkdtempSync(path.join(tmpdir(), 'poll-')), 'via'); require('node:fs').symlinkSync(f.dir, link); socketPath = path.join(link, 'policy.sock'); }
+    const http = createHttp((req, res) => { posts++; req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end('{"via":"http"}'); }); });
+    await new Promise<void>(r => http.listen(0, '127.0.0.1', r)); const port = (http.address() as any).port;
+    const w = new Worker(workerFile, { workerData: { endpoint: `http://127.0.0.1:${port}/`, tokenFile: f.tokenFile, socket: socketPath } });
+    try { assert.deepEqual(await call(w, '{"n":1}'), { ok: true, value: { via: 'http' } }); assert.equal(posts, 1); assert.equal(socketFrames, 0, variant); }
+    finally { await w.terminate(); http.close(); listener.close(); chmodSync(f.dir, 0o700); }
+  }
 });
