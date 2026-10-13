@@ -5481,7 +5481,7 @@ async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>): ReturnTyp
   return inferencePriority.runForeground(() => affectTurn(args[0], args[2] ?? {}, options => ollamaChatTurn(args[0], args[1], options)));
 }
 
-async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, traceId, signal }: { signal?:AbortSignal; onPublished?: () => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
+async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, traceId, signal }: { signal?:AbortSignal; onPublished?: (content: string) => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
   signal?.throwIfAborted();
   markTurn('harness_start');
   const enteredAt = Date.now();
@@ -6483,7 +6483,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   signal?.throwIfAborted();
   replyGate.commit(content);
   // 3760: the reply is final: say what is left of it now (a one-sentence reply waited for the turn's end, ~0.2-0.3 s).
-  try{onPublished?.();}catch(error){console.warn('[voice] early flush failed:',error instanceof Error?error.message:'error');}
+  try{onPublished?.(content);}catch(error){console.warn('[voice] early flush failed:',error instanceof Error?error.message:'error');}
   markTurn('published');
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'published', elapsedMs: Date.now() - enteredAt,
     preparationMs: firstDispatchAt ? firstDispatchAt - enteredAt : null, path: naturalKind ? 'natural' : 'full', model: config.model })}`);
@@ -9413,7 +9413,11 @@ function webDeps(): WebDeps {
       // Barge-in is ordinary turn-taking. The interruption flag describes the
       // audio transport, not rejection: only their words may move her mood.
       let receivedReplyChunks=false;
-      const answer = await ollamaChat(messages, config, { affect,
+      // 3760: the final reply is said as soon as it is published. A voice error there fails the turn where it failed before (no
+      // replay of the tail); a call turn that fails after its reply was published and spoken keeps that reply instead of failing.
+      let published: string | null = null, flushError: unknown = null;
+      let answer: Awaited<ReturnType<typeof ollamaChat>>;
+      try { answer = await ollamaChat(messages, config, { affect,
         hands: false,
         web: true,
         away: 'it came in from the phone',
@@ -9421,7 +9425,7 @@ function webDeps(): WebDeps {
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         signal:options?.signal,
         onSending: () => trace.mark('sending'),
-        onPublished: () => voice.flush(),   // 3760: what is left of the final reply is said at once
+        onPublished: content => { published = content; try { voice.flush(); } catch (error) { flushError = error; } },   // 3760: what is left of the final reply is said at once
         traceId: trace.id,
         // 3320: the gate's own reset marker (a hold or an opening taken back) is a reset here too \u2014 the first-word
         // stamp and the voice buffer go with the words nobody kept, and a reply that then arrives whole is still shown.
@@ -9433,7 +9437,12 @@ function webDeps(): WebDeps {
         // on words nobody ever saw. The voice is sunk the same way — nothing of
         // a thrown-away round may be spoken.
         onChunkReset: () => { receivedReplyChunks=false; trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
-      });
+      }); } catch (error) {
+        if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;
+        console.warn('[web] call turn failed after its reply was published; keeping the reply:', error instanceof Error ? error.message : 'error');
+        answer = { content: published as unknown as string, ignored: false, irritation: undefined, ego: undefined, choices: [], attachments: [] };
+      }
+      if (flushError) throw flushError;
       options?.signal?.throwIfAborted();
       const reply = stripDelivery(answer.content ?? '');
       // A confirmed Core answer can arrive whole without provider chunks.

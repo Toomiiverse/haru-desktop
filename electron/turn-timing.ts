@@ -12,7 +12,7 @@ export type TurnStage = 'received' | 'admitted' | 'admission_failed' | 'runner_s
 type Fields = { operation?: string; candidates?: number; step?: string; model?: string; attempt?: number; durationMs?: number; coreMs?: number; bytes?: number; replyBytes?: number;
   status?: 'ok' | 'error' | 'pending'; mode?: 'plain' | 'stream'; fresh?: boolean; connected?: boolean };
 export type TimingEvent = { version: 1; trace: string; pid: number; at: number; monoMs: number; stage: TurnStage; phase: 'turn' | 'review' } & Fields;
-type Context = { mark: (stage: TurnStage, fields?: Fields, phase?: 'turn' | 'review') => void; active: boolean; phase: 'turn' | 'review' };
+type Context = { mark: (stage: TurnStage, fields?: Fields, phase?: 'turn' | 'review') => void; active: boolean; phase: 'turn' | 'review'; turn?: Context };
 const context = new AsyncLocalStorage<Context>();
 const defaultSink = (event: TimingEvent) => console.log(`[turn-timing] ${JSON.stringify(event)}`);
 
@@ -53,20 +53,26 @@ export function timingFor(id: string, sink: (event: TimingEvent) => void = defau
 }
 /** 3760: a sink for call turns: stage marks are written as usual, but the ~400-500 policy/storage spans are only counted (written
  *  in one burst at the turn's end they would land on her first sentence) and summed once, at runner_end. */
-export function spanCountingSink(summary:(counts:{spans:number;coreCalls:number;memoOrLocal:number;coreMs:number;wallMs:number})=>void, write:(event:TimingEvent)=>void=defaultSink) {
-  let spans=0,core=0,coreMs=0,wallMs=0;
+export function spanCountingSink(summary:(counts:{coreCalls:number;memoHits:number;failed:number;storageCalls:number;coreMs:number;policyWallMs:number;capped?:boolean})=>void, write:(event:TimingEvent)=>void=defaultSink) {
+  let core=0,memo=0,failed=0,storage=0,coreMs=0,wallMs=0;
   return (event:TimingEvent) => {
     const e=event as any;
-    if(e.stage==='policy_span'||e.stage==='storage_span'){
-      spans++;if(typeof e.coreMs==='number'){core++;coreMs+=e.coreMs;}if(typeof e.durationMs==='number')wallMs+=e.durationMs;return;
+    if(e.stage==='storage_span'){storage++;return;}
+    if(e.stage==='policy_span'){
+      if(typeof e.durationMs==='number')wallMs+=e.durationMs;
+      if(typeof e.coreMs==='number'){core++;coreMs+=e.coreMs;}else if(e.status==='ok')memo++;else failed++;   // a memo hit: ok, no Core clock
+      return;
     }
     write(event);
     // the held spans are handed over right after runner_end, in the same synchronous flush: count them first
-    if(e.stage==='runner_end')queueMicrotask(()=>summary({spans,coreCalls:core,memoOrLocal:spans-core,coreMs:Math.round(coreMs),wallMs:Math.round(wallMs)}));
+    if(e.stage==='runner_end')queueMicrotask(()=>summary({coreCalls:core,memoHits:memo,failed,storageCalls:storage,coreMs:Math.round(coreMs),policyWallMs:Math.round(wallMs),
+      ...(core+memo+failed+storage>=768?{capped:true}:{})}));   // timingFor keeps at most 768 spans a turn
   };
 }
 /** The active turn, as an identity token for per-turn caches (core-policy-sync); undefined outside a turn. */
-export function currentTurn(): unknown { return context.getStore(); }
+// 3760: only while the turn runs (work it started and that outlives it must not use or wipe the next turn's memo); a review inside
+// the turn shares the turn's token, so it shares its memo.
+export function currentTurn(): unknown { const s = context.getStore(); return s?.active ? (s.turn ?? s) : undefined; }
 export function markTurn(stage: TurnStage, fields?: Fields) {
   const current = context.getStore();
   if (current?.active) current.mark(stage,fields,current.phase);
@@ -85,7 +91,7 @@ export async function timeTurnReview<T>(run: () => Promise<T>): Promise<T> {
   if (!parent?.active) return run();
   // The shared active flag belongs to the runner; detached post-reply work
   // must not add new stages to a completed turn.
-  const child: Context={mark:parent.mark,get active(){return parent.active;},phase:'review'};
+  const child: Context={mark:parent.mark,get active(){return parent.active;},phase:'review',turn:parent.turn??parent};
   return context.run(child,async()=>{
     const started=performance.now();markTurn('review_start');
     try {const result=await run();markTurn('review_end',{status:'ok',durationMs:performance.now()-started});return result;}

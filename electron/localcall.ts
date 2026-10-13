@@ -319,12 +319,17 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       return;
     }
     const event = vad.feed(pcm16Level(frame), t, hers() ? OVER_HER_RATIO : undefined);
-    const preview = !event && !hers() && !transcribing && !deps.speaker?.enabled && deps.prepareHear && deps.prepareAfterMs
+    const preview = !event && !hers() && !transcribing && deps.prepareHear && deps.prepareAfterMs
       ? vad.preview(t, deps.prepareAfterMs) : null;
     if (preview && (!preparation || preparation.settled && (preparation.from !== preview.from || preparation.to !== preview.to))) {
       const item = {from:preview.from,to:preview.to,settled:false,result:Promise.resolve(null) as Promise<PreparedHearing|null>};
       const wav=cut(preview.from,preview.to);
-      item.result = atEars(()=>deps.prepareHear!(wav,listening.signal)).catch(() => null).finally(() => {item.settled=true;});
+      // 3760 (user choice): with the voice filter on, the early transcript too — but only once a non-final voice check says it is
+      // him, so nobody else's speech is transcribed; the final check and confirm in heard() still decide (~0.3 s off a turn).
+      const prepare=()=>atEars(()=>deps.prepareHear!(wav,listening.signal));
+      item.result = (deps.speaker?.enabled
+        ? atEars(()=>deps.speaker!.check(wav,false,false,listening.signal)).then(verdict=>{speakerLine(verdict,false,false,false);return verdict.allow?prepare():null;})
+        : prepare()).catch(() => null).finally(() => {item.settled=true;});
       preparation = item;
     }
     if (pending && holdUntil && !transcribing && !vad.possibleSpeech() && t >= holdUntil && !event) {
@@ -334,7 +339,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       pending = '';
       pendingTiming = null;
       holdUntil = 0;
-      holdLine(false);
+      holdLine('timeout');
       if (timing) commit(text, timing);
     }
     if (overHer === 'suspect' && !probing && !event && vad.speaking() && t - overHerAt >= PROBE_MS) {
@@ -378,9 +383,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     return echo;
   }
   /** 3760: one line per held utterance, never its words: why it was held, for how long, and whether more speech joined it. */
-  function holdLine(merged:boolean) {
+  function holdLine(outcome:'merged'|'timeout'|'dropped') {
     if(!holdStarted)return;
-    log('[call-hold] '+JSON.stringify({callId,reason:holdStarted.reason,heldMs:Math.round(now()-holdStarted.at),merged,ending:holdStarted.ending}));
+    log('[call-hold] '+JSON.stringify({callId,reason:holdStarted.reason,heldMs:Math.round(now()-holdStarted.at),merged:outcome==='merged',outcome,ending:holdStarted.ending}));
     holdStarted=null;
   }
   function speakerFailed(final:boolean, error:unknown) {
@@ -521,14 +526,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     timing.listenMs = timing.heardAt - listenAt;
     if(timing.manual){commit(text,timing);return;}
     if(command) {
-      inputMode=command;pending='';pendingTiming=null;holdUntil=0;react('mode');
+      if(pending)holdLine('dropped');inputMode=command;pending='';pendingTiming=null;holdUntil=0;react('mode');
       log('[call-admission] '+JSON.stringify({callId,reason:'mode_changed',mode:inputMode}));
       commit(text,timing,(corePolicySync<string>('speech-boundary.commandReply',[command])));
       return;
     }
     if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver('commit');
     timing.segments += pendingTiming?.segments ?? 0;
-    if (pending) holdLine(true);
+    if (pending) holdLine('merged');
     text = pending ? `${pending} ${text}` : text;
     pending = '';
     pendingTiming = null;
@@ -786,7 +791,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     manualInput(enabled) {
       if(closed)return;
       inputEpoch++;manual=enabled;held=false;manualEnd=null;
-      preparation=null;pending='';pendingTiming=null;holdUntil=0;overHer='no';vad.reset();ring.length=0;ringSamples=0;
+      if(pending)holdLine('dropped');preparation=null;pending='';pendingTiming=null;holdUntil=0;overHer='no';vad.reset();ring.length=0;ringSamples=0;
       dropHerVoice();finishTurn();
       emit({type:'input_mode',manual});react('mode');
     },
@@ -809,6 +814,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       queue=queue.filter(line=>!line.reaction);
       listening.abort();
       dropHerVoice();
+      if(pending)holdLine('dropped');
       finishTurn();
       const seconds=Math.round((now() - startedAt) / 1000);
       log('[call-end] '+JSON.stringify({callId,seconds,reason:String(reason).slice(0,80)}));
