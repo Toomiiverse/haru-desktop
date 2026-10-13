@@ -9,7 +9,7 @@ export type TurnStage = 'received' | 'admitted' | 'admission_failed' | 'runner_s
   | 'review_start' | 'review_end' | 'published' | 'harness_end'
   | 'completion_start' | 'completion_saved' | 'completion_failed'
   | 'first_text_write' | 'response_finish' | 'response_close';
-type Fields = { operation?: string; candidates?: number; step?: string; model?: string; attempt?: number; durationMs?: number;
+type Fields = { operation?: string; candidates?: number; step?: string; model?: string; attempt?: number; durationMs?: number; coreMs?: number; bytes?: number; replyBytes?: number;
   status?: 'ok' | 'error' | 'pending'; mode?: 'plain' | 'stream'; fresh?: boolean; connected?: boolean };
 export type TimingEvent = { version: 1; trace: string; pid: number; at: number; monoMs: number; stage: TurnStage; phase: 'turn' | 'review' } & Fields;
 type Context = { mark: (stage: TurnStage, fields?: Fields, phase?: 'turn' | 'review') => void; active: boolean; phase: 'turn' | 'review' };
@@ -39,7 +39,8 @@ export function timingFor(id: string, sink: (event: TimingEvent) => void = defau
       if (typeof fields.candidates === 'number' && Number.isSafeInteger(fields.candidates) && fields.candidates >= 0 && fields.candidates <= 128) safe.candidates = fields.candidates;
       if (fields.step && /^[a-zA-Z]{1,40}$/.test(fields.step)) safe.step = fields.step;
       if (fields.model && /^[a-zA-Z0-9_.:/-]{1,160}$/.test(fields.model)) safe.model = fields.model;
-      for (const key of ['attempt','durationMs'] as const) if (typeof fields[key] === 'number' && Number.isFinite(fields[key]) && fields[key]! >= 0) safe[key] = fields[key];
+      // 3650: coreMs (the Core's own clock), bytes / replyBytes (the wire both ways) split a policy span into compute and payload.
+      for (const key of ['attempt','durationMs','coreMs','bytes','replyBytes'] as const) if (typeof fields[key] === 'number' && Number.isFinite(fields[key]) && fields[key]! >= 0) safe[key] = fields[key];
       if (['ok','error','pending'].includes(fields.status ?? '')) safe.status = fields.status;
       if (fields.mode === 'plain' || fields.mode === 'stream') safe.mode = fields.mode;
       if (typeof fields.fresh === 'boolean') safe.fresh = fields.fresh;

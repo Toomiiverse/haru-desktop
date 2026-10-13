@@ -42,7 +42,7 @@ export function coreAdapterOwner(){
  return {pid:process.pid,birth:stat.slice(stat.lastIndexOf(')')+2).split(' ')[19]};
 }
 export function corePolicySync<T>(operation:string,args:unknown[]):T {
- const started=performance.now();let status:'ok'|'error'='error';
+ const started=performance.now();let status:'ok'|'error'='error';let coreMs:number|undefined,bytes=0,replyBytes=0;
  try {
  const options=coreServiceOptions();
  if(!options||(false as boolean))throw Error('core_policy_owner_unavailable');
@@ -61,7 +61,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wired};
  const encoded=JSON.stringify(packet);
  const limit=(/^knowledge-(index|flow|chunks|vault)\./.test(operation))?8388608:LIMIT;
- if(Buffer.byteLength(encoded)>limit)throw Error('core_policy_payload_too_large');
+ bytes+=Buffer.byteLength(encoded);if(Buffer.byteLength(encoded)>limit)throw Error('core_policy_payload_too_large');
  let buffer=buffers.get(limit);
  if(!buffer){buffer=new SharedArrayBuffer(limit+8);buffers.set(limit,buffer);}
  const header=new Int32Array(buffer,0,2);
@@ -69,7 +69,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  transport.postMessage({encoded,buffer});
  const wait=Atomics.wait(header,0,0,1500);
  if(wait==='timed-out'||Atomics.load(header,0)!==1){if(worker===transport){worker=undefined;buffers=new Map();}void transport.terminate();throw Error('core_policy_unconfirmed');}
- const reply=JSON.parse(Buffer.from(buffer,8,Atomics.load(header,1)).toString('utf8'));
+ replyBytes+=Atomics.load(header,1);const reply=JSON.parse(Buffer.from(buffer,8,Atomics.load(header,1)).toString('utf8'));
  if(!reply.ok)throw Error('core_policy_unavailable');
  const value=reply.value;
  if(value.version!==1||value.requestId!==packet.requestId||value.operation!==operation||value.executes!==false
@@ -84,9 +84,10 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  if(key)memo.set(key,JSON.stringify(value.result));
  // 3490: a call the Core finished fast but this side waited long for (~1 turn in 20 shows one of 0.5-1 s) — queueing
  // somewhere between the two; the journal gets both clocks so the cause can be found.
+ if(typeof value.policyMs==='number')coreMs=(coreMs??0)+value.policyMs;
  if(typeof value.policyMs==='number'){const nodeMs=performance.now()-started;if(nodeMs-value.policyMs>200)console.log('[policy-stall] '+JSON.stringify({operation,nodeMs:Math.round(nodeMs),coreMs:Math.round(value.policyMs),bytes:Buffer.byteLength(encoded)}));}
  status='ok';return value.result as T;
  }
  throw Error('core_policy_doc_unknown');
- } finally {markTurn('policy_span',{operation,durationMs:performance.now()-started,status});}
+ } finally {markTurn('policy_span',{operation,durationMs:performance.now()-started,status,...(coreMs===undefined?{}:{coreMs}),...(bytes?{bytes,replyBytes}:{})});}
 }
