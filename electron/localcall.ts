@@ -238,7 +238,8 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       const plan=deps.engagement.plan(engagementState,event,{nowMs:now(),closed,
         available:deps.engagement.available(),inputMode,manualHeld:manual&&held,reactionActivityTracked,
         phoneSpeaking:phoneHearsHer&&!reactionAudible,
-        replyBusy:queue.some(line=>!line.filler)||!!activeSpeech&&!activeReaction,
+        // 3750 (user choice): no reaction sound starts while the microphone hears him; it fed her voice into his turn.
+        replyBusy:queue.some(line=>!line.filler)||!!activeSpeech&&!activeReaction||vad.possibleSpeech(),
         playbackUntilMs:playbackUntil});
       engagementState=plan.state;
       if(plan.inputMode)inputMode=plan.inputMode;
@@ -328,7 +329,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       if (hers()) { overHer = 'suspect'; overHerAt = t; probing = false;if(!deps.speaker?.enabled)react('speechStart'); }       else {
         const echo=phoneHearsHer&&reactionAudible || now()<reactionEchoUntil;
         overHer = echo?'suspect':'no';
-        if(inputMode==='open'&&!echo&&!deps.speaker?.enabled)spokeOver();
+        if(inputMode==='open'&&!echo&&!deps.speaker?.enabled)spokeOver('onset');
         if(!deps.speaker?.enabled)react('speechStart');
       }
       return;
@@ -348,15 +349,21 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   }
 
   /** Words heard over her: hers, coming back through the phone, or his? */
-  function echoOfHers(text: string): boolean {
-  return corePolicySync<any>('speech-boundary.echoOfHers',[text,herLines]);
+  function echoOfHers(text: string, path: 'probe'|'final'): boolean {
+    const echo=corePolicySync<boolean>('speech-boundary.echoOfHers',[text,herLines,path==='probe']);
+    log('[call-echo] '+JSON.stringify({callId,path,echo:!!echo,words:text.split(/\s+/).filter(Boolean).length}));
+    return echo;
+  }
+  function speakerLine(verdict:any, final:boolean, busy:boolean, suspect:boolean) {
+    log('[call-speaker] '+JSON.stringify({callId,final,allow:!!verdict.allow,enforcing:!!verdict.enforcing,speaker:verdict.speaker??null,reason:verdict.reason??null,
+      score:verdict.score??null,maxScore:verdict.maxScore??null,speechSeconds:verdict.speechSeconds??null,busy,suspect}));
   }
 
   /** The first stretch of an utterance over her, heard early so his words stop her soon. */
   async function probe(wav: Uint8Array) {
     let text = '';
     try {
-      if(deps.speaker){const verdict=await atEars(()=>deps.speaker!.check(wav,false,true,listening.signal));if(closed||!verdict.allow)return;}
+      if(deps.speaker){const verdict=await atEars(()=>deps.speaker!.check(wav,false,true,listening.signal));speakerLine(verdict,false,true,true);if(closed||!verdict.allow)return;}
       if (deps.prepareHear) {
         const candidate=await atEars(()=>deps.prepareHear!(wav,listening.signal));
         text=typeof candidate.text==='string' ? candidate.text : inputMode==='open' ? await atEars(()=>deps.hear(wav,listening.signal)) : '';
@@ -364,10 +371,10 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     } catch { return; }
     if(inputMode==='addressed' && !addressedText(text))return;
     if (closed || manual || overHer !== 'suspect') return;
-    if (echoOfHers(text)) { log(`[call] heard herself over her line: "${text.slice(0, 40)}"`); return; }
+    if (echoOfHers(text,'probe')) { log(`[call] heard herself over her line: "${text.slice(0, 40)}"`); return; }
     overHer = 'his';
     log(`[call] words over her: "${text.slice(0, 40)}"`);
-    spokeOver();
+    spokeOver('probe');
   }
 
   /** The frames between two sample-times, as one WAV for her ears. */
@@ -392,14 +399,16 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   }
 
   /** They started talking. Over her, that is an interruption; over her thinking, the reply will not be voiced. */
-  function spokeOver() {
-    if (phoneHearsHer || sending || activeSpeech || queue.length || (thinking && spokeThisTurn)) {
+  function spokeOver(source:'onset'|'probe'|'final'|'commit') {
+    const action=phoneHearsHer || sending || activeSpeech || queue.length || (thinking && spokeThisTurn) ? 'interrupt' : thinking ? 'preempt' : null;
+    if(action)log('[call-overlap] '+JSON.stringify({callId,source,action}));
+    if (action==='interrupt') {
       interrupted = true;
       dropHerVoice();
       emit({ type: 'user_interruption' });
       finishTurn();
       log('[call] talked over her');
-    } else if (thinking) {
+    } else if (action==='preempt') {
       // Nothing of hers has gone out yet: the reply on its way is not spoken,
       // and what they are saying now is the turn that counts.
       generation++;
@@ -440,7 +449,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     transcribing++;
     try {
       if(deps.speaker){
-        const verdict=await atEars(()=>deps.speaker!.check(wav,true,phoneHearsHer||sending||thinking||queue.length>0,listening.signal));
+        const busy=phoneHearsHer||sending||thinking||queue.length>0;
+        const verdict=await atEars(()=>deps.speaker!.check(wav,true,busy,listening.signal));
+        speakerLine(verdict,true,busy,suspect);
         if(stale())return;
         emit({type:'speaker_identity',speaker:verdict.speaker,reason:verdict.reason});
         if(!verdict.allow){speakerNotice(verdict.notice);react('hearingRejected');return;}
@@ -463,9 +474,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const command=timing.manual ? null : callInputCommand(text);
     if(!timing.manual && inputMode==='addressed') { const admitted=addressedText(text);if(!admitted){react('hearingRejected');return;}text=admitted; }
     if (suspect) {
-      if (echoOfHers(text)) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`);react('hearingRejected'); return; }
+      if (echoOfHers(text,'final')) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`);react('hearingRejected'); return; }
       log(`[call] words over her: "${text.slice(0, 40)}"`);
-      spokeOver();
+      spokeOver('final');
     }
     if (!text) { log('[call] heard nothing worth answering');react('hearingRejected'); return; }
     timing.heardAt = now();
@@ -477,7 +488,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       commit(text,timing,(corePolicySync<string>('speech-boundary.commandReply',[command])));
       return;
     }
-    if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver();
+    if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver('commit');
     timing.segments += pendingTiming?.segments ?? 0;
     text = pending ? `${pending} ${text}` : text;
     pending = '';

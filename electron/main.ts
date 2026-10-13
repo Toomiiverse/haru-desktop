@@ -9950,7 +9950,7 @@ function webDeps(): WebDeps {
         const local = openLocalCall({
           onEvent: handlers.onEvent,
           onAudio: handlers.onAudio,
-          onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); handlers.onClose(reason); },
+          onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); console.log('[call-end] '+JSON.stringify({seconds,reason:String(reason).slice(0,80)})); handlers.onClose(reason); },
         }, {
           speaker,
           hear: async (wav,signal) => (await prepareHearing(wav,'audio/wav',signal))(),
