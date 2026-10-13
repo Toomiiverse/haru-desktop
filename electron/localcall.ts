@@ -77,7 +77,7 @@ export type LocalCallDeps = {
    * line so far; a tool round announces itself as it starts. Resolves with the
    * reply that settled, which the brain has already written into the day.
    */
-  answer(text: string, options: { phoneTimeZone?:string; interrupted: boolean; signal?:AbortSignal; callTrace?:{id:string;turn:number}; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void }): Promise<{ reply: string; ignored?: boolean }>;
+  answer(text: string, options: { phoneTimeZone?:string; interrupted: boolean; signal?:AbortSignal; callTrace?:{id:string;turn:number}; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void; onActed?(): void }): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her voice for a line: a stream of mono PCM16 with no header, and its
    * rate. Null when she has no voice to give. Every line of one reply comes
@@ -235,10 +235,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let frameMs = 0;                // 3760: the last microphone frame's length
   // 3770 (user choice): words she was still thinking about, with nothing of her reply queued yet, when he carried on are merged
   // into what he says next instead of dropped (the dropped turn never reached the conversation).
-  let turnText = '', turnQueued = false, turnWasInterrupted = false;
-  let unvoiced: { text: string; at: number; interrupted: boolean } | null = null;
-  const UNVOICED_MERGE_MS = 15000;
-  const dropUnvoiced = () => { if (thinking && !turnQueued && turnText) unvoiced = { text: turnText, at: now(), interrupted: turnWasInterrupted }; };
+  // Never a turn that acted (a tool ran, a reminder was written): asked again, it would act twice.
+  let turnText = '', turnQueued = false, turnActed = false, turnWasInterrupted = false;
+  let unvoiced: { text: string; at: number; interrupted: boolean; turn: number } | null = null;
+  const UNVOICED_MERGE_MS = 30000;   // from the drop, which is at his next words' onset or commit: covers a 15 s utterance + ASR
+  const dropUnvoiced = () => { if (thinking && !turnQueued && !turnActed && turnText) unvoiced = { text: turnText, at: now(), interrupted: turnWasInterrupted, turn: turns }; };
+  const acted = (turn: number) => { if (turns === turn) turnActed = true; if (unvoiced?.turn === turn) unvoiced = null; };
   const herLines: string[] = [];  // the last few lines sent to the phone
 
   const emit = (event: CallEvent) => { if (!closed) handlers.onEvent({...event,callId}); };
@@ -573,7 +575,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     if (thinking) dropUnvoiced();
     const merged = !localReply && unvoiced && now() - unvoiced.at <= UNVOICED_MERGE_MS ? unvoiced : null;
-    unvoiced = null;
+    if (!localReply) unvoiced = null;   // a mic check or mode command answers itself; the dropped words wait for his next turn
     if (merged) {
       if (merged.interrupted) interrupted = true;   // the dropped turn's context goes with its words
       log('[call-merge] '+JSON.stringify({callId,turn:turns+1,afterMs:Math.round(now()-merged.at)}));
@@ -598,7 +600,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const mine = ++turns;
     const wasInterrupted = interrupted;
     interrupted = false;
-    turnText = text; turnQueued = false; turnWasInterrupted = wasInterrupted;
+    turnText = text; turnQueued = false; turnActed = false; turnWasInterrupted = wasInterrupted;
     thinking = true;
     spokeThisTurn = false;
     fillerThisTurn = false;
@@ -642,7 +644,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           stopReaction();react('replyStart');
           {const p=corePolicySync<any>('speech-boundary.sentencePlan',[{mood,stretch,sentences},sentence,emotion]);mood=p.mood;stretch=p.stretch;sentences=p.sentences;if(p.moodChanged)lastEmotion=mood;for(const command of p.commands)say({...command,seed,filler:false});return;}
         },
+        onActed: () => acted(mine),
         onToolCall: name => {
+          acted(mine);   // even after a drop: the tool ran
           if (generation !== myGeneration || turns !== mine) return;
           if(deps.engagement){react('tool');return;}
           if((!corePolicySync<boolean>('speech-boundary.fillerAllowed',[fillerThisTurn,spokeThisTurn])))return;

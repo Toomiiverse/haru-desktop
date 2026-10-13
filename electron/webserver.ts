@@ -82,7 +82,7 @@ export type WebDeps = {
    * before the stream ends. The same U+FFFD that clears the text clears the
    * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { signal?:AbortSignal; interrupted?: boolean; call?: boolean; callTrace?:{id:string;turn:number}; replyTo?: string; quoted?: string; phoneTimeZone?: string; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { signal?:AbortSignal; onActed?: () => void; interrupted?: boolean; call?: boolean; callTrace?:{id:string;turn:number}; replyTo?: string; quoted?: string; phoneTimeZone?: string; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its

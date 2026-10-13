@@ -11,13 +11,14 @@ const FRAME_MS = 40, FRAME_BYTES = (CALL_RATE * FRAME_MS / 1000) * 2;
 const frame = (level: number) => { const out = new Int16Array(FRAME_BYTES / 2), a = Math.round(level * 32767); for (let i = 0; i < out.length; i++) out[i] = i % 2 ? a : -a; return new Uint8Array(out.buffer); };
 const settle = async (n = 40) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 
-function call(filterOn: boolean, firstReplies: boolean) {
+function call(filterOn: boolean, firstReplies: boolean, firstActs: '' | 'acted' | 'tool' = '') {
   (policy as any).corePolicySync = (op: string) => table[op];
   let clock = 1_000_000, heardN = 0; const asked: string[] = [], shown: string[] = [], lines: string[] = [];
   const speaker = { enabled: true, check: async () => ({ allow: true, enforcing: true, speaker: 'owner', reason: 'voice_match', notice: null }),
     confirm: async () => ({ current: true }), notice: async () => ({ notice: null }), frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
   const deps: LocalCallDeps = { ...(filterOn ? { speaker } : {}), hear: async () => (++heardN === 1 ? 'I went to the shops yesterday' : 'and bought a lamp'),
-    answer: (text: string, o: any) => { asked.push(text); if (asked.length === 1 && firstReplies) o.onSentence('Sure. ', 'neutral'); return new Promise(() => {}); },
+    answer: (text: string, o: any) => { asked.push(text); if (asked.length === 1 && firstReplies) o.onSentence('Sure. ', 'neutral');
+      if (asked.length === 1 && firstActs === 'acted') o.onActed(); if (asked.length === 1 && firstActs === 'tool') o.onToolCall('remember'); return new Promise(() => {}); },
     speak: async () => ({ stream: new ReadableStream({ start() {} }), sampleRate: 24000 }), filler: () => '', moodNow: () => 'neutral', said: () => {}, now: () => clock,
     vad: { endAfterMs: 500 }, log: (l: string) => lines.push(l) } as any;
   const c = openLocalCall({ onEvent: e => { if (e.type === 'user_message') shown.push((e as any).text); }, onAudio: () => {}, onClose: () => {} }, deps);
@@ -47,3 +48,14 @@ test('a turn whose reply was already queued is not merged', async () => {
   assert.ok(!h.lines.some(l => l.startsWith('[call-merge] ')));
   h.c.close('test');
 });
+
+for (const kind of ['acted', 'tool'] as const) {
+  test(`a dropped turn that ${kind === 'acted' ? 'wrote a reminder' : 'ran a tool'} is never merged (it would act twice)`, async () => {
+    const h = call(true, false, kind);
+    h.feed(0.002, 1000); h.feed(0.3, 1000); h.feed(0.002, 700); await settle();
+    h.feed(0.3, 1000); h.feed(0.002, 700); await settle();
+    assert.equal(h.asked.at(-1), 'and bought a lamp');
+    assert.ok(!h.lines.some(l => l.startsWith('[call-merge] ')));
+    h.c.close('test');
+  });
+}

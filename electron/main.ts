@@ -5501,7 +5501,7 @@ async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>): ReturnTyp
   return inferencePriority.runForeground(() => affectTurn(args[0], args[2] ?? {}, options => ollamaChatTurn(args[0], args[1], options)));
 }
 
-async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, traceId, signal }: { signal?:AbortSignal; onPublished?: (content: string) => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
+async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, onActed, traceId, signal }: { signal?:AbortSignal; onPublished?: (content: string) => void; onActed?: () => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
   signal?.throwIfAborted();
   markTurn('harness_start');
   const enteredAt = Date.now();
@@ -5669,6 +5669,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   {
     const packet=corePolicySync<any>('agenda-life.directReminder',[agendaFacts(ownedAgendaCore()),{lastIsUser:messages.at(-1)?.role==='user',latest,previous:typeof herPrevious==='string'?herPrevious:null,recentUsers:theirRecent,clock:agendaClock(zonedNow(CHAT_TIMEZONE))},new Date().toISOString(),randomUUID()]);
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+    if(packet.plan)onActed?.();   // 3770: a reminder written from his words: this turn acted (a call does not merge it into the next)
     if(packet.result){reminder=packet.result.reminder;aside=[aside,packet.result.aside].filter(Boolean).join(' ');}
     if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
   }
@@ -9453,6 +9454,7 @@ function webDeps(): WebDeps {
         away: 'it came in from the phone',
         ...(options?.call ? { aside: callAside(Boolean(options.interrupted)), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
+        ...(options?.onActed ? { onActed: options.onActed } : {}),
         signal:options?.signal,
         onSending: () => trace.mark('sending'),
         onPublished: content => { published = content; try { voice.flush(); } catch (error) { flushError = error; } },   // 3760: what is left of the final reply is said at once
@@ -10001,7 +10003,7 @@ function webDeps(): WebDeps {
           prepareHear:(wav:Uint8Array,signal?:AbortSignal)=>prepareHearing(wav,'audio/wav',signal),
           ...(call.prepareAfterMs ? {prepareAfterMs:call.prepareAfterMs} : {}),
           unfinishedQuietMs:call.unfinishedQuietMs,
-          answer: (text, { interrupted, onSentence, onToolCall, callTrace, signal, phoneTimeZone }) => runTimedTurn(`call-${callTrace?.id ?? randomUUID()}-${callTrace?.turn ?? 0}`, () => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)), spanCountingSink(counts => console.log('[call-prep] '+JSON.stringify({callId:callTrace?.id??null,turn:callTrace?.turn??null,...counts})))),   // 3760
+          answer: (text, { interrupted, onSentence, onToolCall, onActed, callTrace, signal, phoneTimeZone }) => runTimedTurn(`call-${callTrace?.id ?? randomUUID()}-${callTrace?.turn ?? 0}`, () => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, onActed, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)), spanCountingSink(counts => console.log('[call-prep] '+JSON.stringify({callId:callTrace?.id??null,turn:callTrace?.turn??null,...counts})))),   // 3760
           // Her mood as the standing tab reads it — no model call — for a reply
           // whose first sentence names no register of its own. Only the moods
           // that change how she sounds pass through; the warm ones would have
