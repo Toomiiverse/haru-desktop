@@ -314,7 +314,9 @@ export class HaruStore {
    *  can reach it before the cache is trusted; everything else goes through the
    *  accessors below. */
   readMemoryFile(): MemoryFile {
-    if (this.core) return normalizeMemoryFile(this.core.get('memories'));
+    // 3800: by digest (the 44 KB file crossed whole on ~15 calls a turn, cloned each time and stringified for the memo key). A
+    // missing document stays a value: a reference to nothing would be answered 'needs' and fail.
+    if (this.core) return normalizeMemoryFile(this.core.has('memories') ? this.core.docRef('memories') : this.core.get('memories'));
     try {
       if (!existsSync(this.memoriesFile)) return { ...EMPTY_MEMORY_FILE };
       return normalizeMemoryFile(JSON.parse(readFileSync(this.memoriesFile, 'utf8')));
