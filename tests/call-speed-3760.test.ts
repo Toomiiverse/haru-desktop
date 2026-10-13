@@ -82,7 +82,7 @@ test('the counting summary is written once on error and flags a capped turn', as
 test('main.ts wires call turns through the counting timer and flushes the voice at publish', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(require.resolve('../../electron/main.ts'), 'utf8');
-  const answerLine = src.split('\n').find(l => l.includes('answer: (text, { interrupted, onSentence, onToolCall, callTrace, signal, phoneTimeZone })')) ?? '';
+  const answerLine = src.split('\n').find(l => /^\s*answer: \(text, \{ interrupted, onSentence, onToolCall,/.test(l)) ?? '';
   assert.ok(answerLine.includes('runTimedTurn(') && answerLine.includes('spanCountingSink('));
   assert.ok(src.includes("onPublished: content => { published = content; try { voice.flush(); }"));
   assert.ok(src.includes("try{onPublished?.(content);}"));
