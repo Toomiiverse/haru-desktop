@@ -107,7 +107,7 @@ import {runCoreProjectStep,runCoreProjectBirth,runCoreReadingOutcome,runCoreProj
 import {appendPhoneTurn,type PhoneTurn} from './core-brain-history';
 import { ProviderAvailability } from './provider-availability';
 import {coreChatPrompt,corePrepareNaturalConversation} from './core-prompts';
-import { markTurn, timeTurnReview } from './turn-timing';
+import { markTurn, timeTurnReview, runTimedTurn, spanCountingSink } from './turn-timing';
 import { conversationReplyIssue } from './conversation-contract';
 import { veniceRegistryEntries } from './model-catalog';
 import { runDreamLearning, learningNote } from './dream-learning';
@@ -5481,7 +5481,7 @@ async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>): ReturnTyp
   return inferencePriority.runForeground(() => affectTurn(args[0], args[2] ?? {}, options => ollamaChatTurn(args[0], args[1], options)));
 }
 
-async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId, signal }: { signal?:AbortSignal; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
+async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, traceId, signal }: { signal?:AbortSignal; onPublished?: () => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
   signal?.throwIfAborted();
   markTurn('harness_start');
   const enteredAt = Date.now();
@@ -6482,12 +6482,15 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     } catch(error) { console.warn('[ai] publication voice unavailable:',error instanceof Error?error.message:'transport'); }
   signal?.throwIfAborted();
   replyGate.commit(content);
+  // 3760: the reply is final: say what is left of it now (a one-sentence reply waited for the turn's end, ~0.2-0.3 s).
+  try{onPublished?.();}catch(error){console.warn('[voice] early flush failed:',error instanceof Error?error.message:'error');}
   markTurn('published');
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'published', elapsedMs: Date.now() - enteredAt,
     preparationMs: firstDispatchAt ? firstDispatchAt - enteredAt : null, path: naturalKind ? 'natural' : 'full', model: config.model })}`);
   // Yield after publication so socket text can leave before optional diagnostics,
   // speech preparation or post-reply configuration writes run on this thread.
-  await new Promise<void>(resolve => setImmediate(resolve));
+  // 3760: on a call, one I/O pass first, so her voice request leaves before the store writes (~65-75 ms).
+  await new Promise<void>(resolve => voiceCall ? setImmediate(() => setImmediate(resolve)) : setImmediate(resolve));
   setImmediate(flushModelObservations);
   if (naturalKind && process.env.HARU_DUMP_PROMPT) setImmediate(() => {
     void import('node:fs/promises').then(fs => fs.writeFile(path.join(app.getPath('userData'), 'last-prompt.json'),
@@ -9418,6 +9421,7 @@ function webDeps(): WebDeps {
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         signal:options?.signal,
         onSending: () => trace.mark('sending'),
+        onPublished: () => voice.flush(),   // 3760: what is left of the final reply is said at once
         traceId: trace.id,
         // 3320: the gate's own reset marker (a hold or an opening taken back) is a reset here too \u2014 the first-word
         // stamp and the voice buffer go with the words nobody kept, and a reply that then arrives whole is still shown.
@@ -9958,7 +9962,7 @@ function webDeps(): WebDeps {
           prepareHear:(wav:Uint8Array,signal?:AbortSignal)=>prepareHearing(wav,'audio/wav',signal),
           ...(call.prepareAfterMs ? {prepareAfterMs:call.prepareAfterMs} : {}),
           unfinishedQuietMs:call.unfinishedQuietMs,
-          answer: (text, { interrupted, onSentence, onToolCall, callTrace, signal, phoneTimeZone }) => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)),
+          answer: (text, { interrupted, onSentence, onToolCall, callTrace, signal, phoneTimeZone }) => runTimedTurn(`call-${callTrace?.id ?? randomUUID()}-${callTrace?.turn ?? 0}`, () => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)), spanCountingSink(counts => console.log('[call-prep] '+JSON.stringify({callId:callTrace?.id??null,turn:callTrace?.turn??null,...counts})))),   // 3760
           // Her mood as the standing tab reads it — no model call — for a reply
           // whose first sentence names no register of its own. Only the moods
           // that change how she sounds pass through; the warm ones would have

@@ -161,6 +161,12 @@ export function withoutWavHeader(body: ReadableStream<Uint8Array>): ReadableStre
   }));
 }
 
+/** 3760: how a held transcript ended, as a class only: terminal punctuation, a soft mark (, ; : - …), or nothing. */
+export function endingOf(text: string): string {
+  const end = text.trimEnd().slice(-1);
+  return /[.!?]/.test(end) ? 'punctuation' : /[,;:\-…—]/.test(end) ? 'mark' : 'none';
+}
+
 /** One buffer as a stream, for a voice that only renders whole. */
 export function oneChunk(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({ start(controller) { if (bytes.byteLength) controller.enqueue(bytes); controller.close(); } });
@@ -225,6 +231,8 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let startedOverHer = false;     // 3750: she was audible when this utterance began (a short reply then is not let through)
   let startMs = 0;                // 3750: sample time this utterance began
   let herEndMs = -1;              // 3750: sample time the phone last said her playback ended
+  let holdStarted: {reason:'still_talking'|'unfinished';at:number;ending:string}|null = null;   // 3760: for the [call-hold] line
+  let frameMs = 0;                // 3760: the last microphone frame's length
   const herLines: string[] = [];  // the last few lines sent to the phone
 
   const emit = (event: CallEvent) => { if (!closed) handlers.onEvent({...event,callId}); };
@@ -299,6 +307,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     start();
     const at = samples;
     samples += frame.byteLength >> 1;
+    frameMs = (frame.byteLength >> 1) * 1000 / CALL_RATE;
     if(manual && !held)return;
     ring.push({ at, frame });
     ringSamples += frame.byteLength >> 1;
@@ -325,6 +334,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       pending = '';
       pendingTiming = null;
       holdUntil = 0;
+      holdLine(false);
       if (timing) commit(text, timing);
     }
     if (overHer === 'suspect' && !probing && !event && vad.speaking() && t - overHerAt >= PROBE_MS) {
@@ -366,6 +376,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     log('[call-echo] '+JSON.stringify({callId,path,verdict:echo?(strict?'undecided':'echo'):'his',words:text.split(/\s+/).filter(Boolean).length,
       ...(timing?.startedOverHer?{startedOverHer:true}:timing?.startMs!==undefined&&herEndMs>=0?{afterHerEndMs:Math.round(timing.startMs-herEndMs)}:{})}));
     return echo;
+  }
+  /** 3760: one line per held utterance, never its words: why it was held, for how long, and whether more speech joined it. */
+  function holdLine(merged:boolean) {
+    if(!holdStarted)return;
+    log('[call-hold] '+JSON.stringify({callId,reason:holdStarted.reason,heldMs:Math.round(now()-holdStarted.at),merged,ending:holdStarted.ending}));
+    holdStarted=null;
   }
   function speakerFailed(final:boolean, error:unknown) {
     if(closed)return;   // a hang-up aborts the pending check: not a failure
@@ -512,13 +528,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver('commit');
     timing.segments += pendingTiming?.segments ?? 0;
+    if (pending) holdLine(true);
     text = pending ? `${pending} ${text}` : text;
     pending = '';
     pendingTiming = null;
     holdUntil = 0;
     // They went on talking while this was being written down: what they are
     // saying now belongs with it, and she answers the whole once it has ended.
-    if (vad.possibleSpeech()) { pending = text; pendingTiming = timing; holdUntil=(samples*1000)/CALL_RATE+UNFINISHED_HOLD_MS; log(`[call] holding "${text.slice(0, 40)}" — they are still talking`); return; }
+    if (vad.possibleSpeech()) { pending = text; pendingTiming = timing; holdUntil=(samples*1000)/CALL_RATE+UNFINISHED_HOLD_MS; holdStarted={reason:'still_talking',at:now(),ending:endingOf(text)}; log(`[call] holding "${text.slice(0, 40)}" — they are still talking`); return; }
     // A sentence they stopped in the middle of waits a moment for its end.
     if ((corePolicySync<boolean>('speech-boundary.unfinished',[text]))) {
       pending = text;
@@ -526,6 +543,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       const hold = (corePolicySync<number>('speech-boundary.unfinishedHold',[deps.unfinishedQuietMs??null,now()-timing.speechEndAt]));
       if (!hold) {pending='';pendingTiming=null;commit(text,timing);return;}
       holdUntil = (samples * 1000) / CALL_RATE + hold;
+      holdStarted={reason:'unfinished',at:now(),ending:endingOf(text)};
       log(`[call] holding "${text.slice(0, 40)}" — it sounds unfinished`);
       return;
     }
@@ -656,7 +674,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   function logTiming(timing: TurnTiming, stage: 'first-audio' | 'done') {
     const { speechEndAt, detectedAt, heardAt, listenMs, answerAt, queuedAt, speakAt, pcmAt } = timing;
-    log(`[call-latency] ${JSON.stringify({ callId, turn: timing.turn, stage, segments: timing.segments,
+    log(`[call-latency] ${JSON.stringify({ callId, turn: timing.turn, stage, segments: timing.segments, frameMs: Math.round(frameMs),
       endpointMs: detectedAt - speechEndAt, listenMs, holdMs: answerAt - heardAt,
       recognitionWaitMs:listenMs,preparedRecognition:timing.preparedRecognition??false,
       answerMs: queuedAt === null ? null : queuedAt - answerAt,

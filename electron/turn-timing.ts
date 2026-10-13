@@ -51,6 +51,20 @@ export function timingFor(id: string, sink: (event: TimingEvent) => void = defau
     } catch { /* diagnostics must never change delivery or task settlement */ }
   };
 }
+/** 3760: a sink for call turns: stage marks are written as usual, but the ~400-500 policy/storage spans are only counted (written
+ *  in one burst at the turn's end they would land on her first sentence) and summed once, at runner_end. */
+export function spanCountingSink(summary:(counts:{spans:number;coreCalls:number;memoOrLocal:number;coreMs:number;wallMs:number})=>void, write:(event:TimingEvent)=>void=defaultSink) {
+  let spans=0,core=0,coreMs=0,wallMs=0;
+  return (event:TimingEvent) => {
+    const e=event as any;
+    if(e.stage==='policy_span'||e.stage==='storage_span'){
+      spans++;if(typeof e.coreMs==='number'){core++;coreMs+=e.coreMs;}if(typeof e.durationMs==='number')wallMs+=e.durationMs;return;
+    }
+    write(event);
+    // the held spans are handed over right after runner_end, in the same synchronous flush: count them first
+    if(e.stage==='runner_end')queueMicrotask(()=>summary({spans,coreCalls:core,memoOrLocal:spans-core,coreMs:Math.round(coreMs),wallMs:Math.round(wallMs)}));
+  };
+}
 /** The active turn, as an identity token for per-turn caches (core-policy-sync); undefined outside a turn. */
 export function currentTurn(): unknown { return context.getStore(); }
 export function markTurn(stage: TurnStage, fields?: Fields) {
