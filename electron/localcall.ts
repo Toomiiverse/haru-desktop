@@ -129,7 +129,7 @@ type Line = { text: string; emotion: string | null; seed: number; filler: boolea
  * turn's take, so a reply whose brain finishes after the next turn has begun
  * still finds what it got out.
  */
-type HeardTiming = { speechEndAt: number; speechEndSample: number; detectedAt: number; heardAt: number; listenMs: number; segments: number; preparedRecognition?:boolean; manual?:boolean; inputEpoch?:number };
+type HeardTiming = { speechEndAt: number; speechEndSample: number; detectedAt: number; heardAt: number; listenMs: number; segments: number; preparedRecognition?:boolean; manual?:boolean; inputEpoch?:number; startedOverHer?:boolean; startMs?:number };
 type TurnTiming = HeardTiming & { turn: number; answerAt: number; queuedAt: number | null; speakAt: number | null; pcmAt: number | null };
 type Take = { voiced: string[]; cut: { text: string; seconds: number } | null; reported: boolean; timing: TurnTiming };
 type Queued = Line & { take: Take; reaction?:{command:ReactionCommand;clip:ReactionClip} };
@@ -222,6 +222,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let overHer: 'no' | 'suspect' | 'his' = 'no';
   let overHerAt = 0;              // sample time the suspect utterance began
   let probing = false;
+  let startedOverHer = false;     // 3750: she was audible when this utterance began (a short reply then is not let through)
+  let startMs = 0;                // 3750: sample time this utterance began
+  let herEndMs = -1;              // 3750: sample time the phone last said her playback ended
   const herLines: string[] = [];  // the last few lines sent to the phone
 
   const emit = (event: CallEvent) => { if (!closed) handlers.onEvent({...event,callId}); };
@@ -238,8 +241,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       const plan=deps.engagement.plan(engagementState,event,{nowMs:now(),closed,
         available:deps.engagement.available(),inputMode,manualHeld:manual&&held,reactionActivityTracked,
         phoneSpeaking:phoneHearsHer&&!reactionAudible,
-        // 3750 (user choice): no reaction sound starts while the microphone hears him; it fed her voice into his turn.
-        replyBusy:queue.some(line=>!line.filler)||!!activeSpeech&&!activeReaction||vad.possibleSpeech(),
+        // 3750 (user choice): no reaction sound starts while the microphone hears him, or while her ears are still deciding on what he
+  // said (the clip landed between his last word and the verdict); it fed her voice into his turn.
+        replyBusy:queue.some(line=>!line.filler)||!!activeSpeech&&!activeReaction||vad.possibleSpeech()||transcribing>0,
         playbackUntilMs:playbackUntil});
       engagementState=plan.state;
       if(plan.inputMode)inputMode=plan.inputMode;
@@ -326,7 +330,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     }
     if (!event) return;
     if (event.type === 'start') {
-      if (hers()) { overHer = 'suspect'; overHerAt = t; probing = false;if(!deps.speaker?.enabled)react('speechStart'); }       else {
+      overHerAt = t; probing = false; startMs = t;   // 3750: a probe only ever covers this utterance (it could reach a stale anchor)
+      startedOverHer = phoneHearsHer || sending;
+      if (hers()) { overHer = 'suspect';if(!deps.speaker?.enabled)react('speechStart'); }       else {
         const echo=phoneHearsHer&&reactionAudible || now()<reactionEchoUntil;
         overHer = echo?'suspect':'no';
         if(inputMode==='open'&&!echo&&!deps.speaker?.enabled)spokeOver('onset');
@@ -344,15 +350,23 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const speechEndAt = detectedAt - Math.max(0, t - event.speechEnd);
     const prepared = preparation;
     preparation = null;
-    void heard(cut(event.from, event.to), suspect, { speechEndAt, speechEndSample:Math.round(event.speechEnd*CALL_RATE/1000), detectedAt, heardAt: detectedAt, listenMs: 0, segments: 1,inputEpoch },
+    void heard(cut(event.from, event.to), suspect, { speechEndAt, speechEndSample:Math.round(event.speechEnd*CALL_RATE/1000), detectedAt, heardAt: detectedAt, listenMs: 0, segments: 1,inputEpoch,startedOverHer,startMs },
       prepared ? {result:prepared.result,exact:prepared.from===event.from&&prepared.to===event.to} : undefined);
   }
 
   /** Words heard over her: hers, coming back through the phone, or his? */
-  function echoOfHers(text: string, path: 'probe'|'final'): boolean {
-    const echo=corePolicySync<boolean>('speech-boundary.echoOfHers',[text,herLines,path==='probe']);
-    log('[call-echo] '+JSON.stringify({callId,path,echo:!!echo,words:text.split(/\s+/).filter(Boolean).length}));
+  function echoOfHers(text: string, path: 'probe'|'final', timing?: HeardTiming): boolean {
+    // 3750: without voice recognition a probe (a cut-off stretch over her) stops her only on new words; once his voice is verified
+    // the old ratio rule decides, as before. A strict probe's 'true' means 'not decided here': the utterance end decides.
+    const strict=path==='probe'&&!deps.speaker?.enabled;
+    const echo=!!corePolicySync<boolean>('speech-boundary.echoOfHers',[text,herLines,strict]);
+    log('[call-echo] '+JSON.stringify({callId,path,verdict:echo?(strict?'undecided':'echo'):'his',words:text.split(/\s+/).filter(Boolean).length,
+      ...(timing?.startMs!==undefined&&herEndMs>=0?{afterHerEndMs:Math.round(timing.startMs-herEndMs)}:{})}));
     return echo;
+  }
+  function speakerFailed(final:boolean, error:unknown) {
+    const m=error instanceof Error?error.message:'';
+    log('[call-speaker] '+JSON.stringify({callId,final,error:/^[a-z_]{1,48}$/.test(m)?m:'other'}));
   }
   function speakerLine(verdict:any, final:boolean, busy:boolean, suspect:boolean) {
     log('[call-speaker] '+JSON.stringify({callId,final,allow:!!verdict.allow,enforcing:!!verdict.enforcing,speaker:verdict.speaker??null,reason:verdict.reason??null,
@@ -363,7 +377,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   async function probe(wav: Uint8Array) {
     let text = '';
     try {
-      if(deps.speaker){const verdict=await atEars(()=>deps.speaker!.check(wav,false,true,listening.signal));speakerLine(verdict,false,true,true);if(closed||!verdict.allow)return;}
+      if(deps.speaker){let verdict;try{verdict=await atEars(()=>deps.speaker!.check(wav,false,true,listening.signal));}catch(error){speakerFailed(false,error);throw error;}speakerLine(verdict,false,true,true);if(closed||!verdict.allow)return;}
       if (deps.prepareHear) {
         const candidate=await atEars(()=>deps.prepareHear!(wav,listening.signal));
         text=typeof candidate.text==='string' ? candidate.text : inputMode==='open' ? await atEars(()=>deps.hear(wav,listening.signal)) : '';
@@ -400,8 +414,10 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   /** They started talking. Over her, that is an interruption; over her thinking, the reply will not be voiced. */
   function spokeOver(source:'onset'|'probe'|'final'|'commit') {
-    const action=phoneHearsHer || sending || activeSpeech || queue.length || (thinking && spokeThisTurn) ? 'interrupt' : thinking ? 'preempt' : null;
-    if(action)log('[call-overlap] '+JSON.stringify({callId,source,action}));
+    // 3750: a reaction clip is not her reply: it stops, and talking over it is no interruption (her answer was told it was).
+    const action=(phoneHearsHer&&!reactionAudible) || (sending&&!activeReaction) || (activeSpeech&&!activeReaction) || queue.some(line=>!line.reaction) || (thinking && spokeThisTurn) ? 'interrupt' : thinking ? 'preempt' : null;
+    stopReaction();
+    if(action)log('[call-overlap] '+JSON.stringify({callId,source,action,repeat:action==='interrupt'&&interrupted}));
     if (action==='interrupt') {
       interrupted = true;
       dropHerVoice();
@@ -449,8 +465,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     transcribing++;
     try {
       if(deps.speaker){
-        const busy=phoneHearsHer||sending||thinking||queue.length>0;
-        const verdict=await atEars(()=>deps.speaker!.check(wav,true,busy,listening.signal));
+        const busy=phoneHearsHer||sending||thinking||queue.length>0||!!timing.startedOverHer;
+        let verdict;
+        try{verdict=await atEars(()=>deps.speaker!.check(wav,true,busy,listening.signal));}catch(error){speakerFailed(true,error);throw error;}
         speakerLine(verdict,true,busy,suspect);
         if(stale())return;
         emit({type:'speaker_identity',speaker:verdict.speaker,reason:verdict.reason});
@@ -467,14 +484,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         log('[call-admission] '+JSON.stringify({callId,reason:'not_addressed',mode:inputMode}));
         react('hearingRejected');return;
       }
-      if(deps.speaker){await atEars(()=>deps.speaker!.confirm(listening.signal));if(stale())return;}
+      if(deps.speaker){try{await atEars(()=>deps.speaker!.confirm(listening.signal));}catch(error){speakerFailed(true,error);throw error;}if(stale())return;}
       text=candidate ? candidate() : await atEars(()=>deps.hear(wav,listening.signal));
     } catch (error) { log(`[call] her ears failed: ${error instanceof Error ? error.message : String(error)}`);if(deps.speaker)emit({type:'error',message:'Voice recognition could not verify this turn. Please reconnect.'});react('hearingRejected'); return; } finally { transcribing--; }
     if (stale()) return;
     const command=timing.manual ? null : callInputCommand(text);
     if(!timing.manual && inputMode==='addressed') { const admitted=addressedText(text);if(!admitted){react('hearingRejected');return;}text=admitted; }
     if (suspect) {
-      if (echoOfHers(text,'final')) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`);react('hearingRejected'); return; }
+      if (echoOfHers(text,'final',timing)) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`);react('hearingRejected'); return; }
       log(`[call] words over her: "${text.slice(0, 40)}"`);
       spokeOver('final');
     }
@@ -759,7 +776,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     },
     herSpeaking(on) {
       phoneHearsHer = on;
-      if (!on) {playbackUntil=now();if(!reactionAudible)herEchoUntil = now() + HER_ECHO_MS;react('playback');pollSpeakerNotice();}
+      if (!on) {playbackUntil=now();herEndMs=(samples*1000)/CALL_RATE;if(!reactionAudible)herEchoUntil = now() + HER_ECHO_MS;react('playback');pollSpeakerNotice();}
     },
     close(reason = 'hung up') {
       if (closed) return;
@@ -770,7 +787,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       listening.abort();
       dropHerVoice();
       finishTurn();
-      handlers.onClose(reason, Math.round((now() - startedAt) / 1000));
+      const seconds=Math.round((now() - startedAt) / 1000);
+      log('[call-end] '+JSON.stringify({callId,seconds,reason:String(reason).slice(0,80)}));
+      handlers.onClose(reason, seconds);
     },
   };
 }

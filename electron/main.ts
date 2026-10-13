@@ -9944,13 +9944,13 @@ function webDeps(): WebDeps {
         const voice = readVoiceConfig(store.get('voice'));
         if (!voice.webEnabled || voice.engine === 'off') throw new Error('She has no voice for a call.');
         if (herAsleepNow()) throw new Error('She is asleep.');
-        const speaker=core_speaker_1.speakerEnabled()?await core_speaker_1.openSpeaker():undefined;
+        const speaker=core_speaker_1.speakerEnabled()?await core_speaker_1.openSpeaker('call'):undefined;   // 3750: a call session (short replies)
         let lastFiller = '';
         console.log(`[call] placed at home, ${call.endAfterMs} ms of quiet ends a turn`);
         const local = openLocalCall({
           onEvent: handlers.onEvent,
           onAudio: handlers.onAudio,
-          onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); console.log('[call-end] '+JSON.stringify({seconds,reason:String(reason).slice(0,80)})); handlers.onClose(reason); },
+          onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); handlers.onClose(reason); },
         }, {
           speaker,
           hear: async (wav,signal) => (await prepareHearing(wav,'audio/wav',signal))(),

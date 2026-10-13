@@ -18,8 +18,8 @@ export async function speakerRequest(op:string,args:Record<string,unknown>={},si
  if(result.version!==1||result.requestId!==packet.requestId||result.op!==op||!result.result||typeof result.result!=='object')throw Error('speaker_protocol_error');
  signal?.throwIfAborted();return result.result;
 }
-export async function openSpeaker(){
- const opened=await speakerRequest('open');
+export async function openSpeaker(purpose?:'call'){
+ const opened=await speakerRequest('open',purpose?{purpose}:{});   // 3750: only a call session lets short replies through
  if(typeof opened.sessionId!=='string')throw Error('speaker_session_invalid');
  let sequence=0,closed=false;
  const abort=new AbortController();

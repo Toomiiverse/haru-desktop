@@ -51,3 +51,37 @@ test('every final speaker verdict is logged with no words', async () => {
   assert.ok(!('text' in body) && !('words' in body));
   h.c.close('test');
 });
+
+test('no reaction starts while her ears are still deciding on what he said', async () => {
+  let release: (v: unknown) => void = () => {};
+  const verdict = new Promise(r => { release = r; });
+  const speaker = { enabled: true, check: async () => verdict, confirm: async () => ({ current: true }), notice: async () => ({ notice: null }),
+    frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
+  const h = call({ speaker });
+  h.feed(0.002, 1000); h.feed(0.3, 800); h.feed(0.002, 900);   // he spoke and stopped; the voice check is pending
+  await settle();
+  h.c.herSpeaking(false);                                        // any engagement decision now must see 'busy'
+  const last = h.plans[h.plans.length - 1];
+  assert.equal(last.event, 'playback');
+  assert.equal(last.replyBusy, true);
+  release({ allow: false, enforcing: true, speaker: 'uncertain', reason: 'ambiguous_or_mixed_audio', notice: null });
+  await settle();
+  h.c.herSpeaking(false);
+  assert.equal(h.plans[h.plans.length - 1].replyBusy, false);
+  h.c.close('test');
+});
+
+test('a failed voice check is logged by its code, and the call end carries the call id', async () => {
+  const speaker = { enabled: true, check: async () => { throw Error('voice_session_expired'); }, confirm: async () => ({ current: true }), notice: async () => ({ notice: null }),
+    frame: async () => ({ audio: '', allow: true }), frameBytes: 6400, maxPendingBytes: 128000, close() {} } as any;
+  const h = call({ speaker });
+  h.feed(0.002, 1000); h.feed(0.3, 800); h.feed(0.002, 900);
+  await settle();
+  const failed = h.lines.find(l => l.startsWith('[call-speaker] '));
+  assert.ok(failed);
+  assert.deepEqual(JSON.parse(failed!.slice(15)).error, 'voice_session_expired');
+  h.c.close('the phone hung up');
+  const end = h.lines.find(l => l.startsWith('[call-end] '));
+  const speakerId = JSON.parse(failed!.slice(15)).callId;
+  assert.ok(end && JSON.parse(end.slice(11)).callId === speakerId && JSON.parse(end.slice(11)).reason === 'the phone hung up');
+});
