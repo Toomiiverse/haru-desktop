@@ -1336,11 +1336,14 @@ let savedVitalsAt = 0;
  *  `force` is for shutdown, where the next read is the one that matters. */
 function persistVitals(force = false) {
   if (!force && !shouldPersistVitals(vitals, savedVitals, Date.now() - savedVitalsAt)) return;
-  store.set('vitals', vitals);
-  store.set('her.weather', { wander, bruise });
-  // Stamped every time her state is written, so a gap she cannot account for is
-  // visible the next time she comes up (feelings.ts 'lost-time').
-  store.set('her.lastAliveAt', new Date().toISOString());
+  // 3780: one commit, not three (each was a storage round trip; two forced a full memory re-projection before the 3780 worker).
+  store.transaction(() => {
+    store.set('vitals', vitals);
+    store.set('her.weather', { wander, bruise });
+    // Stamped every time her state is written, so a gap she cannot account for is
+    // visible the next time she comes up (feelings.ts 'lost-time').
+    store.set('her.lastAliveAt', new Date().toISOString());
+  });
   savedVitals = { ...vitals };
   savedVitalsAt = Date.now();
 }
@@ -5539,10 +5542,11 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // her replies in too would just as often paper over a message with no
   // keywords of its own with ones that were never theirs. (3770: computed here; `messages` is not reassigned after this point.)
   const recentUserContext = messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-3).join(' ');
-  // 3770: on a call, the memory read (embeddings + Core memory) starts now instead of ~0.5 s later, after the policy steps below;
-  // it is used only if the request built at the retrieval step is the same one, else that step reads afresh as before. Not
-  // aborted with the turn: cancelling stops the Core's memory worker and the next turn would pay its cold start.
-  const earlyMemory = voiceCall ? startCallMemory(latest, recentUserContext) : null;
+  // 3770/3780: the memory read (embeddings + Core memory) starts now instead of ~0.5 s later, after the policy steps below; it is
+  // used only if the request built at the retrieval step is the same one, else that step reads afresh as before. Not aborted
+  // with the turn: cancelling stops the Core's memory worker and the next turn would pay its cold start. 3780: text turns too
+  // (the embedding wait was 204-254 ms on the critical path; natural and source-only turns waste one read).
+  const earlyMemory = startCallMemory(latest, recentUserContext);
   if (earlyMemory) await new Promise<void>(resolve => setImmediate(resolve));   // let the request leave before the blocking policy calls
   // 3770: every durable write below a check runs synchronously after it, so a turn dropped on a call either stops before
   // writing or has signalled that it acted (it is then never merged into his next words and asked again).

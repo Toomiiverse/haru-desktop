@@ -54,7 +54,7 @@ export class CoreStore {
   const response=JSON.parse(Buffer.from(this.buffer,8,Atomics.load(header,1)).toString('utf8'));
   if(response.id!==id){this.broken=true;throw Error('core_authority_protocol_error');}
   if(!response.ok)throw Error(response.error??'core_authority_failed');
-  if(method==='commit')console.log(`[core-write-timing] ${JSON.stringify({workerWaitMs:performance.now()-started,...response.result.timing})}`);
+  if(method==='commit')console.log(`[core-write-timing] ${JSON.stringify({workerWaitMs:performance.now()-started,...response.result.timing,changed:changedKeys((params as any).patches,this.state.documents)})}`);
   spanStatus='ok';return response.result;
   } finally {markTurn('storage_span',{step:method,durationMs:performance.now()-started,status:spanStatus});}
  }
@@ -94,7 +94,7 @@ export class CoreStore {
      }
      if(result.currentRevision!==result.revision)throw Error('core_authority_revision_conflict');
      this.state={...this.state,revision:result.revision,documents:{...this.state.documents,...params.patches}};
-     console.log(`[core-write-timing] ${JSON.stringify({asyncCommit:true,workerWaitMs:performance.now()-started,...result.timing})}`);
+     console.log(`[core-write-timing] ${JSON.stringify({asyncCommit:true,workerWaitMs:performance.now()-started,...result.timing,changed:changedKeys(params.patches,originalDocuments)})}`);
     }catch(error){failed=true;failure=error;this.broken=true;}
     finally{settled=true;this.pendingAsync=false;}
    }
@@ -239,4 +239,17 @@ export class CoreStore {
  backup(reason:string):string{return this.call('backup',{reason});}
  clearExperiences(){this.transaction(()=>{const plan=corePolicySync<Record<string,unknown>>('memory-admin.assets',[Object.keys(this.staged!),this.get('dream-learning')]);for(const [key,value]of Object.entries(plan))this.set(key,value);});return;}
  close(){for(const [key,value]of registry)if(value===this)registry.delete(key);if(!this.broken)this.call('close',{});this.broken=true;this.worker.postMessage({stop:true});void this.worker.terminate();}
+}
+
+/** 3780: what a commit changed, for the write-timing line: the document names, and for config its changed top-level keys
+ *  ('config:her.weather vitals'), so a full re-projection can be traced to its writer. Values never appear. */
+export function changedKeys(patches:Record<string,any>|undefined,before:Record<string,any>):string{
+ if(!patches)return '';
+ return Object.keys(patches).map(name=>{
+  if(name!=='config'||!patches.config||typeof patches.config!=='object')return name;
+  const was=before.config??{};const now=patches.config;
+  const differ=(a:any,b:any)=>[...new Set([...Object.keys(a??{}),...Object.keys(b??{})])].filter(k=>JSON.stringify(a?.[k])!==JSON.stringify(b?.[k]));
+  const keys=differ(was,now).flatMap(k=>k==='her'&&was.her&&now.her?differ(was.her,now.her).map(h=>'her.'+h):[k]);
+  return 'config:'+keys.slice(0,12).join(' ');
+ }).join(' ');
 }
