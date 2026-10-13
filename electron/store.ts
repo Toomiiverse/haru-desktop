@@ -534,6 +534,12 @@ export class HaruStore {
     return { ...this.archiveCache };
   }
 
+  /** 3710: the archive's days and how many lines each holds, without copying the transcripts (getArchive() clones them). */
+  getArchiveSizes(): { day: string; length: number }[] {
+    if (this.core) return this.core.sizesOf('archive').map(({ key, length }) => ({ day: key, length }));
+    return Object.entries(this.getArchive()).map(([day, messages]) => ({ day, length: messages.length }));
+  }
+
   setArchive(archive: Archive): void {
     if (this.core) { this.core.set('archive', archive); return; }
     this.archiveCache = archive;

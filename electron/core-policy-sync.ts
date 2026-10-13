@@ -15,7 +15,16 @@ let buffers=new Map<number,SharedArrayBuffer>();
 // shares an object with another. A new turn starts a new memo; outside a turn nothing is kept.
 export const MEMO_OPS=new Set(['mood.normalize','memory-admin.readSlate','memory-tools.normalizeFile','agenda-life.get','conversation-program.todaysExamples',
  // 3410: pure of their arguments, asked 4-12 times a turn each (final-system.config x12, self.explicitModeOn x9, credit-guard.conversationRoute x5 = 80 ms, ...)
- 'credit-guard.conversationRoute','self.explicitModeOn','route-admission.local','natural-policy.contextDefault','memory-admin.known','final-system.config','final-search.config','manga-fetch.config','anime-downloads.config']);
+ 'credit-guard.conversationRoute','self.explicitModeOn','route-admission.local','natural-policy.contextDefault','memory-admin.known','final-system.config','final-search.config','manga-fetch.config','anime-downloads.config',
+ // 3710: 34 more, each verified pure of its arguments by a per-op review and a skeptic (Python implementation, every brain
+ // call site, no hidden input or side effect); ~95 repeat calls a turn on 2026-10-13 (same op, same request size).
+ 'natural-policy.isRemote','feelings.readFeelings','route-admission.allowed','asides.missingIds','asides.read',
+ 'mood.currentTemperament','knowledge-index.config','natural-turn.selectionObserved','projects.readInterests','sleep.availability',
+ 'user-records.readConfig','final-anilist.config','final-shell.available','natural-turn.selectionStart','conversation-policy.readTraits',
+ 'memory-admin.profile','own-time.nightlastNightDay','own-time.nightnightsOn','location.readWhereabouts','sleep.readHerSleepState',
+ 'final-sessions.config','final-downloads.config','device-activity.readsAsDropIt','conversation-policy.fuseOf','attachments.vision',
+ 'route-admission.taskPolicy','user-records.missingIds','user-records.readCheckins','device-activity.readFollowing','conversation-program.weatherState',
+ 'own-time.nightnightsInstruction','tastes.tastesInstruction','diary.parseEntries','diary.context']);
 let memoTurn:unknown=null;let memo=new Map<string,string>();
 // Date carries the local fields the caller observed, including zonedNow's
 // shifted date. ISO serialization alone would change sleep-window semantics.

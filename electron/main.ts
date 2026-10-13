@@ -6962,7 +6962,7 @@ let recallRefreshing = false;
 
 /** The days that are already in front of her whole (history.ts) — no point finding those again. */
 function daysAlreadyShown(todayKey: string): string[] {
-  return corePolicySync('final-recall.shown',[Object.keys(store.getArchive()),todayKey,DAYS_OF_HISTORY]);
+  return corePolicySync('final-recall.shown',[store.getArchiveSizes().map(s=>s.day),todayKey,DAYS_OF_HISTORY]);
 }
 
 /** Every kept exchange before today, the days in front of her included: what search_chats searches and what gets embedded. */
@@ -6978,8 +6978,7 @@ function keptExchanges(todayKey: string): Exchange[] {
 let chatIndexCache: { key: string; index: ChatIndex } | null = null;
 function chatIndex(todayKey: string): ChatIndex {
   {
-    const archive=store.getArchive() as unknown as Record<string,unknown[]>;
-    const decision=corePolicySync<{key:string;rebuild:boolean}>('final-recall.indexPlan',[Object.entries(archive).map(([day,messages])=>({day,length:messages.length})),todayKey,chatIndexCache?.key??null]);
+    const decision=corePolicySync<{key:string;rebuild:boolean}>('final-recall.indexPlan',[store.getArchiveSizes(),todayKey,chatIndexCache?.key??null]);
     if(decision.rebuild)chatIndexCache={key:decision.key,index:buildChatIndex(keptExchanges(todayKey))};
     if(!chatIndexCache)throw Error('chat_index_cache_protocol');return chatIndexCache.index;
   }

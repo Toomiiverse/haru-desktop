@@ -139,6 +139,12 @@ export class CoreStore {
  docRef(name:string,fallback?:any):DocRef{const {digest,doc}=this.digestOf(name,fallback);return {$doc:name,digest,get body(){return structuredClone(doc??fallback);}};}
  sameDoc(name:string,expected:unknown,fallback?:any):boolean{return isDigestRef(expected)?this.digestOf(name,fallback).digest===expected.$digest:sameDocument(this.get(name,fallback),expected);}
  has(name:string):boolean{this.refreshPending(name);return Object.hasOwn(this.view(name),name);}
+ /** 3710: a document's top-level keys and the .length of each value, read without cloning the document (the 707 KB archive
+  *  was cloned three times a turn to learn its day names and sizes). Only fresh arrays leave the store. */
+ sizesOf(name:string):{key:string;length:any}[]{
+  this.refreshPending(name);const doc=this.view(name)[name];
+  return doc&&typeof doc==='object'?Object.entries(doc).map(([key,value])=>({key,length:(value as any).length})):[];
+ }
  set(name:string,value:any):void{
   this.refreshPending();
   if(this.staged){this.staged[name]=structuredClone(value);this.touched.add(name);return;}

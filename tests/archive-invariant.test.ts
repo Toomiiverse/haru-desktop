@@ -65,3 +65,16 @@ test('acknowledged digests age out least recently used first, and use keeps one 
   const wired = wire([{ $doc: 'archive', digest: 'archive-digest', body: { big: 1 } }], { force: null, sent: [] }) as any[];
   assert.deepEqual(wired[0], { $doc: 'archive', digest: 'archive-digest' });   // body not resent
 });
+
+test('sizesOf reads keys and lengths without cloning, from whatever view get() would serve', async () => {
+  const t = make({ config: { a: 1 }, archive: { '2026-10-11': [1, 2], '2026-10-12': [3] }, memories: { m: [] }, schedule: { jobs: [] } }); const s = t.s;
+  const shape = (n: string) => Object.entries(s.get(n, {})).map(([key, v]: [string, any]) => ({ key, length: v.length }));
+  assert.deepEqual(s.sizesOf('archive'), shape('archive'));
+  s.transaction(() => { s.set('archive', { '2026-10-11': [1, 2], '2026-10-12': [3, 4, 5], '2026-10-13': [] }); assert.deepEqual(s.sizesOf('archive'), shape('archive')); });
+  s.transactionBehind(() => { s.set('archive', { '2026-10-13': [9] }); });
+  assert.deepEqual(s.sizesOf('archive'), [{ key: '2026-10-13', length: 1 }]);   // the pending write, as get() would serve it
+  t.release(); await s.asyncTail;
+  assert.deepEqual(s.sizesOf('archive'), shape('archive'));
+  assert.deepEqual(s.sizesOf('absent'), []);
+  const out = s.sizesOf('archive'); out[0].length = 99; assert.equal(s.get('archive')['2026-10-13'].length, 1);   // nothing internal leaves
+});
