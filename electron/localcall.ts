@@ -77,7 +77,7 @@ export type LocalCallDeps = {
    * line so far; a tool round announces itself as it starts. Resolves with the
    * reply that settled, which the brain has already written into the day.
    */
-  answer(text: string, options: { phoneTimeZone?:string; interrupted: boolean; signal?:AbortSignal; callTrace?:{id:string;turn:number}; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void; onActed?(): void }): Promise<{ reply: string; ignored?: boolean }>;
+  answer(text: string, options: { phoneTimeZone?:string; interrupted: boolean; signal?:AbortSignal; callTrace?:{id:string;turn:number}; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void; onActed?(): void; repeated?: string }): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her voice for a line: a stream of mono PCM16 with no header, and its
    * rate. Null when she has no voice to give. Every line of one reply comes
@@ -592,10 +592,10 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       queue = [];
       activeSpeech?.abort();
     }
-    void turn(merged ? `${merged.text} ${text}` : text, timing, localReply);
+    void turn(merged ? `${merged.text} ${text}` : text, timing, localReply, merged?.text);
   }
 
-  async function turn(text: string, heardTiming: HeardTiming, localReply?:string) {
+  async function turn(text: string, heardTiming: HeardTiming, localReply?:string, repeated?:string) {
     const answering=new AbortController();
     activeAnswer=answering;
     const mine = ++turns;
@@ -646,6 +646,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           {const p=corePolicySync<any>('speech-boundary.sentencePlan',[{mood,stretch,sentences},sentence,emotion]);mood=p.mood;stretch=p.stretch;sentences=p.sentences;if(p.moodChanged)lastEmotion=mood;for(const command of p.commands)say({...command,seed,filler:false});return;}
         },
         onActed: () => acted(mine),
+        ...(repeated ? { repeated } : {}),   // 3770: the merged words already heard once (counted once, not again)
         onToolCall: name => {
           acted(mine);   // even after a drop: the tool ran
           if (generation !== myGeneration || turns !== mine) return;
@@ -839,6 +840,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       if(reactionTimer){clearTimeout(reactionTimer);reactionTimer=null;}
       queue=queue.filter(line=>!line.reaction);
       listening.abort();
+      activeAnswer?.abort('hung-up');   // 3770: not a drop: what he asked before hanging up is still written down, as before
       dropHerVoice();
       if(pending)holdLine('dropped');
       finishTurn();

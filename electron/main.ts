@@ -1143,6 +1143,8 @@ async function ownedComposeOpening():Promise<string|null>{
 
 function ownedAgendaCore(){return remainingStore(app.getPath('userData'));}
 let agendaWrites=0;   // 3770: committed agenda writes, so a call turn can tell that it acted
+/** 3770: stop a call turn dropped for his next words; a hang-up is not a drop (what he asked is still written down, as before). */
+function stopIfDropped(signal?: AbortSignal) { if (signal?.aborted && signal.reason !== 'hung-up') signal.throwIfAborted(); }
 function ownedAgendaChanged(packet:any){
   if(packet.plan)agendaWrites++;
   if(packet.plan){sendToWindows('kept:changed',corePolicySync<any>('agenda-life.get',[packet.plan.config.kept?.items??[]]));broadcastGoogleStatus();}
@@ -5503,7 +5505,7 @@ async function ollamaChat(...args: Parameters<typeof ollamaChatTurn>): ReturnTyp
   return inferencePriority.runForeground(() => affectTurn(args[0], args[2] ?? {}, options => ollamaChatTurn(args[0], args[1], options)));
 }
 
-async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, onActed, traceId, signal }: { signal?:AbortSignal; onPublished?: (content: string) => void; onActed?: () => void; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
+async function ollamaChatTurn(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, onPublished, onActed, repeated, traceId, signal }: { signal?:AbortSignal; onPublished?: (content: string) => void; onActed?: () => void; repeated?: string; hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string; affect?: unknown } = {}) {
   signal?.throwIfAborted();
   markTurn('harness_start');
   const enteredAt = Date.now();
@@ -5544,18 +5546,19 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   if (earlyMemory) await new Promise<void>(resolve => setImmediate(resolve));   // let the request leave before the blocking policy calls
   // 3770: every durable write below a check runs synchronously after it, so a turn dropped on a call either stops before
   // writing or has signalled that it acted (it is then never merged into his next words and asked again).
-  signal?.throwIfAborted();
-  const agendaWritesAtEntry = agendaWrites;
+  stopIfDropped(signal);
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
+  const agendaWritesAtEntry = agendaWrites;
   tickOffSpoken(latest);
+  // Only the tick acts: run again on merged words it can tick a second task. Put-off, started and accounted are idempotent.
+  if (agendaWrites !== agendaWritesAtEntry) onActed?.();
   startedSpoken(latest);
   // A new day for something is as much a report as finishing it is.
   putOffSpoken(latest);
   // Separate from ticking off, and it has to be: an event is never ticked off,
   // and the answer to "how did it go" rarely looks like a completion.
   noteTheyAccounted(latest);
-  if (agendaWrites !== agendaWritesAtEntry) onActed?.();
   // They have spoken, which is what every escalation was trying to achieve.
   // Asked for somewhere real — a steakhouse, a barber, a place to eat — the
   // search runs before she answers and the results ride in beside the message,
@@ -5674,7 +5677,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   const theirRecent = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
   let reminder: ReturnType<typeof reminderAsk> = null;
   {
-    signal?.throwIfAborted();   // 3770: see the turn-entry note
+    stopIfDropped(signal);   // 3770: see the turn-entry note
     const packet=corePolicySync<any>('agenda-life.directReminder',[agendaFacts(ownedAgendaCore()),{lastIsUser:messages.at(-1)?.role==='user',latest,previous:typeof herPrevious==='string'?herPrevious:null,recentUsers:theirRecent,clock:agendaClock(zonedNow(CHAT_TIMEZONE))},new Date().toISOString(),randomUUID()]);
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
     if(packet.plan)onActed?.();   // 3770: a reminder written from his words: this turn acted (a call does not merge it into the next)
@@ -5684,10 +5687,12 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // Counted here rather than in the prompt so it survives across turns: telling
   // her to drop it and having her comply for one reply is the whole complaint.
   const previousPushback = store.get('pushback') as Pushback | undefined;
-  const pushback=(deviceMutation('pushback',[latest],deviceStateAdapter()));
+  // 3770: on a merged call turn, only his new words are counted as pushing back (the first part was counted when it was heard).
+  const newWords = repeated && latest.startsWith(repeated) ? latest.slice(repeated.length).trim() : latest;
+  const pushback=(deviceMutation('pushback',[newWords],deviceStateAdapter()));
   
-  if (readsAsDropIt(latest)) feelNow('drop-it');
-  if (readsAsDropIt(latest)) console.log(`[pushback] told to drop it (${pushback.count}/${PUSHBACK_LIMIT})${isSilenced(pushback, Date.now()) ? ' — dropping the subject entirely' : ''}`);
+  if (readsAsDropIt(newWords)) feelNow('drop-it');
+  if (readsAsDropIt(newWords)) console.log(`[pushback] told to drop it (${pushback.count}/${PUSHBACK_LIMIT})${isSilenced(pushback, Date.now()) ? ' — dropping the subject entirely' : ''}`);
   nudgeVitals('spoken-to');
   // Feelings and mood are one interaction update, committed together before dispatch.
   // 3480 write-behind: the mood is known now; the disk catches up while the prompt is prepared (~75-120 ms a turn).
@@ -6477,13 +6482,6 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // is a reminder that exists only in the conversation. See reminderPromised.
   // Not when she already wrote it down herself this turn: the tool ran and
   // she said "reminder set", and the net caught the sentence a second time.
-  {
-    signal?.throwIfAborted();   // 3770: see the turn-entry note
-    const packet=corePolicySync<any>('agenda-life.final',[agendaFacts(ownedAgendaCore()),getAsides(),{lastIsUser:messages.at(-1)?.role==='user',hasReminder:Boolean(reminder),ran:[...ran],latest,reply:cleaned,previous:typeof herPrevious==='string'?herPrevious:'',recentUsers:messages.filter(m=>m.role==='user').slice(-4).map(m=>String(m.content??'')),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),now:Date.now()},new Date().toISOString(),randomUUID()]);
-    applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
-    if(packet.plan)onActed?.();
-    if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
-  }
   // The eye-roll in thirty-five of forty replies: the wording that caused it is
   // fixed (EXPRESSIVE), and this catches what the wording does not.
   // herRecentReplies, not `recent`: that holds the last two she said, one fewer
@@ -6523,6 +6521,13 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
       if(typeof voiced==='string')content=voiced;
     } catch(error) { console.warn('[ai] publication voice unavailable:',error instanceof Error?error.message:'transport'); }
   signal?.throwIfAborted();
+  // 3770: her reply-promise reminder is written here, with nothing awaited before the commit that says it: a turn dropped
+  // earlier writes nothing (and is merged); a turn that gets here says it.
+  {
+    const packet=corePolicySync<any>('agenda-life.final',[agendaFacts(ownedAgendaCore()),getAsides(),{lastIsUser:messages.at(-1)?.role==='user',hasReminder:Boolean(reminder),ran:[...ran],latest,reply:cleaned,previous:typeof herPrevious==='string'?herPrevious:'',recentUsers:messages.filter(m=>m.role==='user').slice(-4).map(m=>String(m.content??'')),clock:agendaClock(zonedNow(CHAT_TIMEZONE)),now:Date.now()},new Date().toISOString(),randomUUID()]);
+    applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
+    if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
+  }
   replyGate.commit(content);
   // 3760: the reply is final: say what is left of it now (a one-sentence reply waited for the turn's end, ~0.2-0.3 s).
   try{onPublished?.(content);}catch(error){console.warn('[voice] early flush failed:',error instanceof Error?error.message:'error');}
@@ -9387,7 +9392,7 @@ function webDeps(): WebDeps {
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
       const files = readAttachments(attachments).slice(0, 6);
       const affect = await admitAffect([...history, { role: 'user', content: text }], { eventId: options?.requestId ?? (options?.callTrace?.id ? ('call-' + options.callTrace.id + '-' + options.callTrace.turn) : undefined), call: options?.call, signal: options?.signal });
-      options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
+      stopIfDropped(options?.signal);   // 3770: a dropped call turn posts nothing (a hung-up one still does, as before)
       if (affect?.reply) {
         const reply = stripDelivery(affect.reply);
         rememberDelivery(affect.reply, reply);
@@ -9409,7 +9414,7 @@ function webDeps(): WebDeps {
       const door = saidSettingDesk ? null : herAsleepNow() ? knockWhileAsleep() : null;
       if (door) {
         await affectOutcome(affect, 'completed');
-        options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
+        stopIfDropped(options?.signal);   // 3770: a dropped call turn posts nothing (a hung-up one still does, as before)
         const trace = newTrace();
         const raw = affectDelivery(affect, door);
         const line = stripDelivery(raw);
@@ -9428,7 +9433,7 @@ function webDeps(): WebDeps {
       trace.mark('intent');
       if (quick) {
         await affectOutcome(affect, 'completed');
-        options?.signal?.throwIfAborted();   // 3770: a dropped call turn posts nothing
+        stopIfDropped(options?.signal);   // 3770: a dropped call turn posts nothing (a hung-up one still does, as before)
         onChunk(quick.reply);
         // Fed whole and flushed: a quick line has no stream behind it to end
         // the last sentence, and unflushed it was never voiced on a call.
@@ -9469,6 +9474,7 @@ function webDeps(): WebDeps {
         ...(options?.call ? { aside: callAside(Boolean(options.interrupted)), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         ...(options?.onActed ? { onActed: options.onActed } : {}),
+        ...(options?.repeated ? { repeated: options.repeated } : {}),
         signal:options?.signal,
         onSending: () => trace.mark('sending'),
         onPublished: content => { published = content; try { voice.flush(); } catch (error) { flushError = error; } },   // 3760: what is left of the final reply is said at once
@@ -10017,7 +10023,7 @@ function webDeps(): WebDeps {
           prepareHear:(wav:Uint8Array,signal?:AbortSignal)=>prepareHearing(wav,'audio/wav',signal),
           ...(call.prepareAfterMs ? {prepareAfterMs:call.prepareAfterMs} : {}),
           unfinishedQuietMs:call.unfinishedQuietMs,
-          answer: (text, { interrupted, onSentence, onToolCall, onActed, callTrace, signal, phoneTimeZone }) => runTimedTurn(`call-${callTrace?.id ?? randomUUID()}-${callTrace?.turn ?? 0}`, () => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, onActed, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)), spanCountingSink(counts => console.log('[call-prep] '+JSON.stringify({callId:callTrace?.id??null,turn:callTrace?.turn??null,...counts})))),   // 3760
+          answer: (text, { interrupted, onSentence, onToolCall, onActed, repeated, callTrace, signal, phoneTimeZone }) => runTimedTurn(`call-${callTrace?.id ?? randomUUID()}-${callTrace?.turn ?? 0}`, () => withIOSOrigin(deviceId, () => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall, onActed, repeated, callTrace, signal, ...(phoneTimeZone?{phoneTimeZone}:{}) }, onSentence)), spanCountingSink(counts => console.log('[call-prep] '+JSON.stringify({callId:callTrace?.id??null,turn:callTrace?.turn??null,...counts})))),   // 3760
           // Her mood as the standing tab reads it — no model call — for a reply
           // whose first sentence names no register of its own. Only the moods
           // that change how she sounds pass through; the warm ones would have
