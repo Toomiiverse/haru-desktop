@@ -1593,11 +1593,11 @@ const UNPROMPTED_CONTEXT_TURNS = 10;
  * morning is its own kind of wrong.
  */
 function spokenOn(day: string, today: string): { role?: string; content?: string }[] {
-  return corePolicySync<any>('agenda-life.spokenOn',[ownedAgendaCore().docRef('config',{}),store.getArchive(),day,today]);
+  return corePolicySync<any>('agenda-life.spokenOn',[ownedAgendaCore().docRef('config',{}),ownedAgendaCore().docRef('archive',{}),day,today]);   // 3690: archive by digest
 }
 
 function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
-  return corePolicySync<any>('agenda-life.todaySoFar',[ownedAgendaCore().docRef('config',{}),store.getArchive(),localDateKey(zonedNow(CHAT_TIMEZONE)),limit]);
+  return corePolicySync<any>('agenda-life.todaySoFar',[ownedAgendaCore().docRef('config',{}),ownedAgendaCore().docRef('archive',{}),localDateKey(zonedNow(CHAT_TIMEZONE)),limit]);   // 3690: archive by digest
 }
 
 /**

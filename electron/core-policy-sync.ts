@@ -30,12 +30,20 @@ export function wire(value:unknown,carry:Carry={force:null,sent:[]}):unknown {
   const ref=value as {$doc?:unknown;digest?:unknown;body?:unknown};
   if(typeof ref.$doc==='string'&&typeof ref.digest==='string'&&Object.hasOwn(ref,'body')){
    if(!carry.strip&&(!acked.has(ref.digest)||carry.force?.has(ref.digest))){carry.sent.push(ref.digest);return {$doc:ref.$doc,digest:ref.digest,body:wire(ref.body,carry)};}
+   if(!carry.strip){acked.delete(ref.digest);acked.add(ref.digest);}   // 3690: used, so most recent
    return {$doc:ref.$doc,digest:ref.digest};
   }
   return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,wire(v,carry)]));
  }
  return value;
 }
+/** 3690: the digests the Core has acknowledged, least recently used first. Clearing them all at 64 also dropped the archive's,
+ *  which is used every turn, and the next call resent its 707 KB though the Core still held it. */
+export function ackDigests(sent:readonly string[]){
+ for(const digest of sent){acked.delete(digest);acked.add(digest);}
+ while(acked.size>64)acked.delete(acked.values().next().value as string);
+}
+export function isAcked(digest:string){return acked.has(digest);}
 export function memoKey(operation:string,args:unknown[]):string{return operation+'\0'+JSON.stringify(wire(args,{force:null,sent:[],strip:true}));}
 export function coreAdapterOwner(){
  const stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');
@@ -80,7 +88,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
   force=new Set(value.needs as string[]);continue;
  }
  if(!Object.hasOwn(value,'result'))throw Error('core_policy_protocol_error');
- if(acked.size>64)acked.clear();for(const digest of carry.sent)acked.add(digest);
+ ackDigests(carry.sent);
  if(key)memo.set(key,JSON.stringify(value.result));
  // 3490: a call the Core finished fast but this side waited long for (~1 turn in 20 shows one of 0.5-1 s) — queueing
  // somewhere between the two; the journal gets both clocks so the cause can be found.
