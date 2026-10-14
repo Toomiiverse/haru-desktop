@@ -5,6 +5,7 @@ import {corePolicySync} from './core-policy-sync';
 import {activeTask} from './task-controller';
 import type {Attachment} from './attachments';
 import type {VisionConfig} from './vision';
+import {explicitlyLocalOnly,mayLeaveTheMachine} from './sensitivity';
 export const attachmentPolicy=<T=any>(op:string,args:unknown[]):T=>corePolicySync<T>('attachments.'+op,args);
 export const attachmentCurrent=()=>activeTask.getStore()?.signal.throwIfAborted();
 export function attachmentFileSource(file:string){
@@ -68,14 +69,22 @@ export async function readCoreAttachment(a:Attachment,v:VisionConfig,provider:an
  })();running.set(packet.ticket.id,work);
  try{return await work;}finally{running.delete(packet.ticket.id);}
 }
+/** 3820: a picture reading goes to the chat model as the user's own text, so one that names a secret or asks to stay local
+ *  would block the whole turn; the picture itself goes instead (images are outside the text scanner), as before 3820. */
+export const readingUsable=(text:string)=>Boolean(text.trim())&&!explicitlyLocalOnly(text)&&mayLeaveTheMachine(text,false,{namesAlone:true}).safe;
 export async function foldCoreAttachments(messages:any[],inPlay:Map<number,Attachment[]>,sees:boolean,read:(a:Attachment)=>Promise<string>,image:(file:string)=>string){
  const plans=attachmentPolicy('fold',[messages,[...inPlay],sees]),out=[...messages];
- for(const plan of plans){const opened:any[]=[],images:string[]=[];
-  for(const file of plan.files){attachmentCurrent();const attachment=file.attachment;
-   try{if(file.action==='image'){images.push(image(attachment.saved));opened.push({attachment});}else opened.push({attachment,readable:await read(attachment)});}
-   catch(error){attachmentCurrent();opened.push({attachment,readable:''});}
-  }
-  attachmentCurrent();out[plan.index]=attachmentPolicy('folded',[messages[plan.index],opened,images]);
- }
+ // 3820: every file is read at once (a hosted picture read is 1.3-3.3 s; a message carries up to 6)
+ await Promise.all(plans.map(async(plan:any)=>{
+  const files=await Promise.all(plan.files.map(async(file:any)=>{attachmentCurrent();const attachment=file.attachment;
+   try{
+    if(file.action==='image')return {opened:{attachment},image:image(attachment.saved)};
+    let readable='';try{readable=await read(attachment);}catch(error){attachmentCurrent();}
+    if(file.fallback==='image'&&!readingUsable(readable)){console.log(`[attach] picture sent as image — ${readable.trim()?'the reading cannot leave as text':'no reading'}`);return {opened:{attachment},image:image(attachment.saved)};}
+    return {opened:{attachment,readable}};
+   }catch(error){attachmentCurrent();return {opened:{attachment,readable:''}};}
+  }));
+  attachmentCurrent();out[plan.index]=attachmentPolicy('folded',[messages[plan.index],files.map(f=>f.opened),files.flatMap(f=>f.image===undefined?[]:[f.image])]);
+ }));
  return out;
 }

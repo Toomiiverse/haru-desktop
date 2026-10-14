@@ -120,7 +120,7 @@ import { toResponsesBody, fromResponsesReply, streamResponses } from './response
 import { toAnthropicBody, fromAnthropicReply, streamAnthropic } from './anthropic-provider';
 import { TaskBridge } from './task-bridge';
 import { TaskController, activeTask } from './task-controller';
-import {coreLook} from './core-perception';
+import {coreLook,coreHostedLook} from './core-perception';
 import {noteCoreUserActivity,noteCoreGame} from './core-live-state';
 import {coreLocalBudget} from './core-local-budget';
 import {coreCloudFetch} from './core-cloud-provider';
@@ -1833,7 +1833,8 @@ function attachmentAdapters(vision:VisionConfig,provider:ProviderConfig){
  const tools=findFfmpeg();
  return {facts:()=>attachmentFacts([provider.endpoint,vision.endpoint??'']),source:(a:Attachment)=>({file:attachmentFileSource(a.saved),vision,provider,brain:store.get('ai.config')}),hasTools:()=>Boolean(tools),
  pdf:readPdf,text:readText,image:imageForSending,eyes:eyesForReading,
- look:(images:string|string[],command:any)=>ownedLook(images,command.config,command.endpoint,modelHeaders(command.endpoint),net.fetch,command.options),
+ look:(images:string|string[],command:any)=>command.entry?coreHostedLook(images,command.entry,{...command.options,timeoutMs:command.timeoutMs},{rpc:taskBridge.call,policy:()=>readTaskPolicy(store.get('ai.taskPolicy')),send:sendToProviderAdmitted})   // 3820
+  :ownedLook(images,command.config,command.endpoint,modelHeaders(command.endpoint),net.fetch,command.options),
  frames:(file:string)=>extractFrames(file,tools!),readFrame:(file:string)=>readFileSync(file).toString('base64'),audio:(file:string,seconds:number)=>extractAudio(file,tools!,seconds),transcribe:transcribeFile,
  waiting:(line:string)=>{sendToWindows('chat:interject',line);void speak(line);},discard};
 }
@@ -5848,7 +5849,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // Said out loud, once, when a picture has just been attached and cannot be
   // sent. She still answers — from a written-out reading of it — but the answer
   // is measurably thinner, and silently thinner is the worst version of that.
-  if (pictures && !brain.sees && vetted.at(-1)?.attachments?.some(file => file.kind === 'image')) {
+  if (pictures && !brain.sees && !brain.hosted && vetted.at(-1)?.attachments?.some(file => file.kind === 'image')) {   // 3820: hosted turns get the picture read
     console.log(`[attach] reading the picture here instead of sending it — ${brain.because}`);
     sendToWindows('ai:fellBack', brain.because.startsWith('stays here')
       ? `That picture is staying on this machine — ${brain.because.replace(/^stays here: /, '')}. She is reading it with the local model instead, which is less sharp.`

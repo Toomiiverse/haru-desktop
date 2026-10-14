@@ -1,9 +1,11 @@
 // Core owns one perception request; the existing local vision transport remains
 // an adapter. Current foreground tasks keep their existing reservation owner.
 import {coreModelFetch} from './core-model-provider';
-import {look,visionConversation,type Sighting} from './vision';
+import {look,visionConversation,type Sighting,type LookOptions} from './vision';
 import {TaskController,activeTask} from './task-controller';
-import {isLocalConfig,type ModelEntry,type TaskPolicy} from './model-registry';
+import {isLocalConfig,type ModelEntry,type ProviderConfig,type TaskPolicy} from './model-registry';
+import {turnImages} from './core-harness-media';
+import type {ChatMessage} from './provider';
 import type {TaskRPC} from './task-bridge';
 import {coreObservation} from './core-live-state';
 import {randomUUID} from 'node:crypto';
@@ -36,4 +38,14 @@ export async function coreLook(args:Parameters<typeof look>,deps:PerceptionDeps)
   await task.start('Local image perception (no actions)',vision.model,options.priority??'foreground');
   await task.compose(()=>request(task),messages);
   return sighting!;
+}
+
+/** 3820: a picture read by the Core's hosted reader entry (Baseten DeepSeek) for a chat model that can't see. It crosses the
+ *  Core's calls as a reference (send puts the bytes back at the provider); one attempt, no tools, the reader's deadline. */
+export async function coreHostedLook(images:string|string[],entry:ModelEntry,options:LookOptions&{timeoutMs?:number},deps:{rpc:TaskRPC;policy:()=>TaskPolicy;
+  send:(messages:ChatMessage[],config:ProviderConfig,options:{tools:false;table:[];maxTokens?:number})=>Promise<ChatMessage>}):Promise<Sighting>{
+  const messages=turnImages.toCore(visionConversation(images,options) as ChatMessage[]);
+  const task=new TaskController(deps.rpc,[entry],{...deps.policy(),maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:options.timeoutMs??15000},true);
+  await task.start('Picture reading (no actions)',entry.config.model,'foreground',options.signal);
+  return {description:await task.compose(()=>deps.send(messages,entry.config,{tools:false,table:[],maxTokens:options.numPredict}),messages),model:entry.config.model};
 }
