@@ -46,7 +46,9 @@ function scanOutbound(messages: readonly ChatMessage[], toolSchema?: readonly un
     if(message.role==='user' && explicitlyLocalOnly(message.content??''))throw new Error('outbound_local_only_requested');
     // Transport metadata never leaves the machine and is not evidence: a message id is a random UUID, and on
     // 2026-10-12 one ("36582565-3772-4202-9a59-…") read as a card number, which kept every later turn local.
-    const { images: _images, id: _id, at: _at, time: _time, ...text } = providerPrivacyView(message) as ReturnType<typeof providerPrivacyView> & { id?: unknown; at?: unknown; time?: unknown };
+    // 3840: so is the attachment record (saved path, id, size): no provider body carries it, and ~1 in 10 phone photo paths
+    // (".../2026-10-14-135754-photo-1791986267.jpg") read as a card number and took the whole turn local (2026-10-14 13:57).
+    const { images: _images, id: _id, at: _at, time: _time, attachments: _attachments, ...text } = providerPrivacyView(message) as ReturnType<typeof providerPrivacyView> & { id?: unknown; at?: unknown; time?: unknown; attachments?: unknown };
     const verdict = mayLeaveTheMachine(JSON.stringify(text), false, { namesAlone: message.role === 'user' });
     visit(text);
     const raw = mayLeaveTheMachine(text.content ?? '', false, { namesAlone: message.role === 'user' });
