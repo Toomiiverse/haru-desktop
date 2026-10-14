@@ -4,7 +4,7 @@ import {currentAffect} from './core-affect';
 import {readFileSync} from 'node:fs';
 import WebSocket from 'ws';
 import {CoreServiceClient,type CoreServiceOptions} from './core-service-client';
-import {HarnessMedia} from './core-harness-media';
+import {HarnessMedia,withImageBytes} from './core-harness-media';
 import type {ChatMessage} from './provider';
 import {toolContract} from './tool-contract';
 import {makeToolReceipt} from './tool-receipt';
@@ -88,7 +88,7 @@ export async function runCoreHarness(conversation:ChatMessage[],deps:ToolLoopDep
           }else if(event.action==='media'){
             await binding();
             if(!Array.isArray(payload.references)||payload.references.length>4||payload.references.some((x:any)=>typeof x!=='string'))throw Error('core_harness_media_invalid');
-            result={images:media.fromCore([{role:'user',images:payload.references}])[0].images};
+            result={images:withImageBytes(media.fromCore([{role:'user',images:payload.references}]))[0].images};
           }else if(event.action==='tool-snapshot'){
             if(!general||!deps.toolSnapshot)throw Error('core_harness_profile_invalid');
             await binding();result={table:deps.toolsAllowed?.()===false||deps.pageWasRead()?[]:deps.toolSnapshot()};

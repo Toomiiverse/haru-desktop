@@ -170,6 +170,7 @@ import { DOWNTIME_NOTICE_MS, backMessage, readLivenessFile } from './liveness';
 import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS, SECOND_THOUGHT_ODDS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
+import { turnImages, withImageBytes } from './core-harness-media';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
@@ -4434,6 +4435,7 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
 }
 
 async function sendToProviderUnchecked(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
+  conversation = withImageBytes(conversation);
   if (config.model === 'gpt-6-astra' && new URL(config.endpoint).hostname === 'api.openai.com') {
     requireKeyFor(config.endpoint, 'openai');
     const body = toResponsesBody({ model: config.model, conversation, tools: tools ? table : undefined, maxTokens: maxTokens ?? 2048, stream: Boolean(onChunk), cacheKey });
@@ -5855,7 +5857,9 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // Reading a file is the slow part, so it happens once the brain is settled and
   // its result is cached — a follow-up about the same video must not transcribe
   // it a second time.
-  const withFiles = compactConversation ? vetted : await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  // 3810: the Core sees a reference per picture; sendToProviderUnchecked puts the bytes back (core-harness-media.ts).
+  const attached = compactConversation ? vetted : await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  const withFiles = turnImages.toCore(attached as any) as unknown as typeof attached;
   prepMark('attachments');
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
   // Literal fresh-image descriptions already have one grounded foreground
