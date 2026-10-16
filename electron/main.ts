@@ -82,7 +82,8 @@ import {coreEveryday,coreProactiveRecall,coreRefreshRecall,recallFrames} from '.
 import {runCorePicture} from './core-final-picture';
 import {coreSessionLink} from './core-final-sessions';
 import {LOCAL_DIRS} from './claudesession';
-import { codeJobs, codeLink, openCodeApi, type CodeLink } from './codetask';
+import { codeJobs, codeLink, openCodeApi, openCodeAuth, type CodeLink } from './codetask';
+import { codeEventHub, codeMode, type CodeModeLink } from './codemode';
 import {runCoreShell} from './core-final-shell';
 import {locationPolicy,locationFlow,locationClock,applyCoreLocation} from './core-location-policy';
 import {devicePolicy,deviceFlow,deviceMutation,handleCoreHelper,reactCoreActivity,reactCoreFullscreen,tieCorePlace} from './core-device-activity';
@@ -3971,16 +3972,23 @@ function downloadsLink(): Downloads | null {
  */
 const OPENCODE_BIN = path.join(os.homedir(), '.npm-global/bin/opencode');
 let codeTasksLink: CodeLink | null | undefined;
-/** Coding jobs handed to OpenCode (codetask.ts): one link for the tool and the watch, null when OpenCode is not installed. */
+let codeModeLink: CodeModeLink | null | undefined;
+let codeHub: ReturnType<typeof codeEventHub> | null = null;
+/** Coding jobs handed to OpenCode (codetask.ts) and his own coding mode (codemode.ts): one OpenCode link each, null when OpenCode is not installed. */
 function codeTasks(): CodeLink | null {
-  if (codeTasksLink === undefined) codeTasksLink = existsSync(OPENCODE_BIN) ? codeLink({ api: openCodeApi(OPENCODE_BIN, os.homedir()), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir() }) : null;
+  if (codeTasksLink === undefined) codeTasksLink = existsSync(OPENCODE_BIN) ? codeLink({ api: openCodeApi(), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir(), listening: id => codeHub?.listening(id) ?? false }) : null;
   return codeTasksLink;
 }
-let codeWatchTimer: NodeJS.Timeout | null = null;
-/** Every 30 s: a job that finished, stopped or wants his OK becomes an aside, which reaches the phone as an event. */
-function startCodeWatch() {
-  if (codeWatchTimer || !codeTasks()) return;
-  codeWatchTimer = setInterval(() => { void codeTasks()?.watch((line, about) => { noteAside(line, 'code', about); }).catch(error => console.warn('[code]', error instanceof Error ? error.message : 'failed')); }, 30_000);
+function codeModeNow(): CodeModeLink | null {
+  if (codeModeLink === undefined) codeModeLink = existsSync(OPENCODE_BIN)
+    ? codeMode({ api: openCodeApi(), hub: codeHub ??= codeEventHub(openCodeAuth()), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir(), file: path.join(app.getPath('userData'), 'code-mode.json') }) : null;
+  return codeModeLink;
+}
+/** Each chase tick: her jobs' news becomes an aside (a phone event); his own coding-mode session pushes to him directly, only when he is not watching it. */
+async function codeWatchTick() {
+  try {
+    await codeTasks()?.watch((line, about, direct) => { if (direct) void pushToPhone('events', line, 'haru://code'); else noteAside(line, 'code', about); });
+  } catch (error) { console.warn('[code]', error instanceof Error ? error.message : 'failed'); }
 }
 
 function claudeSessions(): ToolDeps['claude'] {
@@ -9687,6 +9695,11 @@ function webDeps(): WebDeps {
       return coreUserRecord('checkins.add',{note,anxiety});
     },
     nudge: () => nudgeForPhone(),
+    code: (link => link ? { ...link, leave: () => {
+      const outcome = link.leave();
+      if (outcome) noteDeed('code_task', { function: { arguments: { action: 'session', folder: outcome.folder, task: outcome.task } } }, JSON.stringify({ ok: true }));
+      return { noted: Boolean(outcome) };
+    } } : null)(codeModeNow()),
     google: {
       status: () => googleStatus(store),
       // The consent page, for signing in from a laptop that forwards the
@@ -10377,7 +10390,6 @@ async function startWebDoor() {
     startPhoneOpportunities();
     startProactive();
     startChasing();
-    startCodeWatch();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the
@@ -11186,7 +11198,7 @@ function startNativePeriodicWork() {
             'task-catalog': refreshTaskCatalog,
             'phone-opportunities': checkPhoneOpportunities,
             'proactive': proactiveTick,
-            'chase': chaseTick,
+            'chase': () => Promise.all([chaseTick(), codeWatchTick()]),
         },
     });
     coreBackgroundStarted = true;

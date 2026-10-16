@@ -51,6 +51,7 @@ import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
 import { readActivityReport, type ActivityReport } from './activity-observation';
 import { validNudgePreference } from './nudge-learning';
 import type { Aside, NudgePreference } from './asides';
+import type { CodeModeLink } from './codemode';
 
 export type WebDeps = {
   /** Core-authored status text; the web transport makes no credit or route decisions. */
@@ -183,6 +184,8 @@ export type WebDeps = {
     /** One real push, now, preferences ignored. True if a push service took it. */
     test(): Promise<boolean>;
   };
+  /** Coding mode (codemode.ts): his own OpenCode session beside the chat, kept out of her history; leaving notes one deed for her. Null without OpenCode. */
+  code?: (Omit<CodeModeLink, 'leave'> & { leave(): { noted: boolean } }) | null;
   /** Google Calendar and Tasks: where the connection stands, and a consent page to reconnect from another machine. */
   google: {
     status(): unknown;
@@ -1194,6 +1197,46 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       return json(res, response.status, await response.json());
     } catch { return json(res, 503, { error: 'Local profile unavailable.' }); }
   }
+  // Coding mode: his own conversation with the coder, on routes of its own so it never waits in, or writes to, her chat.
+  if (path.startsWith('/api/code/')) {
+    const code = deps.code;
+    if (!code) return json(res, 404, { error: 'Coding mode is not set up on this server.' });
+    if (req.method === 'POST' && req.headers['sec-fetch-site'] === 'cross-site') return json(res, 403, { error: 'same_origin_required' });
+    if (req.method === 'POST' && req.headers.origin) {
+      try { if (new URL(req.headers.origin).host !== req.headers.host) return json(res, 403, { error: 'same_origin_required' }); }
+      catch { return json(res, 403, { error: 'same_origin_required' }); }
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    const route = `${req.method} ${path.slice('/api/code/'.length)}`;
+    if (route === 'GET events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+      res.flushHeaders();
+      const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
+      const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': waiting\n\n'); }, 10000); heartbeat.unref();
+      let stop: (() => void) | null = null;
+      res.once('close', () => { clearInterval(heartbeat); stop?.(); });
+      try { stop = await code.subscribe(emit); if (!stop || res.destroyed) { stop?.(); clearInterval(heartbeat); res.end(); } }
+      catch (error) { emit({ kind: 'error', id: 'stream', text: error instanceof Error ? error.message : 'The coder is not answering.' }); clearInterval(heartbeat); res.end(); }
+      return;
+    }
+    let body: any = {};
+    if (req.method === 'POST') { try { body = await readBody(req, 64 * 1024) ?? {}; } catch { return json(res, 400, { error: 'Bad request.' }); } }
+    const text = (key: string) => typeof body[key] === 'string' ? body[key] : '';
+    try {
+      switch (route) {
+        case 'GET state': return json(res, 200, await code.state());
+        case 'GET diff': return json(res, 200, code.diff());
+        case 'POST session': return json(res, 200, await code.start(text('folder'), text('model') || undefined));
+        case 'POST prompt': return json(res, 200, await code.prompt(text('text')));
+        case 'POST model': return json(res, 200, await code.model(text('model')));
+        case 'POST permission': return json(res, 200, await code.permission(text('id'), text('decision')));
+        case 'POST stop': return json(res, 200, await code.stop());
+        case 'POST leave': return json(res, 200, code.leave());
+      }
+    } catch (error) { return json(res, 409, { error: error instanceof Error ? error.message : 'The coder is not answering.' }); }
+    return json(res, 404, { error: 'Nothing here.' });
+  }
+
   // Fixed authenticated transport; the body cannot supply owner or device identity.
   if (req.method === 'POST' && path === '/api/local/task') {
     if (req.headers['sec-fetch-site'] === 'cross-site') return json(res, 403, { error: 'same_origin_required' });
