@@ -140,17 +140,25 @@ export function gitDiff(dir: string, run = (args: string[]) => execFileSync('git
   return { files, untracked: run(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean).slice(0, 100) };
 }
 
-export function codeMode({ api, hub, jobs, home, file, diff = gitDiff }: { api: CodeApi; hub: Hub; jobs: Jobs; home: string; file: string; diff?: typeof gitDiff }) {
+/** What the haru-coder key has spent today against its daily cap (LiteLLM; OpenCode prices its custom provider at $0). */
+export async function coderSpend(keyFile: string, url = 'http://127.0.0.1:4000/key/info') {
+  const response = await fetch(url, { headers: { authorization: 'Bearer ' + readFileSync(keyFile, 'utf8').trim() }, signal: AbortSignal.timeout(5000) });
+  const info = (await response.json())?.info ?? {};
+  return { today: Number(info.spend ?? 0), cap: Number(info.max_budget ?? 0), resetsAt: info.budget_reset_at ?? null };
+}
+
+export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = async () => null }: { api: CodeApi; hub: Hub; jobs: Jobs; home: string; file: string; diff?: typeof gitDiff; spend?: () => Promise<unknown> }) {
   const read = (): ModeState => { try { return { model: CODE_MODELS[0].id, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { return { model: CODE_MODELS[0].id }; } };
   const write = (s: ModeState) => { writeFileSync(file + '.tmp', JSON.stringify(s)); renameSync(file + '.tmp', file); };
   const session = () => { const s = read(); if (!s.sessionId || !s.dir) throw Error('Pick a project folder first.'); return s as Required<Pick<ModeState, 'sessionId' | 'dir'>> & ModeState; };
   const asks = async (id: string) => ((await api('GET', `/api/session/${id}/permission`)) ?? []) as { id: string; resources: string[] }[];
 
   async function state() {
-    const s = read(), base = { folder: s.folder ?? null, model: s.model, models: CODE_MODELS, projects: codeProjects(home), sessionId: s.sessionId ?? null };
-    if (!s.sessionId || !s.dir) return { ...base, items: [], running: false, cost: 0 };
-    const [messages, waiting, active, info] = await Promise.all([api('GET', `/api/session/${s.sessionId}/message?limit=200`), asks(s.sessionId), api('GET', '/api/session/active'), api('GET', `/api/session/${s.sessionId}`)]);
-    return { ...base, items: [...phoneItems(messages, s.dir), ...waiting.map(w => ({ kind: 'ask', id: w.id, resources: w.resources }))], running: Boolean(active?.[s.sessionId]), cost: Number(info?.cost ?? 0) };
+    const s = read(), spent = await spend().catch(() => null);
+    const base = { folder: s.folder ?? null, model: s.model, models: CODE_MODELS, projects: codeProjects(home), sessionId: s.sessionId ?? null, spent };
+    if (!s.sessionId || !s.dir) return { ...base, items: [], running: false };
+    const [messages, waiting, active] = await Promise.all([api('GET', `/api/session/${s.sessionId}/message?limit=200`), asks(s.sessionId), api('GET', '/api/session/active')]);
+    return { ...base, items: [...phoneItems(messages, s.dir), ...waiting.map(w => ({ kind: 'ask', id: w.id, resources: w.resources }))], running: Boolean(active?.[s.sessionId]) };
   }
 
   return {

@@ -83,7 +83,7 @@ import {runCorePicture} from './core-final-picture';
 import {coreSessionLink} from './core-final-sessions';
 import {LOCAL_DIRS} from './claudesession';
 import { codeJobs, codeLink, openCodeApi, openCodeAuth, type CodeLink } from './codetask';
-import { codeEventHub, codeMode, type CodeModeLink } from './codemode';
+import { codeEventHub, codeMode, coderSpend, type CodeModeLink } from './codemode';
 import {runCoreShell} from './core-final-shell';
 import {locationPolicy,locationFlow,locationClock,applyCoreLocation} from './core-location-policy';
 import {devicePolicy,deviceFlow,deviceMutation,handleCoreHelper,reactCoreActivity,reactCoreFullscreen,tieCorePlace} from './core-device-activity';
@@ -3981,7 +3981,7 @@ function codeTasks(): CodeLink | null {
 }
 function codeModeNow(): CodeModeLink | null {
   if (codeModeLink === undefined) codeModeLink = existsSync(OPENCODE_BIN)
-    ? codeMode({ api: openCodeApi(), hub: codeHub ??= codeEventHub(openCodeAuth()), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir(), file: path.join(app.getPath('userData'), 'code-mode.json') }) : null;
+    ? codeMode({ api: openCodeApi(), hub: codeHub ??= codeEventHub(openCodeAuth()), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir(), file: path.join(app.getPath('userData'), 'code-mode.json'), spend: () => coderSpend(path.join(os.homedir(), '.config/haru/coder-litellm-key')) }) : null;
   return codeModeLink;
 }
 /** Each chase tick: her jobs' news becomes an aside (a phone event); his own coding-mode session pushes to him directly, only when he is not watching it. */
