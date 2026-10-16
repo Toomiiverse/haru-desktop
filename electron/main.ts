@@ -6623,7 +6623,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   const herWords = routeless;
   // The reply already names its intended delivery. Reuse it for voice and
   // expression instead of queueing a second model request behind every turn.
-  const labelled = splitDelivery(herWords)[0]?.mood;
+  const labelled = splitDelivery(herWords)[0]?.mood ?? splitDelivery(said)[0]?.mood;   // 4040: a replaced opening loses her tag; what she wrote still has it (two call turns ran the classifier on 10-16)
   const delivery = labelled ? { ...NEUTRAL_EMOTION, emotion: labelled, confidence: 1 } : null;
   if (delivery) broadcastBeat(delivery);
   const saidMood = delivery ? Promise.resolve(delivery) : classifyEmotion(herWords, home);

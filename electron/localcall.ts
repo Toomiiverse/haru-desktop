@@ -453,7 +453,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   /** They started talking. Over her, that is an interruption; over her thinking, the reply will not be voiced. */
   function spokeOver(source:'onset'|'probe'|'final'|'commit') {
     // 3750: a reaction clip is not her reply: it stops, and talking over it is no interruption (her answer was told it was).
-    const action=(phoneHearsHer&&!reactionAudible) || (sending&&!activeReaction) || (activeSpeech&&!activeReaction) || queue.some(line=>!line.reaction) || (thinking && spokeThisTurn) ? 'interrupt' : thinking ? 'preempt' : null;
+    const action=(phoneHearsHer&&!reactionAudible) || (sending&&!activeReaction) || (activeSpeech&&!activeReaction) || queue.some(line=>!line.reaction) || (thinking && spokeThisTurn) ? 'interrupt' : thinking && source!=='onset' ? 'preempt' : null;   // 4040: a sound alone no longer cancels her pending answer; words do (commit). 10-16 call 1 lost 6 turns this way with recognition off
     stopReaction();
     if(action)log('[call-overlap] '+JSON.stringify({callId,source,action,repeat:action==='interrupt'&&interrupted}));
     if (action==='interrupt') {
@@ -545,7 +545,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       commit(text,timing,(corePolicySync<string>('speech-boundary.commandReply',[command])));
       return;
     }
-    if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver('commit');
+    spokeOver('commit');   // 4040: words arrived; this is now the only pre-emption when recognition is off (the onset no longer is)
     timing.segments += pendingTiming?.segments ?? 0;
     if (pending) holdLine('merged');
     text = pending ? `${pending} ${text}` : text;
