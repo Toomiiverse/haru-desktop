@@ -2,7 +2,7 @@
 // its own beside the chat (webserver.ts /api/code/*). None of it enters Haru's chat history or memory; she
 // gets one deed when he leaves the mode.
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { CODE_AGENT, cut, errorText, repoDir, type CodeApi, type CodeJob, type OpenCodeAuth } from './codetask';
 
@@ -124,6 +124,20 @@ type ModeState = { sessionId?: string; folder?: string; dir?: string; model: str
 type Hub = ReturnType<typeof codeEventHub>;
 type Jobs = { read(): CodeJob[]; add(job: CodeJob): void; update(id: string, patch: Partial<CodeJob>): void };
 
+/** Where "+" (a session with no folder named) works: a scratch repository of its own in home, made on first use. */
+export const QUICK_FOLDER = 'quick-code';
+export function quickRepo(home: string): string {
+  const dir = path.join(home, QUICK_FOLDER);
+  if (!existsSync(path.join(dir, '.git'))) {
+    mkdirSync(dir, { recursive: true });
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { timeout: 10_000 });
+    git('init', '-q');
+    // An empty first commit, so the Changes sheet (git diff HEAD) has something to compare with.
+    git('-c', 'user.name=Haru', '-c', 'user.email=haru@localhost', 'commit', '-q', '--allow-empty', '-m', 'Quick coding sessions start here');
+  }
+  return QUICK_FOLDER;
+}
+
 /** His git repositories directly in home, most recently touched first. */
 export function codeProjects(home: string): string[] {
   try {
@@ -157,7 +171,7 @@ export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = a
 
   async function state() {
     const s = read(), spent = await spend().catch(() => null);
-    const base = { folder: s.folder ?? null, model: s.model, models: CODE_MODELS, projects: codeProjects(home), sessionId: s.sessionId ?? null, spent };
+    const base = { folder: s.folder ?? null, model: s.model, models: CODE_MODELS, projects: codeProjects(home), quickFolder: QUICK_FOLDER, sessionId: s.sessionId ?? null, spent };
     if (!s.sessionId || !s.dir) return { ...base, items: [], running: false };
     const [messages, waiting, active] = await Promise.all([api('GET', `/api/session/${s.sessionId}/message?limit=200`), asks(s.sessionId), api('GET', '/api/session/active')]);
     return { ...base, items: [...phoneItems(messages, s.dir), ...waiting.map(w => ({ kind: 'ask', id: w.id, resources: w.resources }))], running: Boolean(active?.[s.sessionId]) };
@@ -167,6 +181,7 @@ export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = a
     state,
     /** A fresh session in a project, on the chosen model; the one before it is left alone in OpenCode. */
     async start(folder: string, model?: string) {
+      if (!folder.trim()) folder = quickRepo(home);
       const where = repoDir(folder, home);
       if ('error' in where) throw Error(where.error);
       const s = read(), chosen = model ?? s.model;

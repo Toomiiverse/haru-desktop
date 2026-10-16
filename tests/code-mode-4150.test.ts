@@ -6,7 +6,8 @@ import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as policy from '../electron/core-policy-sync';
-import { codeMode, gitDiff, phoneEvent, phoneItems, CODE_MODELS, type CodeEvent } from '../electron/codemode';
+import { codeMode, gitDiff, phoneEvent, phoneItems, CODE_MODELS, QUICK_FOLDER, type CodeEvent } from '../electron/codemode';
+import { execFileSync } from 'node:child_process';
 import { codeJobs, codeLink, errorText } from '../electron/codetask';
 
 const DIR = '/home/toomii/haru-code-check';
@@ -133,4 +134,15 @@ test('git diff splits per file and counts lines', () => {
     : 'new.txt\n');
   assert.deepEqual(out.files.map(f => [f.file, f.additions, f.deletions]), [['calc.py', 1, 1], ['b.txt', 1, 0]]);
   assert.deepEqual(out.untracked, ['new.txt']);
+});
+
+test('a session with no folder opens the quick repository, made once with a first commit to diff against', async () => {
+  const { mode, calls, home } = rig();
+  const s = await mode.start('');
+  assert.equal(s.folder, QUICK_FOLDER);
+  assert.equal(calls[0][2].location.directory, path.join(home, QUICK_FOLDER));
+  assert.equal(execFileSync('git', ['-C', path.join(home, QUICK_FOLDER), 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), '1');
+  await mode.start('  ');   // again: the same repository, not a second first commit
+  assert.equal(execFileSync('git', ['-C', path.join(home, QUICK_FOLDER), 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), '1');
+  assert.ok((await mode.state()).projects.includes(QUICK_FOLDER));
 });
