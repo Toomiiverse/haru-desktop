@@ -333,6 +333,12 @@ import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, s
 import { categoryOf, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, type SortNote, type Sorted } from './categories';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { carriedSamples, checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
+import { warnLine } from './brain-warn';
+// 4050: warnings go to stderr, which the Core keeps private and throws away, so a refused background call was invisible
+// (the month fold, the after-turn lines). Each also prints one content-free stdout line, tag and error code only.
+{const warn=console.warn.bind(console),error=console.error.bind(console),seen=new Map<string,number>();
+ const tee=(write:(...a:unknown[])=>void)=>(...args:unknown[])=>{write(...args);try{const line=warnLine(args,Date.now(),seen);if(line)process.stdout.write(line+'\n');}catch{}};
+ console.warn=tee(warn);console.error=tee(error);}
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
