@@ -147,7 +147,7 @@ export async function coreLearnNudgeResponse(asides:Aside[],learning:NudgeSignal
 
 /** Admission metadata contains no payload, carrier tokens or device identities. */
 export type CoreDeliveryInput = {
-  kind:'random'|'events'|'system'|'weather'; id:string; state:PhoneNudgeState;
+  kind:'random'|'events'|'system'|'weather'|'followup'; id:string; state:PhoneNudgeState;
   prefs:{enabled:boolean;held:boolean;quietFrom:string;quietTo:string};
   hasDevices:boolean; force:boolean; urgent:boolean; scheduled:boolean; momentBlocked:boolean;
   fromAside:boolean; userAwake:boolean; opportunityRequired:boolean; opportunityPresent:boolean;

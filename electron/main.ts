@@ -5706,6 +5706,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
     if(packet.plan)onActed?.();   // 3770: a reminder written from his words: this turn acted (a call does not merge it into the next)
     if(packet.result){reminder=packet.result.reminder;aside=[aside,packet.result.aside].filter(Boolean).join(' ');}
+    else if(messages.at(-1)?.role==='user'){   // 3910: his own thing with a time books her comeback for after it (no planner needed)
+      const followUp=corePolicySync<any>('final-booking.direct',[latest,Date.now(),CHAT_TIMEZONE]);
+      if(followUp)void bookFollowUp(followUp).then(r=>console.log('[follow-up] '+JSON.stringify(r))).catch(error=>console.warn('[follow-up]',error instanceof Error?error.message:'failed'));
+    }
     if(packet.plan)void syncFromGoogle().catch(error=>console.warn('[agenda-sync]',error instanceof Error?error.message:'failed'));
   }
   // Counted here rather than in the prompt so it survives across turns: telling
@@ -7705,7 +7709,7 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
   return delivered;
 }
 
-async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string, nudge?: { id: string; expiresAt: number; scheduled?: boolean }, urgent = false, asideContext?: { source: AsideSource; opportunityPresent: boolean }): Promise<boolean> {
+async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather' | 'followup', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string, nudge?: { id: string; expiresAt: number; scheduled?: boolean }, urgent = false, asideContext?: { source: AsideSource; opportunityPresent: boolean }): Promise<boolean> {
   const { devices } = getPush();
   const deliveryKey = nudge?.id ?? `random:${Date.now()}:${Math.random()}`;
   const capture = () => {
@@ -7786,7 +7790,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
  * Which asides buzz the phone, and as which kind — split by kind so the
  * preferences can refuse one sort of interruption without silencing the rest.
  */
-const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'weather'>> = {
+const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'weather' | 'followup'>> = {
   reminder: 'events',
   upcoming: 'events',
   hanging: 'random',
@@ -7795,7 +7799,7 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   idle: 'random',
   goodnight: 'random',
   system: 'system',
-  booked: 'random',
+  booked: 'followup',
   thought: 'random',
   anime: 'random',
 };

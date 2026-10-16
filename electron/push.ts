@@ -43,6 +43,8 @@ export type PushPrefs = {
   system: boolean;
   /** The weather turning where they are. */
   weather: boolean;
+  /** 3910: her follow-ups on things he told her ("how did the dentist go?"), one a day; separate from `random`. */
+  followup: boolean;
   /** "HH:MM" pair; equal means no quiet hours. Spans midnight when from > to. */
   quietFrom: string;
   quietTo: string;
@@ -114,6 +116,7 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     events: flag(record.events, true),
     system: flag(record.system, true),
     weather: flag(record.weather, true),
+    followup: flag(record.followup, true),
     // Overnight by default. A companion that buzzes a nightstand at 3am is a
     // companion whose permission gets revoked, which is the quieter failure.
     quietFrom: time(record.quietFrom, '23:00'),
@@ -279,7 +282,7 @@ export function untilQuiet(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now:
  */
 export const PUSH_BREATHER_MS = 20 * 60_000;
 
-export function tooSoonToPush(kind: 'random' | 'events' | 'system' | 'weather', lastReachedAt: number, now: number): boolean {
+export function tooSoonToPush(kind: 'random' | 'events' | 'system' | 'weather' | 'followup', lastReachedAt: number, now: number): boolean {
   if (kind === 'events') return false;
   return lastReachedAt > 0 && now - lastReachedAt < PUSH_BREATHER_MS;
 }
