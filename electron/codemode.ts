@@ -7,9 +7,11 @@ import path from 'node:path';
 import { CODE_AGENT, cut, errorText, repoDir, type CodeApi, type CodeJob, type OpenCodeAuth } from './codetask';
 
 /** What the model switch offers; all of them go through the haru-coder LiteLLM key and its cap. */
+/** The first is the default: Qwen did both 10-16 test jobs right for ~1/10 of Opus. */
 export const CODE_MODELS = [
-  { id: 'haru/mimo-v2.6-pro', name: 'MiMo V2.6 Pro' },
+  { id: 'haru/qwen-3-6-plus-uncensored', name: 'Qwen 3.6 Plus' },
   { id: 'haru/claude-opus-5-5', name: 'Opus 5.5' },
+  { id: 'haru/mimo-v2.6-pro', name: 'MiMo V2.6 Pro' },
 ];
 const modelRef = (id: string) => ({ providerID: id.split('/')[0], id: id.split('/').slice(1).join('/') });
 

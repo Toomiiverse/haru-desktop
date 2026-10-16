@@ -74,7 +74,7 @@ test('a session starts only in a repo and on a listed model; leaving notes it on
   await assert.rejects(mode.start('repo', 'litellm/claude-opus-5'), /not on the list/);
   await assert.rejects(mode.prompt('hi'), /Pick a project folder first/);
   const s = await mode.start('repo');
-  assert.deepEqual(calls[0][2], { location: { directory: path.join(home, 'repo') }, agent: 'haru-coder', model: { providerID: 'haru', id: 'mimo-v2.6-pro' }, title: 'Code · repo' });
+  assert.deepEqual(calls[0][2], { location: { directory: path.join(home, 'repo') }, agent: 'haru-coder', model: { providerID: 'haru', id: 'qwen-3-6-plus-uncensored' }, title: 'Code · repo' });
   assert.deepEqual(s.projects, ['repo']);
   assert.equal(jobs.read()[0].direct, true);
   assert.equal(mode.leave(), null);   // nothing asked yet

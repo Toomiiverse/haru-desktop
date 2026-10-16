@@ -1,4 +1,4 @@
-// Coding jobs she hands to OpenCode on this machine: agent haru-coder (MiMo V2.6 Pro through the
+// Coding jobs she hands to OpenCode on this machine: agent haru-coder (Qwen 3.6 Plus Uncensored on Venice through the
 // haru-coder LiteLLM key, capped at $5/day and $30/30 days). Edits run; any other command waits for
 // his OK, which she asks him for and he gives in his own words. Driven over the OpenCode server API,
 // because `opencode run` refuses every permission request by itself.
@@ -19,7 +19,7 @@ export type CodeLink = {
 };
 
 export const CODE_AGENT = 'haru-coder';
-export const CODE_MODEL = { providerID: 'haru', id: 'mimo-v2.6-pro' };
+export const CODE_MODEL = { providerID: 'haru', id: 'qwen-3-6-plus-uncensored' };
 
 export type OpenCodeAuth = () => { url: string; header: string };
 /** The background server's own address and password, read per call so a service restart is followed. */
