@@ -896,9 +896,23 @@ async function formDayMemories(lines: string[], doing: string, day: string, conf
       const success=await formFrom(lines,doing,day,config),core=remainingStore(app.getPath('userData'));
       const outcome=corePolicySync<any>('chat-lifecycle.formFinish',[core.docRef('config',{}),day,messageCount,success,Object.fromEntries(formRetries),Date.now()]);
       if(outcome.plan)commitLifecyclePlan(core,outcome.plan);
+      if(success)await writePortrait(config);   // 3890: the portrait follows the day's memories, once a day
       formRetries.clear();for(const [key,value] of Object.entries(outcome.retries))formRetries.set(key,value as {tries:number;until:number});
     }finally{forming=false;}return;
   }
+}
+
+/** 3890: one paragraph about him from everything kept, written once a day after the day pass into config.portrait (the portrait block). */
+async function writePortrait(config: ProviderConfig): Promise<void> {
+  try{
+    const core=remainingStore(app.getPath('userData'));
+    const ask=corePolicySync<any>('memory-portrait.ask',[core.docRef('config',{}),core.docRef('memories',{}),core.docRef('graph',{}),localDateKey(zonedNow(CHAT_TIMEZONE))]);
+    if(!ask)return;
+    const text=await ollamaQuipLong(ask.system,ask.user,config);
+    const plan=corePolicySync<any>('memory-portrait.plan',[core.docRef('config',{}),text,ask.day,new Date().toISOString()]);
+    if(plan)commitLifecyclePlan(core,plan);
+    console.log(`[portrait] ${plan?'written':'rejected'} from ${ask.notes} notes (${text.length} chars)`);
+  }catch(error){console.warn('[portrait]',error instanceof Error?error.message:'failed');}
 }
 
 /**
@@ -3346,6 +3360,7 @@ const memoryStore = createMemoryStore({
   // turn the budget is scaled down: with the interests first, last night fell
   // off the end on every turn (65 cuts in a day) and two models answered
   // "what did you do last night" from her interests and diary instead.
+  portrait: () => (store.get('portrait') as { text?: string } | undefined)?.text ?? '',
   herOwnLife: () => {
     const now = zonedNow(CHAT_TIMEZONE);
     const today = localDateKey(now);

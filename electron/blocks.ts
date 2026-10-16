@@ -59,6 +59,8 @@ export type BlockSources = {
    * one place rather than as scattered lines in the prompt.
    */
   herOwn?: string;
+  /** 3890: the nightly portrait of him. */
+  portrait?: string;
   /** The message being answered — makes the human block message-aware the
    *  same way the deterministic engine always was. */
   query?: string;

@@ -87,6 +87,8 @@ export type MemoryStoreDeps = {
   agenda(): { title: string; kind: string; done: boolean }[];
   /** Her own life, framed — interests, nights, diary (tastes.ts, nightlife.ts, diary.ts). */
   herOwnLife(): string;
+  /** 3890: the nightly portrait of him (config.portrait.text), read into the portrait block. */
+  portrait(): string;
   /**
    * Sort a batch of records into categories (categories.ts) with a model.
    * Optional: without it nothing is sorted and every record keeps the category
@@ -441,6 +443,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       following: deps.following(),
       agenda: deps.agenda(),
       herOwn: deps.herOwnLife(),
+      portrait: deps.portrait(),
       query,
       semantic,
       now: new Date(),
