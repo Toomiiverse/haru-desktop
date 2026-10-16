@@ -87,7 +87,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const wait=Atomics.wait(header,0,0,1500);
  if(wait==='timed-out'||Atomics.load(header,0)!==1){if(worker===transport){worker=undefined;buffers=new Map();}void transport.terminate();throw Error('core_policy_unconfirmed');}
  replyBytes+=Atomics.load(header,1);const reply=JSON.parse(Buffer.from(buffer,8,Atomics.load(header,1)).toString('utf8'));
- if(!reply.ok)throw Error('core_policy_unavailable');
+ if(!reply.ok)throw Error('core_policy_unavailable '+operation.toLowerCase().replace(/[^a-z0-9]+/g,'_'));   // 4060: which operation, so [brain-warn] can name it (attention ticks failed every minute, op unknown)
  const value=reply.value;
  if(value.version!==1||value.requestId!==packet.requestId||value.operation!==operation||value.executes!==false
    ||JSON.stringify(value.owner)!==JSON.stringify(packet.owner)||typeof value.policyEpoch!=='string'

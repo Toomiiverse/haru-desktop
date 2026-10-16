@@ -22,3 +22,8 @@ test('main.ts tees console.warn and console.error through it to stdout', async (
   assert.ok(main.includes("console.warn=tee(warn);console.error=tee(error);"));
   assert.ok(main.includes("if(line)process.stdout.write(line+'\\n');"));
 });
+test('4060: a refused Core policy call names its operation', () => {
+  const seen = new Map<string, number>();
+  assert.equal(warnLine(['[attention] baseline tick failed', Error('core_policy_unavailable conversation_program_pipeadmission')], 0, seen),
+    '[brain-warn] {"tag":"attention","code":"core_policy_unavailable conversation_program_pipeadmission"}');
+});
