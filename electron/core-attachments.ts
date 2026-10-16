@@ -1,3 +1,4 @@
+import {AsyncLocalStorage} from 'node:async_hooks';
 /** Supervised attachment adapters. Core owns admission, caching and each next step. */
 import {randomUUID} from 'node:crypto';
 import {statSync} from 'node:fs';
@@ -73,6 +74,14 @@ export async function readCoreAttachment(a:Attachment,v:VisionConfig,provider:an
 /** 3820: a picture reading goes to the chat model as the user's own text, so one that names a secret or asks to stay local
  *  would block the whole turn; the picture itself goes instead (images are outside the text scanner), as before 3820. */
 export const readingUsable=(text:string)=>Boolean(text.trim())&&!explicitlyLocalOnly(text)&&mayLeaveTheMachine(text,false,{namesAlone:true}).safe;
+/** 4130: where a "give me a sec" line goes during a phone turn: into her reply bubble, cleared (\uFFFD) when the real answer starts.
+ *  The phone already treats \uFFFD as "that round was thrown away", so it needs no change. */
+export const waitSink=new AsyncLocalStorage<(line:string)=>void>();
+export function withWaitLine(onChunk:(chunk:string)=>void,onSentence?:(sentence:string,emotion:string)=>void){
+ let shown=false;
+ return {onChunk:(chunk:string)=>{if(shown&&chunk!=='\uFFFD'&&chunk){shown=false;onChunk('\uFFFD');}onChunk(chunk);},
+  sink:(line:string)=>{shown=true;onChunk(line);onSentence?.(line,'neutral');}};
+}
 /** 4100: how long a call turn waits for a picture it has not read yet; a cached reading returns well inside this. */
 const CALL_READ_MS=300;
 export async function foldCoreAttachments(messages:any[],inPlay:Map<number,Attachment[]>,sees:boolean,read:(a:Attachment)=>Promise<string>,image:(file:string)=>string,call=false){

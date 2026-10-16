@@ -90,7 +90,7 @@ import {agendaClock,agendaFacts,applyAgendaPlan,mutateAgenda,syncAgendaGoogle} f
 import {executeGoogleCommand} from './google';
 import {gamePolicy,bootCoreGame} from './core-games';
 import {screenPolicy,runCoreScreen,commitPerceptionPlan} from './core-screen-policy';
-import {attachmentPolicy,attachmentURLFacts,attachmentCapability,attachmentFileSource,readCoreAttachment,openCoreAttachment,foldCoreAttachments} from './core-attachments';
+import {attachmentPolicy,attachmentURLFacts,attachmentCapability,attachmentFileSource,readCoreAttachment,openCoreAttachment,foldCoreAttachments,waitSink,withWaitLine} from './core-attachments';
 import {runCoreMemoryTool,runCoreMemoryAdmin,runCoreMemoryReset} from './core-memory-tools';
 import {runSyncedCaptions} from './core-shot-captions';
 import {coreAsideMutation} from './core-asides';
@@ -1874,7 +1874,7 @@ function attachmentAdapters(vision:VisionConfig,provider:ProviderConfig){
  look:(images:string|string[],command:any)=>command.entry?coreHostedLook(images,command.entry,{...command.options,timeoutMs:command.timeoutMs},{rpc:taskBridge.call,policy:()=>readTaskPolicy(store.get('ai.taskPolicy')),send:sendToProviderAdmitted})   // 3820
   :ownedLook(images,command.config,command.endpoint,modelHeaders(command.endpoint),net.fetch,command.options),
  frames:(file:string)=>extractFrames(file,tools!),readFrame:(file:string)=>readFileSync(file).toString('base64'),pdfPages:(file:string,count:number)=>coreRenderPdfPages(file,count,scratchDir()),audio:(file:string,seconds:number)=>extractAudio(file,tools!,seconds),transcribe:transcribeFile,
- waiting:(line:string)=>{sendToWindows('chat:interject',line);void speak(line);},discard};
+ waiting:(line:string)=>{const sink=waitSink.getStore();if(sink){sink(line);return;}sendToWindows('chat:interject',line);void speak(line);},discard};   // 4130: a phone turn shows it in the reply bubble
 }
 
 function eyesHold(vision: VisionConfig, wanted: string): string | number {
@@ -9447,8 +9447,9 @@ function webDeps(): WebDeps {
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
-    async sayStream(text, onChunk, attachments, options?: NonNullable<Parameters<WebDeps['sayStream']>[3]> & WebTurnOptions, onSentence?) {
+    async sayStream(text, onChunkRaw, attachments, options?: NonNullable<Parameters<WebDeps['sayStream']>[3]> & WebTurnOptions, onSentence?) {
       options?.signal?.throwIfAborted();
+      const waitLine = withWaitLine(onChunkRaw, options?.call ? undefined : onSentence), onChunk = waitLine.onChunk;   // 4130
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
@@ -9529,7 +9530,7 @@ function webDeps(): WebDeps {
       // replay of the tail); a call turn that fails after its reply was published and spoken keeps that reply instead of failing.
       let published: string | null = null, flushError: unknown = null;
       let answer: Awaited<ReturnType<typeof ollamaChat>>;
-      try { answer = await ollamaChat(messages, config, { affect,
+      try { answer = await (options?.call ? (f: () => ReturnType<typeof ollamaChat>) => f() : (f: () => ReturnType<typeof ollamaChat>) => waitSink.run(waitLine.sink, f))(() => ollamaChat(messages, config, { affect,
         hands: false,
         web: true,
         away: 'it came in from the phone',
@@ -9551,7 +9552,7 @@ function webDeps(): WebDeps {
         // on words nobody ever saw. The voice is sunk the same way — nothing of
         // a thrown-away round may be spoken.
         onChunkReset: () => { receivedReplyChunks=false; trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
-      }); } catch (error) {
+      })); } catch (error) {
         if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;
         console.log('[turn-failed] '+JSON.stringify({id:trace.id,callId:options.callTrace?.id??null,turn:options.callTrace?.turn??null,kept:true,reason:(error instanceof Error?error.name+': '+error.message:String(error)).slice(0,300)}));   // 3760: the reply was kept
         answer = { content: published as unknown as string, ignored: false, irritation: undefined, ego: undefined, choices: [], attachments: [] };
