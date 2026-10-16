@@ -39,6 +39,8 @@ export class TaskController {
   recordWorkerFailure() { this.observed(false); }
   get signal() { return this.abort.signal; }
   get taskPriority() { return this.priority; }
+  /** 4100: what the ledger keeps as the result in place of the reply (a picture reading is not kept). */
+  storedResult?: string;
   get remainingBudgetMicros() { return Math.max(0, this.policy.taskBudgetMicros - (this.snapshot?.spentMicros ?? 0) - (this.snapshot?.reservedMicros ?? 0)); }
   private observed(succeeded: boolean) {
     const model = this.snapshot?.model;
@@ -148,7 +150,7 @@ export class TaskController {
       });
       await this.check();
       if (reply.tool_calls?.length || !reply.content?.trim()) throw new Error('invalid_background_reply');
-      await this.rpc('finish', { ...this.input, status: 'completed', result: reply.content });
+      await this.rpc('finish', { ...this.input, status: 'completed', result: this.storedResult ?? reply.content });
       return reply.content;
     } catch (error) {
       await this.rpc('finish', { ...this.input, status: 'failed', reason: error instanceof Error ? error.message : 'composition_failed' }).catch(() => {});

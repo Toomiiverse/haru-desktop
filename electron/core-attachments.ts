@@ -72,19 +72,30 @@ export async function readCoreAttachment(a:Attachment,v:VisionConfig,provider:an
 /** 3820: a picture reading goes to the chat model as the user's own text, so one that names a secret or asks to stay local
  *  would block the whole turn; the picture itself goes instead (images are outside the text scanner), as before 3820. */
 export const readingUsable=(text:string)=>Boolean(text.trim())&&!explicitlyLocalOnly(text)&&mayLeaveTheMachine(text,false,{namesAlone:true}).safe;
-export async function foldCoreAttachments(messages:any[],inPlay:Map<number,Attachment[]>,sees:boolean,read:(a:Attachment)=>Promise<string>,image:(file:string)=>string){
+/** 4100: how long a call turn waits for a picture it has not read yet; a cached reading returns well inside this. */
+const CALL_READ_MS=300;
+export async function foldCoreAttachments(messages:any[],inPlay:Map<number,Attachment[]>,sees:boolean,read:(a:Attachment)=>Promise<string>,image:(file:string)=>string,call=false){
  const plans=attachmentPolicy('fold',[messages,[...inPlay],sees]),out=[...messages];
  // 3820: every file is read at once (a hosted picture read is 1.3-3.3 s; a message carries up to 6)
  await Promise.all(plans.map(async(plan:any)=>{
   const files=await Promise.all(plan.files.map(async(file:any)=>{attachmentCurrent();const attachment=file.attachment;
    try{
     if(file.action==='image')return {opened:{attachment},image:image(attachment.saved)};
-    let readable='';try{readable=await read(attachment);}catch(error){attachmentCurrent();}
+    let readable='';
+    if(call&&file.fallback==='image'){   // 4100: a call does not wait seconds for a picture; the read carries on outside the turn and is cached for her next reply
+     const reading=activeTask.exit(()=>read(attachment));reading.catch(()=>{});
+     const early=await Promise.race([reading,new Promise<null>(done=>setTimeout(()=>done(null),CALL_READ_MS))]).catch(()=>'');
+     attachmentCurrent();
+     if(early===null)return {opened:{attachment,readable:'',pending:true}};
+     readable=early;
+    } else try{readable=await read(attachment);}catch(error){attachmentCurrent();}
     if(file.fallback==='image'&&!readingUsable(readable)){console.log(`[attach] picture sent as image — ${readable.trim()?'the reading cannot leave as text':'no reading'}`);return {opened:{attachment},image:image(attachment.saved)};}
     return {opened:{attachment,readable}};
    }catch(error){attachmentCurrent();return {opened:{attachment,readable:''}};}
   }));
-  attachmentCurrent();out[plan.index]=attachmentPolicy('folded',[messages[plan.index],files.map(f=>f.opened),files.flatMap(f=>f.image===undefined?[]:[f.image])]);
+  // 4100: the picture bytes are added here, not sent through the policy call (2 MiB wire cap: one 1.6 MB picture or a few phone photos broke the turn)
+  attachmentCurrent();const images=files.flatMap(f=>f.image===undefined?[]:[f.image]),folded=attachmentPolicy<any>('folded',[messages[plan.index],files.map(f=>f.opened),[]]);
+  out[plan.index]=images.length?{...folded,images}:folded;
  }));
  return out;
 }

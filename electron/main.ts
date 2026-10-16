@@ -138,7 +138,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
@@ -2794,12 +2794,18 @@ function discardStaged(attachment: { saved?: string }) {
  */
 const SEND_WIDTH = 1536;
 
+/** 4100: a JPEG no wider than SEND_WIDTH, metadata dropped. shortcut: synchronous ffmpeg (~0.2-1 s, only for pictures over the cap); move it off the loop if big pictures become common. */
+function smallerPicture(file: string): Buffer {
+  return execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-frames:v', '1', '-vf', `scale='min(${SEND_WIDTH},iw)':-2`, '-map_metadata', '-1', '-q:v', '3', '-f', 'image2pipe', '-c:v', 'mjpeg', '-'],
+    { maxBuffer: 32 * 1024 * 1024, timeout: 20_000 });
+}
+
 function imageForSending(file: string): string {
   {
     const plan=attachmentPolicy<{raw?:boolean;maxBytes:number}>('imageSend',[true,0,(true as boolean)]);
     if(plan.raw){
-      if(statSync(file).size>plan.maxBytes)throw Error('core_image_bytes_too_large');
-      const raw=readFileSync(file);
+      let raw:Buffer=readFileSync(file);
+      if(raw.length>plan.maxBytes)raw=smallerPicture(file);   // 4100: too big to send whole (was dropped); shrunk instead
       if(raw.length>plan.maxBytes)throw Error('core_image_bytes_too_large');
       return raw.toString('base64');
     }
@@ -5519,8 +5525,9 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   sees: boolean,
   vision: VisionConfig,
   provider: ProviderConfig,
+  call = false,
 ): Promise<(T & { images?: string[] })[]> {
-  return foldCoreAttachments(messages,inPlay,sees,a=>readAttachment(a,vision,provider),imageForSending);
+  return foldCoreAttachments(messages,inPlay,sees,a=>readAttachment(a,vision,provider),imageForSending,call);
 }
 
 const finishLocalReply: typeof finishLocalReplyUntimed = (...args) => timeTurnReview(() => finishLocalReplyUntimed(...args));
@@ -5904,7 +5911,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // its result is cached — a follow-up about the same video must not transcribe
   // it a second time.
   // 3810: the Core sees a reference per picture; sendToProviderUnchecked puts the bytes back (core-harness-media.ts).
-  const attached = compactConversation ? vetted : await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  const attached = compactConversation ? vetted : await withAttachments(vetted, inPlay, brain.sees, vision, config, call);
   const withFiles = turnImages.toCore(attached as any) as unknown as typeof attached;
   prepMark('attachments');
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);

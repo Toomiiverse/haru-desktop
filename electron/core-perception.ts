@@ -47,5 +47,6 @@ export async function coreHostedLook(images:string|string[],entry:ModelEntry,opt
   const messages=turnImages.toCore(visionConversation(images,options) as ChatMessage[]);
   const task=new TaskController(deps.rpc,[entry],{...deps.policy(),maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:options.timeoutMs??15000},true);
   await task.start('Picture reading (no actions)',entry.config.model,'foreground',options.signal);
+  task.storedResult='Picture read; the reading is not kept in the ledger.';   // 4100
   return {description:await task.compose(()=>deps.send(messages,entry.config,{tools:false,table:[],maxTokens:options.numPredict}),messages),model:entry.config.model};
 }
