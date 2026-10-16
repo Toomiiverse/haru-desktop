@@ -240,6 +240,8 @@ export type WebDeps = {
   quiet?(): boolean;
   /** A picture or file she was sent, back out of her keeping for the chat to show. */
   attachedFile?(saved: string): { bytes: Uint8Array; mime: string } | null;
+  /** Her selfies, newest first; the pictures themselves come from /api/attach/file. */
+  album?(): { id: string; saved: string; private: boolean; at: string }[];
   /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
   sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
@@ -1450,6 +1452,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   // What he sent her, for the chat to show again. The name is one stage() gave
   // out; the deps side refuses anything outside her pictures folder.
+  if (req.method === 'GET' && path === '/api/album') {
+    res.setHeader('Cache-Control', 'no-store');
+    return json(res, 200, { pictures: deps.album?.() ?? [] });
+  }
   if (req.method === 'GET' && path === '/api/attach/file') {
     const file = deps.attachedFile?.(url.searchParams.get('saved') ?? '');
     if (!file) return json(res, 404, { error: 'She does not have that.' });

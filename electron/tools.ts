@@ -1133,7 +1133,7 @@ export type ToolDeps = {
   /** Herself, in facts: readSelfSnapshot + describeSettings (self.ts). */
   myself(): unknown;
   /** Make a picture and push it to his phone (venice-image.ts). Only wired in Explicit mode. */
-  makePicture?(prompt: string): Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  makePicture?(prompt: string): Promise<{ ok: true; attached: true } | { ok: false; error: string }>;
   /** Attach a picture from the last search's results to this reply (web-picture.ts). */
   showWebPicture?(result: number): Promise<{ ok: true; source: string; bytes: number } | { ok: false; error: string }>;
   /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */

@@ -3912,7 +3912,7 @@ function availableTools(turn: TurnContext): ToolAvailability {
     mangaShelf: mangaShelfLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: turn.handsAllowed(),
-    pictures: explicitModeNow(),
+    pictures: true,   // 4180: the local picture server; Core offers it in every mode
     desktop: ({launch:false,power:false}),
     knockedAwake: herKnockedAwakeNow(),
     anime: animeLink() !== null,
@@ -4061,7 +4061,7 @@ function toolDeps(turn: TurnContext): ToolDeps {
     policyConfig:()=>remainingStore(app.getPath('userData')).get('config',{}),
     applyToolPlan:plan=>applyRemainingPlan(remainingStore(app.getPath('userData')),plan),
     changeMySetting: plan => applyPlanAtTheirWord(plan),
-    makePicture: prompt => makeAndSendPicture(prompt),
+    makePicture: prompt => makeAndSendPicture(prompt, turn),
     showWebPicture: result => showWebPicture(result, turn),
     lastResults: turn.lastResults,
     lastSearchQuery: turn.lastSearchQuery,
@@ -8553,12 +8553,35 @@ function pictureBase(): string {
  * Make one picture and push it. Asked for by him, so the push is forced: quiet
  * hours are for lines she chose to send, not for the one he asked for.
  */
-async function makeAndSendPicture(prompt: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+async function makeAndSendPicture(prompt: string, turn: TurnContext): Promise<{ ok: true; attached: true } | { ok: false; error: string }> {
   return runCorePicture(prompt,{
-    hasKey:()=>String(store.get('veniceApiKey')??'').startsWith('plain:')&&String(store.get('veniceApiKey')).length>6,
-    generate:async text=>{const made=await makePicture({key:String(store.get('veniceApiKey')).slice(6),prompt:text,folder:pictureFolder()});return {made:{...made,saved:path.basename(made.file)},url:`${pictureBase()}/api/picture/${made.id}?k=${pictureSignature(made.id)}`};},
-    push:c=>pushToPhone(c.kindName,c.text,c.url,c.force,c.tag),windows:c=>sendToWindows(c.channel,c.payload),sweep:sweepPictures,
+    // 4180: drawn by the local ComfyUI (Core's final-picture.prepare names it); no key.
+    hasKey:()=>true,explicit:explicitModeNow,
+    generate:async (text,safeMode)=>{const made=await makePicture({key:'',prompt:text,folder:pictureFolder(),safeMode});return {made:{...made,saved:path.basename(made.file)}};},
+    keep:keepPicture,
+    attach:picture=>{
+      turn.attachPicture(picture);
+      // The album's record of it, beside the picture; the sweep only takes image files.
+      writeFileSync(path.join(pictureFolder(),`${picture.id}.json`),JSON.stringify({id:picture.id,saved:picture.saved,private:picture.private===true,at:new Date().toISOString()}),{flag:'wx'});
+    },
+    sweep:sweepPictures,
   });
+}
+
+/** Her selfies, newest first: every one with an album record whose picture is still there. */
+function herAlbum(): { id: string; saved: string; private: boolean; at: string }[] {
+  const folder = pictureFolder();
+  let names: string[];
+  try { names = readdirSync(folder); } catch { return []; }
+  const rows = [];
+  for (const name of names) {
+    if (!/^[-0-9a-f]{36}\.json$/i.test(name)) continue;
+    try {
+      const row = JSON.parse(readFileSync(path.join(folder, name), 'utf8'));
+      if (typeof row.saved === 'string' && path.basename(row.saved) === row.saved && existsSync(path.join(folder, row.saved))) rows.push({ id: String(row.id), saved: row.saved, private: row.private === true, at: String(row.at) });
+    } catch { /* a half-written record is not shown */ }
+  }
+  return rows.sort((a, b) => b.at.localeCompare(a.at));
 }
 
 /**
@@ -9858,6 +9881,7 @@ function webDeps(): WebDeps {
       return wakeAck();
     },
     quiet: () => isMuted(getMute(), Date.now()),
+    album: herAlbum,
     attachedFile(saved) {
       // Two places a picture can live: the folder he hands his photos in, and
       // the folder she draws her own into. The phone asks by name and neither

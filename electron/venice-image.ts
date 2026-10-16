@@ -58,7 +58,7 @@ export async function makePicture(options: {
     const {key,folder,...facts}=options;
     const prepared=corePolicySync<any>('final-picture.prepare',[facts,Boolean(key)]);
     if(prepared.error)throw new PictureRefused(prepared.error);
-    const response=await fetch(prepared.endpoint,{method:prepared.method,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(prepared.body)});
+    const response=await fetch(prepared.endpoint,{method:prepared.method,headers:{...(key?{Authorization:`Bearer ${key}`}:{}),'Content-Type':'application/json'},body:JSON.stringify(prepared.body)});
     const text=await response.text();let reply:VeniceReply;try{reply=JSON.parse(text)}catch{reply={}}
     const chosen=corePolicySync<any>('final-picture.response',[response.status,response.ok,typeof reply.error==='string'?reply.error:reply.error?.message??null,Boolean(reply.images?.[0])]);
     if(chosen.error)throw new PictureRefused(chosen.error);
