@@ -4444,7 +4444,7 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
     assertOutboundSafe(conversation, table);
   }
   const task = activeTask.getStore();
-  if(!task&&(true as boolean)&&(isLocalConfig(config)||((activeScheduledJob.getStore())))&&!options.turn&&!table.length){
+  if(!task&&!options.turn&&!table.length){   // 4010: every hosted call without a live task gets its own ledger task; scheduled jobs only before, the rest died unlogged as cloud_task_required
     const registry=readModelRegistry(store.get('ai.modelRegistry'),{
       local:(store.get('ai.config') as ProviderConfig|undefined)??config,conversation:store.get('ai.conversation') as ProviderConfig|undefined,
       specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision:readVisionConfig(store.get('vision')),
@@ -4456,7 +4456,7 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
       taskBudgetMicros:local?0:policy.taskBudgetMicros,dailyBudgetMicros:local?0:policy.dailyBudgetMicros,
       maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:local?180000:Math.min(40000,policy.deadlineMs)},!local);
     const job=activeScheduledJob.getStore()?.kind;   // 3960: which job spent it (the ledger grouped every composition under one label)
-    await background.start('Background model composition (no actions)'+(job?' — '+job:''),config.model,'background');
+    await background.start('Background model composition (no actions)'+(job?' — '+job:' — unscheduled'),config.model,'background');
     let reply:OllamaMessage|undefined;
     await background.compose(async()=>{reply=await sendToProviderAdmitted(conversation,config,{...options,tools:false,table:[]});return reply;},conversation);
     return withToolContract(reply!,[]);
