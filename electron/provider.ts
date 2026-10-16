@@ -192,7 +192,9 @@ export function openAIQuirks(model: string): {
   const name = model.trim().toLowerCase();
   // GLM-5.3 via NanoGPT always thinks; its default (max) effort blows past her
   // 15s hosted first-word deadline, so ask for low and keep the chat speed.
-  if (/^z-ai\/glm-5\.3/.test(name)) return { maxTokensKey: 'max_tokens', reasoningEffort: 'low', honoursTemperature: true };
+  // Baseten lists the same family as zai-org/GLM-5.3-Fast; without this match her background
+  // notes ran at full effort and the month fold spent its whole output cap thinking (3990).
+  if (/^(z-ai|zai-org)\/glm-5\.3/.test(name)) return { maxTokensKey: 'max_tokens', reasoningEffort: 'low', honoursTemperature: true };
   if (name === 'abliterated-model-large-v2') return { maxTokensKey: 'max_tokens', reasoningEffort: 'low', honoursTemperature: true };
   if (name === 'kimi-k3' || name === 'gpt-6-astra') return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'low', honoursTemperature: false };
   if (/^mimo-v2\.6-/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: null, honoursTemperature: true };

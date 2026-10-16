@@ -86,6 +86,9 @@ test('a model name is matched by family, not by accident', () => {
   assert.equal(openAIQuirks('o1-pro').maxTokensKey, 'max_completion_tokens');
   // Whitespace and case from a Setup field do not change the answer.
   assert.equal(openAIQuirks('  GPT-5.6-Terra ').reasoningEffort, 'none');
+  // 3990: GLM-5.3 thinks at low effort under Baseten's name too, not only NanoGPT's.
+  assert.equal(openAIQuirks('zai-org/GLM-5.3-Fast').reasoningEffort, 'low');
+  assert.equal(toOpenAIBody({ model: 'zai-org/GLM-5.3-Fast', conversation: [{ role: 'user', content: 'x' }], maxTokens: 240 } as any).reasoning_effort, 'low');
 });
 
 test('no max tokens asked for means no max tokens sent, whichever the key would have been', () => {
