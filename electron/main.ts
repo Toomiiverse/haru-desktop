@@ -179,7 +179,8 @@ import { CAPTURE_HEIGHT, CAPTURE_WIDTH, readWatchingConfig, recentScene, sceneAs
 import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, welcomePrompt } from './games';
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
-import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
+import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, scratchDir, type FileKind } from './attach';
+import { coreRenderPdfPages } from './core-attachment-files';
 import { markTimeGaps, sinceLast, earlierDaysContext, recentWindow, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_FLOOR, RECALL_LIMIT, type Exchange } from './recall';
 import { buildChatIndex, chatHitsNote, embedFormat, embedText, mentionsAny, rareTerms, searchChats, type ChatIndex } from './chatsearch';
@@ -1872,7 +1873,7 @@ function attachmentAdapters(vision:VisionConfig,provider:ProviderConfig){
  pdf:readPdf,text:readText,image:imageForSending,eyes:eyesForReading,
  look:(images:string|string[],command:any)=>command.entry?coreHostedLook(images,command.entry,{...command.options,timeoutMs:command.timeoutMs},{rpc:taskBridge.call,policy:()=>readTaskPolicy(store.get('ai.taskPolicy')),send:sendToProviderAdmitted})   // 3820
   :ownedLook(images,command.config,command.endpoint,modelHeaders(command.endpoint),net.fetch,command.options),
- frames:(file:string)=>extractFrames(file,tools!),readFrame:(file:string)=>readFileSync(file).toString('base64'),audio:(file:string,seconds:number)=>extractAudio(file,tools!,seconds),transcribe:transcribeFile,
+ frames:(file:string)=>extractFrames(file,tools!),readFrame:(file:string)=>readFileSync(file).toString('base64'),pdfPages:(file:string,count:number)=>coreRenderPdfPages(file,count,scratchDir()),audio:(file:string,seconds:number)=>extractAudio(file,tools!,seconds),transcribe:transcribeFile,
  waiting:(line:string)=>{sendToWindows('chat:interject',line);void speak(line);},discard};
 }
 

@@ -9,6 +9,20 @@ export async function coreReadPdf(file:string,maxChars:number){
  finally{await task.destroy();}
  attachmentCurrent();return attachmentPolicy('pdfResult',[doc.numPages,parts,maxChars]);
 }
+/** 4110: the first pages of a (scanned) PDF as JPEG files no wider than 1536 px, for the picture reader. */
+export async function coreRenderPdfPages(file:string,count:number,dir:string):Promise<string[]>{
+ const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs'),{createCanvas}=await import('@napi-rs/canvas') as any;
+ const task=pdfjs.getDocument({data:new Uint8Array(fs.readFileSync(file)),useSystemFonts:true,disableFontFace:true,isEvalSupported:false} as Parameters<typeof pdfjs.getDocument>[0]);
+ const doc=await task.promise,out:string[]=[],stamp=Date.now();
+ try{for(let n=1;n<=Math.min(count,doc.numPages);n++){
+  attachmentCurrent();const page=await doc.getPage(n),base=page.getViewport({scale:1}),viewport=page.getViewport({scale:Math.min(2,1536/base.width)});
+  const canvas=createCanvas(Math.ceil(viewport.width),Math.ceil(viewport.height)),context=canvas.getContext('2d');
+  context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext:context,viewport,canvas} as any).promise;
+  const name=path.join(dir,`page-${stamp}-${n}.jpg`);fs.writeFileSync(name,canvas.toBuffer('image/jpeg',80));out.push(name);
+ }}finally{await task.destroy();}
+ return out;
+}
 export async function coreExtractFrames(file:string,tools:any,count:number,adapter:{duration:(file:string,tools:any)=>Promise<number>;dir:()=>string;run:(file:string,args:string[],ms:number)=>Promise<string>}){
  const length=await adapter.duration(file,tools),dir=adapter.dir(),stamp=Date.now(),shots:string[]=[];
  const commands=attachmentPolicy<any[]>('frames',[length,count]);

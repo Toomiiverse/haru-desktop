@@ -27,7 +27,7 @@ export type AttachmentAdapter={
  facts:()=>any;source:(attachment:Attachment)=>unknown;hasTools:()=>boolean;
  pdf:(file:string)=>Promise<any>;text:(file:string)=>string;image:(file:string)=>string;
  eyes:(vision:VisionConfig,provider:any)=>Promise<any>;look:(images:string|string[],command:any)=>Promise<any>;
- frames:(file:string)=>Promise<string[]>;readFrame:(file:string)=>string;audio:(file:string,seconds:number)=>Promise<string>;
+ frames:(file:string)=>Promise<string[]>;readFrame:(file:string)=>string;pdfPages:(file:string,count:number)=>Promise<string[]>;audio:(file:string,seconds:number)=>Promise<string>;
  transcribe:(file:string)=>Promise<string>;waiting:(line:string)=>void;discard:(files:string[])=>void;
 };
 function assertSource(a:Attachment,adapter:AttachmentAdapter,source:unknown){
@@ -46,6 +46,7 @@ export async function openCoreAttachment(a:Attachment,v:VisionConfig,provider:an
     case 'image':{const eyes=await adapter.eyes(v,provider);assertSource(a,adapter,source);observation=await adapter.look(adapter.image(a.saved),{...eyes,options:{...command.options,numCtx:eyes.numCtx}});break;}
     case 'wait':adapter.waiting(command.line);observation={};break;
     case 'frames':frames=await adapter.frames(a.saved);temporary.push(...frames);observation={count:frames.length};break;
+    case 'pdf-pages':frames=await adapter.pdfPages(a.saved,command.count);temporary.push(...frames);observation={count:frames.length};break;   // 4110: scanned pages, read like video frames
     case 'video-look':observation=await adapter.look(frames.map(adapter.readFrame),command);break;
     case 'audio':wav=await adapter.audio(a.saved,command.seconds);temporary.push(wav);observation={};break;
     case 'transcribe':try{observation={ok:true,text:await adapter.transcribe(wav)};}catch(error){attachmentCurrent();observation={ok:false};}break;
