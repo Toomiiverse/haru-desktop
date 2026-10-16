@@ -961,8 +961,16 @@ const FORMING_QUIET_MS = 10 * 60_000;
 async function formingTick(): Promise<void> {
   {
     const archive=store.getArchive(),config=store.get('ai.config') as ProviderConfig|undefined;
-    const day=corePolicySync<string|null>('chat-lifecycle.formChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),Object.fromEntries(Object.entries(archive).map(([k,v])=>[k,v.length])),formedDays(),Object.fromEntries(formRetries),Date.now()]);
-    if(!day)return;
+    const lengths=Object.fromEntries(Object.entries(archive).map(([k,v])=>[k,v.length]));
+    const day=corePolicySync<string|null>('chat-lifecycle.formChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),lengths,formedDays(),Object.fromEntries(formRetries),Date.now()]);
+    if(!day){   // 3950: no memories to form; catch up a day note that never got written (same tick, same backoff map under 'summary:<day>')
+      const missing=corePolicySync<string|null>('chat-lifecycle.summaryChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),lengths,getSessions(),Object.fromEntries(formRetries),Date.now()]);
+      if(!missing)return;
+      const result=await runChatSummary('day',missing,(archive[missing]??[]) as unknown[],false,{core:remainingStore(app.getPath('userData')),model:r=>ollamaPost(r.messages,r.config,r.options),form:()=>{}}).catch(()=>'provider_failed');
+      console.log(`[memory] day note catch-up ${missing}: ${result}`);
+      if(result!=='saved')noteFormingFailed('summary:'+missing);
+      return;
+    }
     const messages=(archive[day]??[]) as {role?:string;content?:string}[];
     await formDayMemories(dayLines(messages),activityDigest(day),day,config!,messages.length);return;
   }
