@@ -965,7 +965,14 @@ async function formingTick(): Promise<void> {
     const day=corePolicySync<string|null>('chat-lifecycle.formChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),lengths,formedDays(),Object.fromEntries(formRetries),Date.now()]);
     if(!day){   // 3950: no memories to form; catch up a day note that never got written (same tick, same backoff map under 'summary:<day>')
       const missing=corePolicySync<string|null>('chat-lifecycle.summaryChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),lengths,getSessions(),Object.fromEntries(formRetries),Date.now()]);
-      if(!missing)return;
+      if(!missing){   // 4000: then a month with day notes but no month note; the startup fold ran outside a job scope and a hosted model refused it (cloud_task_required)
+        const month=corePolicySync<string|null>('chat-lifecycle.monthChoose',[forming,config??null,getMood().lastMessageAt??null,currentChatDayKey(),getSessions(),getMonthNotes(),Object.fromEntries(formRetries),Date.now()]);
+        if(!month)return;
+        const folded=await runChatSummary('month',month,[],true,{core:remainingStore(app.getPath('userData')),model:r=>ollamaPost(r.messages,r.config,r.options),form:()=>{}}).catch(()=>'provider_failed');
+        console.log(`[memory] month note catch-up ${month}: ${folded}`);
+        if(folded!=='saved')noteFormingFailed('month:'+month);
+        return;
+      }
       const result=await runChatSummary('day',missing,(archive[missing]??[]) as unknown[],false,{core:remainingStore(app.getPath('userData')),model:r=>ollamaPost(r.messages,r.config,r.options),form:()=>{}}).catch(()=>'provider_failed');
       console.log(`[memory] day note catch-up ${missing}: ${result}`);
       if(result!=='saved')noteFormingFailed('summary:'+missing);
