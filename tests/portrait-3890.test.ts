@@ -7,5 +7,5 @@ test('the portrait is a block source and follows a successful day pass', async (
   assert.ok(store.includes('portrait: deps.portrait(),'));
   assert.ok(main.includes("portrait: () => (store.get('portrait') as { text?: string } | undefined)?.text ?? '',"));
   assert.ok(main.includes('if(success)await writePortrait(config);'));
-  assert.ok(main.includes("corePolicySync<any>('memory-portrait.plan',[core.docRef('config',{}),text,ask.day,new Date().toISOString()])"));
+  assert.ok(main.includes("corePolicySync<any>('chat-lifecycle.portraitPlan',[core.docRef('config',{}),text,ask.day,new Date().toISOString()])"));
 });

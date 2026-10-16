@@ -906,10 +906,10 @@ async function formDayMemories(lines: string[], doing: string, day: string, conf
 async function writePortrait(config: ProviderConfig): Promise<void> {
   try{
     const core=remainingStore(app.getPath('userData'));
-    const ask=corePolicySync<any>('memory-portrait.ask',[core.docRef('config',{}),core.docRef('memories',{}),core.docRef('graph',{}),localDateKey(zonedNow(CHAT_TIMEZONE))]);
+    const ask=corePolicySync<any>('chat-lifecycle.portraitAsk',[core.docRef('config',{}),core.docRef('memories',{}),core.docRef('graph',{}),localDateKey(zonedNow(CHAT_TIMEZONE))]);
     if(!ask)return;
     const text=await ollamaQuipLong(ask.system,ask.user,config);
-    const plan=corePolicySync<any>('memory-portrait.plan',[core.docRef('config',{}),text,ask.day,new Date().toISOString()]);
+    const plan=corePolicySync<any>('chat-lifecycle.portraitPlan',[core.docRef('config',{}),text,ask.day,new Date().toISOString()]);
     if(plan)commitLifecyclePlan(core,plan);
     console.log(`[portrait] ${plan?'written':'rejected'} from ${ask.notes} notes (${text.length} chars)`);
   }catch(error){console.warn('[portrait]',error instanceof Error?error.message:'failed');}
