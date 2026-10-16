@@ -4456,7 +4456,9 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
       taskBudgetMicros:local?0:policy.taskBudgetMicros,dailyBudgetMicros:local?0:policy.dailyBudgetMicros,
       maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:local?180000:Math.min(40000,policy.deadlineMs)},!local);
     const job=activeScheduledJob.getStore()?.kind;   // 3960: which job spent it (the ledger grouped every composition under one label)
-    await background.start('Background model composition (no actions)'+(job?' — '+job:' — unscheduled'),config.model,'background');
+    // 4020: a hosted call outside a job is her answering him (second thought, opening line, remarks); background priority was
+    // refused for 180 s after he spoke, i.e. always. Foreground runs beside his turns without queueing them; jobs stay background (startPriority).
+    await background.start('Background model composition (no actions)'+(job?' — '+job:' — unscheduled'),config.model,local?'background':'foreground');
     let reply:OllamaMessage|undefined;
     await background.compose(async()=>{reply=await sendToProviderAdmitted(conversation,config,{...options,tools:false,table:[]});return reply;},conversation);
     return withToolContract(reply!,[]);
