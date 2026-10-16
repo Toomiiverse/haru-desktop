@@ -1120,7 +1120,9 @@ async function ownedReminder(phone:boolean,idleSeconds:number):Promise<any>{
  if(!packet.run)return packet.result;
  applyAgendaPlan(core,packet,()=>{});chasing=true;lastRemindedAt=packet.at;
  try{
-  const line=await ollamaQuip(packet.request.system,packet.request.user,packet.request.provider);
+  // 3880: the reminder goes out even when the model is down (Venice: 11/11 reminder lines failed 10-13..14); the attempt was already counted
+  let line:string;try{line=await ollamaQuip(packet.request.system,packet.request.user,packet.request.provider);}
+  catch(error){console.warn('[remind] plain line, model failed:',error instanceof Error?error.message:'failed');line=`Reminder: ${packet.item.title}${packet.item.time?` at ${packet.item.time}`:''}.`;}
   if(!corePolicySync<boolean>('agenda-life.reminderCurrent',[packet.source,agendaFacts(core),ownedReminderFacts(phone,idleSeconds)]))return phone?null:false;
   if(phone){recordBrief(`reminder ${packet.tier}`,packet.request.system,line);return {line,about:packet.item.title,eventId:packet.item.id};}
   sendToWindows('voice:insistence',packet.volume);
