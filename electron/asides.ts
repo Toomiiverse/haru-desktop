@@ -43,6 +43,7 @@ export type AsideSource =
   | 'thought'     // something on her mind she decided to say (thoughts.ts)
   | 'goodnight'   // turning in for the night, at her own hour (hersleep.ts)
   | 'anime'       // a show she fetched for them has landed, or never came (animefetch.ts)
+  | 'code'        // a coding job she handed over finished, stopped, or waits on his OK (codetask.ts)
   | 'other';
 
 export const NUDGE_KINDS = ['memory', 'day', 'task', 'own', 'recommendation', 'checkin', 'callback'] as const;
@@ -132,7 +133,7 @@ export const ASIDE_DAYS = 7;
 // and 'upcoming' were missing, which is three of the seven sources that reach
 // the phone — the evening tally counted none of them, so being left on read
 // after "you left me hanging" cost them nothing.
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime', 'code'];
 
 export function readAsides(saved: unknown): Aside[] {
   {const count=corePolicySync<number>('asides.missingIds',[saved]);return corePolicySync('asides.read',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}

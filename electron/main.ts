@@ -82,6 +82,7 @@ import {coreEveryday,coreProactiveRecall,coreRefreshRecall,recallFrames} from '.
 import {runCorePicture} from './core-final-picture';
 import {coreSessionLink} from './core-final-sessions';
 import {LOCAL_DIRS} from './claudesession';
+import { codeJobs, codeLink, openCodeApi, type CodeLink } from './codetask';
 import {runCoreShell} from './core-final-shell';
 import {locationPolicy,locationFlow,locationClock,applyCoreLocation} from './core-location-policy';
 import {devicePolicy,deviceFlow,deviceMutation,handleCoreHelper,reactCoreActivity,reactCoreFullscreen,tieCorePlace} from './core-device-activity';
@@ -3903,6 +3904,8 @@ function availableTools(turn: TurnContext): ToolAvailability {
     // A fact for Core's tool menu: which browser that is.
     browserBackend: readBrowserControlConfig(store.get('browser')).backend,
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
+    code: codeTasks() !== null,
+    codeWaiting: codeTasks()?.waiting() ?? false,
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
     mangaShelf: mangaShelfLink() !== null,
@@ -3966,6 +3969,20 @@ function downloadsLink(): Downloads | null {
  * only the ones she opened. Read per call, so switching it off takes effect on
  * the next turn.
  */
+const OPENCODE_BIN = path.join(os.homedir(), '.npm-global/bin/opencode');
+let codeTasksLink: CodeLink | null | undefined;
+/** Coding jobs handed to OpenCode (codetask.ts): one link for the tool and the watch, null when OpenCode is not installed. */
+function codeTasks(): CodeLink | null {
+  if (codeTasksLink === undefined) codeTasksLink = existsSync(OPENCODE_BIN) ? codeLink({ api: openCodeApi(OPENCODE_BIN, os.homedir()), jobs: codeJobs(path.join(app.getPath('userData'), 'code-jobs.json')), home: os.homedir() }) : null;
+  return codeTasksLink;
+}
+let codeWatchTimer: NodeJS.Timeout | null = null;
+/** Every 30 s: a job that finished, stopped or wants his OK becomes an aside, which reaches the phone as an event. */
+function startCodeWatch() {
+  if (codeWatchTimer || !codeTasks()) return;
+  codeWatchTimer = setInterval(() => { void codeTasks()?.watch((line, about) => { noteAside(line, 'code', about); }).catch(error => console.warn('[code]', error instanceof Error ? error.message : 'failed')); }, 30_000);
+}
+
 function claudeSessions(): ToolDeps['claude'] {
   if(!readClaudeCodeConfig(store.get('claudeCode')).enabled)return null;
     return coreSessionLink({core:remainingStore(app.getPath('userData')),home:os.homedir(),dirs:LOCAL_DIRS,systemdRun:existsSync('/usr/bin/systemd-run')?'/usr/bin/systemd-run':null,sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms)),run:(file,args,options)=>new Promise(resolve=>{execFile(file,args,{cwd:options.cwd,timeout:options.timeoutMs,maxBuffer:16*1024*1024},(error,stdout,stderr)=>resolve({ok:!error,stdout:String(stdout??''),stderr:String(stderr??error?.message??'')}));})});
@@ -3994,6 +4011,7 @@ function toolDeps(turn: TurnContext): ToolDeps {
     handsAllowed: turn.handsAllowed,
     onWeb: turn.onWeb,
     markPageRead: turn.markPageRead,
+    pageWasRead: turn.pageWasRead,
     setPendingChoices: turn.setPendingChoices,
     requestRestart: turn.requestRestart,
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
@@ -4002,6 +4020,8 @@ function toolDeps(turn: TurnContext): ToolDeps {
     chats: { search: searchOldChats },
     // Claude Code sessions he picks up in the Claude app (claudesession.ts).
     claude: claudeSessions(),
+    // Coding jobs she hands to OpenCode (codetask.ts).
+    code: codeTasks(),
     // The downloads, asked of qBittorrent at call time (downloads.ts).
     downloads: (link => link ? { status: () => link.status(), pause: title => link.pause(title), resume: title => link.resume(title) } : null)(downloadsLink()),
     // The terminal on the server (shell.ts), level 3.
@@ -10357,6 +10377,7 @@ async function startWebDoor() {
     startPhoneOpportunities();
     startProactive();
     startChasing();
+    startCodeWatch();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the

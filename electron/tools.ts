@@ -990,6 +990,9 @@ export type ToolAvailability = {
   browserBackend?: 'playwright' | 'chrome';
   /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
   claude: boolean;
+  /** Whether she can hand coding jobs to OpenCode (codetask.ts), and whether one waits on his OK (so a bare "yes" still gets the tool). Optional so fixtures need not name them. */
+  code?: boolean;
+  codeWaiting?: boolean;
   /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
   downloads?: boolean;
   /** Whether she may make a picture and send it (venice-image.ts). Only in Explicit mode. Optional so fixtures need not name it. */
@@ -1141,6 +1144,10 @@ export type ToolDeps = {
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
   /** The downloads (downloads.ts): qBittorrent asked directly; null when the stack is off or her password file is missing. */
   downloads?: { status(): Promise<Record<string, unknown>>; pause(title?: string): Promise<Record<string, unknown>>; resume(title?: string): Promise<Record<string, unknown>> } | null;
+  /** Coding jobs handed to OpenCode (codetask.ts), or null when OpenCode is not installed. */
+  code?: import('./codetask').CodeLink | null;
+  /** Whether outside text entered this reply (a page she read); a coding job is not started from it. */
+  pageWasRead?(): boolean;
   /** The terminal on the server (shell.ts): his word is checked inside, against his real message. */
   shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
   /** His manga shelf (suwayomi.ts): a title found and fetched for him, and how it is going. */

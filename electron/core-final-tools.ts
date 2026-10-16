@@ -26,12 +26,12 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
  let packet=corePolicySync<Packet>('final-tools.start',[name??null,args,latest]);
  const facts=(keys:string[])=>{
   const values:Record<string,()=>unknown>={
-   onWeb:()=>deps.onWeb(),hands:()=>deps.handsAllowed(),desktopSupported:()=>desktop.desktopSupported(),desktopConfig:()=>desktop.readDesktopConfig(deps.store.get('desktop')),
+   onWeb:()=>deps.onWeb(),hands:()=>deps.handsAllowed(),pageRead:()=>deps.pageWasRead?.()??false,desktopSupported:()=>desktop.desktopSupported(),desktopConfig:()=>desktop.readDesktopConfig(deps.store.get('desktop')),
    searchConfig:()=>readSearchConfig(deps.store.get('search')),anilistConfig:()=>readAniListConfig(deps.store.get('anilist')),
    systemConfig:()=>deps.readSystemConfig(),lastResults:()=>deps.lastResults(),lastSearchQuery:()=>deps.lastSearchQuery(),
    wardrobe:()=>deps.getWardrobeControls(),interests:()=>deps.getInterests(),config:()=>{if(!deps.policyConfig)throw Error('final_tool_config_required');return deps.policyConfig()},
    clock:()=>{const now=zonedNow(deps.CHAT_TIMEZONE);return {day:localDateKey(now),iso:now.toISOString(),epochMs:Date.now()}},uuid:()=>randomUUID(),
-   capabilities:()=>Object.fromEntries(['makePicture','showWebPicture','claude','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
+   capabilities:()=>Object.fromEntries(['makePicture','showWebPicture','claude','code','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
    vaultRoot:()=>deps.vault.root(),knowledgeConfig:()=>deps.getKnowledgeConfig()
   };
   return Object.fromEntries(keys.map(key=>{if(!values[key])throw Error('final_tool_fact_protocol');return [key,values[key]()] }));
@@ -68,6 +68,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    case 'myself':return deps.myself();
    case 'claudeOpen':if(!deps.claude)throw Error('final_tool_capability_revoked');return deps.claude.open({folder:c.folder,name:c.name});
    case 'claudeList':if(!deps.claude)throw Error('final_tool_capability_revoked');return deps.claude.list();
+   case 'code':if(!deps.code)throw Error('final_tool_capability_revoked');return deps.code.run(c);
    case 'claudeStop':if(!deps.claude)throw Error('final_tool_capability_revoked');return deps.claude.stop(c.id);
    case 'downloads':if(!deps.downloads)throw Error('final_tool_capability_revoked');if(c.action==='status')return deps.downloads.status();if(c.action==='pause')return deps.downloads.pause(c.title??undefined);if(c.action==='resume')return deps.downloads.resume(c.title??undefined);throw Error('final_tool_download_command');
    case 'shell':if(!deps.shell)throw Error('final_tool_capability_revoked');return deps.shell.run({command:c.command,said:c.said,door:c.door});
