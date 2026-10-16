@@ -4448,7 +4448,8 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
     const background=new TaskController(taskBridge.call,registry,{...policy,
       taskBudgetMicros:local?0:policy.taskBudgetMicros,dailyBudgetMicros:local?0:policy.dailyBudgetMicros,
       maxAttempts:1,maxToolCalls:0,maxEscalations:0,deadlineMs:local?180000:Math.min(40000,policy.deadlineMs)},!local);
-    await background.start('Background model composition (no actions)',config.model,'background');
+    const job=activeScheduledJob.getStore()?.kind;   // 3960: which job spent it (the ledger grouped every composition under one label)
+    await background.start('Background model composition (no actions)'+(job?' — '+job:''),config.model,'background');
     let reply:OllamaMessage|undefined;
     await background.compose(async()=>{reply=await sendToProviderAdmitted(conversation,config,{...options,tools:false,table:[]});return reply;},conversation);
     return withToolContract(reply!,[]);
