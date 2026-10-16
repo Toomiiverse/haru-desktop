@@ -9545,6 +9545,7 @@ function webDeps(): WebDeps {
       if (flushError) throw flushError;
       options?.signal?.throwIfAborted();
       const reply = stripDelivery(answer.content ?? '');
+      rememberDelivery(answer.content ?? '', reply);   // 4030: the phone streams, so without this its face request missed her own tag and ran the classifier every reply
       // A confirmed Core answer can arrive whole without provider chunks.
       if(!receivedReplyChunks && reply){trace.mark('first');showClean(answer.content??reply);voice.feed(answer.content??reply);}
       // The last sentence arrives without the space the splitter waits for —
@@ -9589,6 +9590,7 @@ function webDeps(): WebDeps {
         onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
       });
       const reply = stripDelivery(answer.content ?? '');
+      rememberDelivery(answer.content ?? '', reply);   // 4030: same for a retried reply
       voice.flush();
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
