@@ -4451,10 +4451,10 @@ async function sendToProviderAdmitted(conversation: OllamaMessage[], config: Pro
   }
   const task = activeTask.getStore();
   if(!task&&!options.turn&&!table.length){   // 4010: every hosted call without a live task gets its own ledger task; scheduled jobs only before, the rest died unlogged as cloud_task_required
-    const registry=readModelRegistry(store.get('ai.modelRegistry'),{
+    const registry=[...readModelRegistry(store.get('ai.modelRegistry'),{
       local:(store.get('ai.config') as ProviderConfig|undefined)??config,conversation:store.get('ai.conversation') as ProviderConfig|undefined,
       specialist:store.get('escalate.provider') as ProviderConfig|undefined,vision:readVisionConfig(store.get('vision')),
-    });
+    }),...naturalPolicy<ModelEntry[]>('readerEntries',[])];   // 4080: the Core's reader entries (DeepSeek, Opus) for this one task only, never for routing
     // Keep the requested route. Scheduled hosted follow-ups receive the same
     // durable budgets, one attempt, no tools and a forty-second ceiling.
     const local=isLocalConfig(config),policy=readTaskPolicy(store.get('ai.taskPolicy'));
