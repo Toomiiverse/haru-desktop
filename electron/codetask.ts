@@ -9,7 +9,7 @@ import path from 'node:path';
 import { LOCAL_DIRS, resolveSessionDir } from './claudesession';
 
 // direct: his own coding-mode session (codemode.ts), not a job of hers; away: it was working while his phone was not watching.
-export type CodeJob = { id: string; dir: string; task: string; at: string; told?: string; done?: boolean; direct?: boolean; away?: boolean };
+export type CodeJob = { id: string; dir: string; task: string; at: string; told?: string; done?: boolean; direct?: boolean; away?: boolean; archived?: boolean };
 export type CodeCommand = { action: 'start' | 'status' | 'approve' | 'deny' | 'stop'; folder?: string; task?: string; id?: string | null };
 export type CodeApi = (method: string, route: string, body?: unknown) => Promise<any>;
 export type CodeLink = {
@@ -52,11 +52,13 @@ export function repoDir(folder: string, home: string): { dir: string } | { error
 /** Her jobs, kept beside her other files. Every change re-reads first and writes at once, so a watch tick and a tool call cannot undo each other. */
 export function codeJobs(file: string) {
   const read = (): CodeJob[] => { try { const v = JSON.parse(readFileSync(file, 'utf8')); return Array.isArray(v) ? v : []; } catch { return []; } };
-  const write = (jobs: CodeJob[]) => { writeFileSync(file + '.tmp', JSON.stringify(jobs.slice(-20))); renameSync(file + '.tmp', file); };
+  // 60: room for his recent coding-mode sessions (the Recent list) beside her own jobs.
+  const write = (jobs: CodeJob[]) => { writeFileSync(file + '.tmp', JSON.stringify(jobs.slice(-60))); renameSync(file + '.tmp', file); };
   return {
     read,
     add: (job: CodeJob) => write([...read(), job]),
     update: (id: string, patch: Partial<CodeJob>) => write(read().map(j => j.id === id ? { ...j, ...patch } : j)),
+    remove: (id: string) => write(read().filter(j => j.id !== id)),
   };
 }
 

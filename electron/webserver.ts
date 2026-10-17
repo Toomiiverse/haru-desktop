@@ -1190,6 +1190,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
         case 'POST shell': return json(res, 200, await code.shell(text('command')));
         case 'POST stop': return json(res, 200, await code.stop());
         case 'POST leave': return json(res, 200, code.leave());
+        case 'GET sessions': return json(res, 200, await code.sessions());
+        case 'POST resume': return json(res, 200, await code.resume(text('id')));
+        case 'POST archive': return json(res, 200, code.archive(text('id'), body.archived !== false));
+        case 'POST delete': return json(res, 200, await code.remove(text('id')));
       }
     } catch (error) { return json(res, 409, { error: error instanceof Error ? error.message : 'The coder is not answering.' }); }
     return json(res, 404, { error: 'Nothing here.' });

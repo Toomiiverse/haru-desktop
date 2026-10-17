@@ -135,7 +135,7 @@ export function codeEventHub(auth: OpenCodeAuth, wait = (ms: number) => new Prom
 
 type ModeState = { sessionId?: string; folder?: string; dir?: string; model: string; first?: string; prompts?: number; noted?: number };
 type Hub = ReturnType<typeof codeEventHub>;
-type Jobs = { read(): CodeJob[]; add(job: CodeJob): void; update(id: string, patch: Partial<CodeJob>): void };
+type Jobs = { read(): CodeJob[]; add(job: CodeJob): void; update(id: string, patch: Partial<CodeJob>): void; remove(id: string): void };
 
 /** Where "+" (a session with no folder named) works: a scratch repository of its own in home, made on first use. */
 export const QUICK_FOLDER = 'quick-code';
@@ -210,7 +210,9 @@ export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = a
       const s = session();
       if (!text.trim()) throw Error('Say what it should do.');
       await api('POST', `/api/session/${s.sessionId}/prompt`, { text });
-      write({ ...s, first: s.first ?? cut(text.replace(/\s+/g, ' ').trim(), 120), prompts: (s.prompts ?? 0) + 1 });
+      const first = s.first ?? cut(text.replace(/\s+/g, ' ').trim(), 120);
+      if (!s.first) jobs.update(s.sessionId, { task: first });   // what the Recent list shows for it
+      write({ ...s, first, prompts: (s.prompts ?? 0) + 1 });
       return { ok: true };
     },
     async model(model: string) {
@@ -233,6 +235,50 @@ export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = a
       const s = session();
       if (!command.trim()) throw Error('Type a command after the !.');
       await api('POST', `/api/session/${s.sessionId}/shell`, { command });
+      return { ok: true };
+    },
+    /** His recent coding-mode sessions, newest first; one deleted in OpenCode drops off the list. */
+    async sessions() {
+      const current = read().sessionId, mine = jobs.read().filter(j => j.direct).reverse();
+      const rows = await Promise.all(mine.map(async j => {
+        try {
+          const info = await api('GET', `/api/session/${j.id}`);
+          return { id: j.id, folder: path.basename(j.dir), task: j.task === '(coding mode)' ? '' : j.task, at: j.at,
+            updatedAt: info?.time?.updated ? new Date(info.time.updated).toISOString() : j.at,
+            model: info?.model ? `${info.model.providerID}/${info.model.id}` : null, archived: Boolean(j.archived), current: j.id === current };
+        } catch (error) {
+          if (/not ?found|404/i.test(error instanceof Error ? error.message : '')) jobs.remove(j.id);
+          return null;
+        }
+      }));
+      return { sessions: rows.filter(<T>(r: T | null): r is T => r !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
+    },
+    /** Back into one of his earlier sessions, with its folder and model. */
+    async resume(id: string) {
+      const job = jobs.read().find(j => j.direct && j.id === id);
+      if (!job) throw Error('That session is not one of yours.');
+      const where = repoDir(path.basename(job.dir), home);
+      if ('error' in where) throw Error(where.error);
+      const info = await api('GET', `/api/session/${id}`), s = read();
+      if (s.sessionId && s.sessionId !== id) jobs.update(s.sessionId, { done: true });
+      jobs.update(id, { done: false, archived: false });
+      const model = info?.model ? `${info.model.providerID}/${info.model.id}` : s.model;
+      write({ sessionId: id, folder: path.basename(job.dir), dir: job.dir, model, first: job.task === '(coding mode)' ? undefined : job.task, prompts: 0, noted: 0 });
+      return state();
+    },
+    /** Hidden from the Recent list (or shown again); the session itself stays in OpenCode. */
+    archive(id: string, archived: boolean) {
+      if (!jobs.read().some(j => j.direct && j.id === id)) throw Error('That session is not one of yours.');
+      jobs.update(id, { archived });
+      return { ok: true };
+    },
+    /** Gone for good, from OpenCode too. Deleting the open one leaves coding mode with no session. */
+    async remove(id: string) {
+      if (!jobs.read().some(j => j.direct && j.id === id)) throw Error('That session is not one of yours.');
+      await api('DELETE', `/api/session/${id}`).catch(error => { if (!/not ?found|404/i.test(error instanceof Error ? error.message : '')) throw error; });
+      jobs.remove(id);
+      const s = read();
+      if (s.sessionId === id) write({ model: s.model });
       return { ok: true };
     },
     async stop() {

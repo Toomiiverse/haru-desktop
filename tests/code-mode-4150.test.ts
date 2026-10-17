@@ -170,3 +170,22 @@ test("OpenCode's own models are on the menu and go to their own provider", async
   await mode.start('repo', 'opencode/deepseek-v4.1-flash');
   assert.deepEqual(calls[0][2].model, { providerID: 'opencode', id: 'deepseek-v4.1-flash' });
 });
+
+test('recent sessions: listed newest first with their first ask, continued, archived and deleted', async () => {
+  const { mode, calls, jobs } = rig();
+  const a = await mode.start('repo'); await mode.prompt('Fix add()');
+  const b = await mode.start('repo', 'haru/claude-opus-5-5');
+  const list = (await mode.sessions()).sessions;
+  assert.deepEqual(list.map(r => [r.id, r.task, r.current]).sort(), [[a.sessionId, 'Fix add()', false], [b.sessionId, '', true]].sort());
+  const back = await mode.resume(a.sessionId!);
+  assert.equal(back.sessionId, a.sessionId); assert.equal(back.folder, 'repo');
+  assert.equal(jobs.read().find(j => j.id === b.sessionId)!.done, true);
+  mode.archive(b.sessionId!, true);
+  assert.equal((await mode.sessions()).sessions.find(r => r.id === b.sessionId)!.archived, true);
+  await mode.remove(a.sessionId!);
+  assert.deepEqual(calls.at(-1), ['DELETE', `/api/session/${a.sessionId}`, undefined]);
+  assert.equal((await mode.state()).sessionId, null);   // the open one was deleted
+  assert.ok(!(await mode.sessions()).sessions.some(r => r.id === a.sessionId));
+  await assert.rejects(mode.resume('ses_not_mine'), /not one of yours/);
+  assert.throws(() => mode.archive('ses_not_mine', true), /not one of yours/);
+});
