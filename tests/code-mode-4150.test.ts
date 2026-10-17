@@ -163,3 +163,10 @@ test('a command he runs himself becomes a terminal card, live and from history',
   await mode.shell('git status');
   assert.deepEqual(calls.at(-1), ['POST', `/api/session/${s.sessionId}/shell`, { command: 'git status' }]);
 });
+
+test("OpenCode's own models are on the menu and go to their own provider", async () => {
+  assert.ok(CODE_MODELS.some(m => m.id === 'opencode/mimo-v2.6-flash-free') && CODE_MODELS.some(m => m.id === 'opencode/deepseek-v4.1-flash'));
+  const { mode, calls } = rig();
+  await mode.start('repo', 'opencode/deepseek-v4.1-flash');
+  assert.deepEqual(calls[0][2].model, { providerID: 'opencode', id: 'deepseek-v4.1-flash' });
+});

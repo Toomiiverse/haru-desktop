@@ -12,6 +12,9 @@ export const CODE_MODELS = [
   { id: 'haru/qwen-3-6-plus-uncensored', name: 'Qwen 3.6 Plus' },
   { id: 'haru/claude-opus-5-5', name: 'Opus 5.5' },
   { id: 'haru/mimo-v2.6-pro', name: 'MiMo V2.6 Pro' },
+  // OpenCode's own provider, billed to the OpenCode account, not the capped haru-coder key.
+  { id: 'opencode/mimo-v2.6-flash-free', name: 'MiMo V2.6 Flash (free)' },
+  { id: 'opencode/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
 ];
 const modelRef = (id: string) => ({ providerID: id.split('/')[0], id: id.split('/').slice(1).join('/') });
 
