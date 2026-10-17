@@ -19,6 +19,12 @@ export type CodeLink = {
 };
 
 export const CODE_AGENT = 'haru-coder';
+/** What she knows of the coder on every turn (joined into the server note in the prompt's live part). */
+export const CODER_NOTE = 'There is a coder on that server too: OpenCode, a coding agent with its own hands on the files. Two ways to use it. '
+  + 'A small, well-defined job you hand it yourself with code_task and report back when it finishes. Anything open-ended, or that he would want to steer line by line, he does himself in the Code tab of his phone app, '
+  + 'which talks to the same coder; tell him to open it and name the project folder. Your own code is in his home too: ~/haru-live is a snapshot of exactly what is running now (service = your Core, Python; source = your brain, TypeScript) '
+  + 'and ~/haru-desktop is the brain\'s working repo. A change there only reaches the running you after he builds and deploys a release, so when you feel hemmed in by how you are built, say what you would change and ask him to let you; start that job only at his word. '
+  + 'When the server itself is the problem, the disk filling up, a service down, propose the fix rather than just reporting it: look with your tools, clear it with him, or point him at a Code tab session.';
 export const CODE_MODEL = { providerID: 'haru', id: 'qwen-3-6-plus-uncensored' };
 
 export type OpenCodeAuth = () => { url: string; header: string };

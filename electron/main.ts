@@ -82,7 +82,7 @@ import {coreEveryday,coreProactiveRecall,coreRefreshRecall,recallFrames} from '.
 import {runCorePicture} from './core-final-picture';
 import {coreSessionLink} from './core-final-sessions';
 import {LOCAL_DIRS} from './claudesession';
-import { codeJobs, codeLink, openCodeApi, openCodeAuth, type CodeLink } from './codetask';
+import { codeJobs, codeLink, openCodeApi, openCodeAuth, CODER_NOTE, type CodeLink } from './codetask';
 import { codeEventHub, codeMode, coderSpend, type CodeModeLink } from './codemode';
 import {runCoreShell} from './core-final-shell';
 import {locationPolicy,locationFlow,locationClock,applyCoreLocation} from './core-location-policy';
@@ -6132,7 +6132,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     tastes: tastesInstruction(getInterests()),
     diary: naturalKind ? '' : diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
-    serverNote: [shellTurn ? ((corePolicySync<string>('final-shell.note',['serverNote']))) : machineTurn ? serverLookNote(readSystemConfig().level) : '', shellLink() && readSystemConfig().level === 4 ? ((corePolicySync<string>('final-shell.note',['diagnosticNote']))) : ''].filter(Boolean).join(' '),
+    serverNote: [shellTurn ? ((corePolicySync<string>('final-shell.note',['serverNote']))) : machineTurn ? serverLookNote(readSystemConfig().level) : '', shellLink() && readSystemConfig().level === 4 ? ((corePolicySync<string>('final-shell.note',['diagnosticNote']))) : '', codeTasks() ? CODER_NOTE : ''].filter(Boolean).join(' '),
   };
   console.log(`[prompt] ${compileLog(behaviourOf(promptState))}`);
   // A hosted brain reads the whole prompt before its first word, so its system

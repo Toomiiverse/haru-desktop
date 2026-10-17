@@ -8,7 +8,7 @@ import path from 'node:path';
 import * as policy from '../electron/core-policy-sync';
 import { codeMode, gitDiff, phoneEvent, phoneItems, CODE_MODELS, QUICK_FOLDER, type CodeEvent } from '../electron/codemode';
 import { execFileSync } from 'node:child_process';
-import { codeJobs, codeLink, errorText } from '../electron/codetask';
+import { codeJobs, codeLink, errorText, CODER_NOTE } from '../electron/codetask';
 
 const DIR = '/home/toomii/haru-code-check';
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, '../../tests/fixtures', name), 'utf8'));
@@ -188,4 +188,13 @@ test('recent sessions: listed newest first with their first ask, continued, arch
   assert.ok(!(await mode.sessions()).sessions.some(r => r.id === a.sessionId));
   await assert.rejects(mode.resume('ses_not_mine'), /not one of yours/);
   assert.throws(() => mode.archive('ses_not_mine', true), /not one of yours/);
+});
+
+test('she is told about the coder on every turn: both doors, where her own code lives, and to ask before changing herself', async () => {
+  for (const must of ['code_task', 'Code tab', '~/haru-live', '~/haru-desktop', 'ask him', 'disk']) assert.ok(CODER_NOTE.includes(must), must);
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(require.resolve('../../electron/main.ts'), 'utf8');
+  assert.ok(src.includes("codeTasks() ? CODER_NOTE : ''].filter(Boolean).join(' ')"), 'joined into the server note');
+  const events = readFileSync(require.resolve('../../electron/systemState.ts'), 'utf8');
+  assert.ok(events.includes('seconds. Want me to find what is eating it?`'), 'the disk warning offers to act');
 });

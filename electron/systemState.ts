@@ -157,7 +157,7 @@ export function checkEvents(
   }
 
   if (thresholds.disk_percent) {
-    if (newlySustained(sample => sample.disk_percent >= (thresholds.disk_percent?.value ?? 0), thresholds.disk_percent.seconds ?? 0)) fire('disk_percent', `The disk has been above ${thresholds.disk_percent.value}% full for the last ${thresholds.disk_percent.seconds} seconds.`);
+    if (newlySustained(sample => sample.disk_percent >= (thresholds.disk_percent?.value ?? 0), thresholds.disk_percent.seconds ?? 0)) fire('disk_percent', `The disk has been above ${thresholds.disk_percent.value}% full for the last ${thresholds.disk_percent.seconds} seconds. Want me to find what is eating it?`);
   }
 
   if (thresholds.gpu_temp_c) {
