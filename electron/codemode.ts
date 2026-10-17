@@ -35,11 +35,19 @@ function toolResult(content: any, metadata: any, error: any, dir: string) {
     ...(patch ? { patch: cut(patch, 16000) } : {}), ...(typeof metadata?.exit === 'number' ? { exit: metadata.exit } : {}) };
 }
 
+/** A command he ran himself (!command): a tool card named "terminal", done once it has an exit code. */
+function terminalCard(shell: any, output: any, dir: string): CodeEvent {
+  const done = typeof shell?.exit === 'number';
+  return { kind: 'tool', id: String(shell?.shellID ?? shell?.id), name: 'terminal', status: done ? 'done' : 'running', title: cut(String(shell?.command ?? ''), 200),
+    ...(done ? { output: cut(rel(dir, output?.output ?? ''), 8000), exit: shell.exit } : {}) };
+}
+
 /** The session so far, oldest first, as the phone draws it. */
 export function phoneItems(messages: any[], dir: string): CodeEvent[] {
   const items: CodeEvent[] = [];
   for (const m of [...(Array.isArray(messages) ? messages : [])].sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))) {
     if (m.type === 'user') items.push({ kind: 'you', id: m.id, text: String(m.text ?? m.payload?.text ?? '') });
+    if (m.type === 'shell') items.push(terminalCard(m, m.output, dir));
     if (m.type !== 'assistant') continue;
     let ordinal = 0;
     for (const c of m.content ?? []) {
@@ -70,6 +78,8 @@ export function phoneEvent(frame: Frame, names: Map<string, string>, dir: string
     case 'session.execution.succeeded': return { kind: 'run', running: false };
     case 'session.execution.interrupted': return { kind: 'run', running: false, note: 'Stopped.' };
     case 'session.execution.failed': return { kind: 'run', running: false, error: errorText(d.error) };
+    case 'session.shell.started': return terminalCard(d.shell, null, dir);
+    case 'session.shell.ended': return terminalCard(d.shell, d.output, dir);
     case 'session.usage.updated': return { kind: 'usage', cost: Number(d.cost ?? 0), tokens: Number(d.tokens?.input ?? 0) + Number(d.tokens?.output ?? 0) };
   }
   return null;
@@ -213,6 +223,13 @@ export function codeMode({ api, hub, jobs, home, file, diff = gitDiff, spend = a
       const s = session();
       if (!(await asks(s.sessionId)).some(w => w.id === id)) throw Error('It is not waiting on that any more.');
       await api('POST', `/api/session/${s.sessionId}/permission/${id}/reply`, { decision });
+      return { ok: true };
+    },
+    /** A command he typed himself (!command), run in the session's folder; its output also goes to the coder as context. */
+    async shell(command: string) {
+      const s = session();
+      if (!command.trim()) throw Error('Type a command after the !.');
+      await api('POST', `/api/session/${s.sessionId}/shell`, { command });
       return { ok: true };
     },
     async stop() {

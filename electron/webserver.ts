@@ -1187,6 +1187,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
         case 'POST prompt': return json(res, 200, await code.prompt(text('text')));
         case 'POST model': return json(res, 200, await code.model(text('model')));
         case 'POST permission': return json(res, 200, await code.permission(text('id'), text('decision')));
+        case 'POST shell': return json(res, 200, await code.shell(text('command')));
         case 'POST stop': return json(res, 200, await code.stop());
         case 'POST leave': return json(res, 200, code.leave());
       }

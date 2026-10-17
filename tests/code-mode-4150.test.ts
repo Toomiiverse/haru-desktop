@@ -146,3 +146,20 @@ test('a session with no folder opens the quick repository, made once with a firs
   assert.equal(execFileSync('git', ['-C', path.join(home, QUICK_FOLDER), 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), '1');
   assert.ok((await mode.state()).projects.includes(QUICK_FOLDER));
 });
+
+test('a command he runs himself becomes a terminal card, live and from history', async () => {
+  const shell = { id: 'sh_1', command: 'npm test', cwd: DIR, status: 'exited', exit: 3 };
+  const names = new Map<string, string>();
+  assert.deepEqual(phoneEvent({ type: 'session.shell.started', data: { sessionID: 's', shell: { ...shell, status: 'running', exit: undefined } } }, names, DIR),
+    { kind: 'tool', id: 'sh_1', name: 'terminal', status: 'running', title: 'npm test' });
+  assert.deepEqual(phoneEvent({ type: 'session.shell.ended', data: { sessionID: 's', shell, output: { output: DIR + '/calc.py failed\n' } } }, names, DIR),
+    { kind: 'tool', id: 'sh_1', name: 'terminal', status: 'done', title: 'npm test', output: 'calc.py failed\n', exit: 3 });
+  const items = phoneItems([{ id: 'msg_1', type: 'shell', shellID: 'sh_1', command: 'npm test', exit: 3, time: { created: 1 }, output: { output: 'x\n' } }], DIR);
+  assert.deepEqual(items, [{ kind: 'tool', id: 'sh_1', name: 'terminal', status: 'done', title: 'npm test', output: 'x\n', exit: 3 }]);
+  const { mode, calls } = rig();
+  await assert.rejects(mode.shell('ls'), /Pick a project folder first/);
+  const s = await mode.start('repo');
+  await assert.rejects(mode.shell('  '), /Type a command/);
+  await mode.shell('git status');
+  assert.deepEqual(calls.at(-1), ['POST', `/api/session/${s.sessionId}/shell`, { command: 'git status' }]);
+});
