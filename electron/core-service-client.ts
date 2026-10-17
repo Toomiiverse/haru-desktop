@@ -47,12 +47,6 @@ export class CoreServiceClient {
       return result;
     }catch(error){if(error instanceof Error&&error.message.startsWith('core_router_'))throw error;throw Error('core_router_unavailable');}
   }
-  /** Fixed character transport; Core owns sessions, catalog and model dispatch. */
-  async roleplay(input:Record<string,unknown>):Promise<Response> {
-    return fetch(`${this.endpoint}/v1/roleplay`,{method:'POST',redirect:'error',
-      headers:{'content-type':'application/json',authorization:`Bearer ${this.token}`},
-      body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});
-  }
   /** Authenticated phone task courier. Core owns interpretation and execution. */
   async phoneTask(input:Record<string,unknown>,signal:AbortSignal):Promise<Response> {
     return fetch(`${this.endpoint}/v1/phone/task`,{method:'POST',redirect:'error',
@@ -63,10 +57,6 @@ export class CoreServiceClient {
     return fetch(`${this.endpoint}/v1/phone/profile`,{method:'POST',redirect:'error',
       headers:{'content-type':'application/json',authorization:`Bearer ${this.token}`},
       body:JSON.stringify(input),signal:AbortSignal.timeout(5000)});
-  }
-  async roleplayPage():Promise<Response> {
-    return fetch(`${this.endpoint}/v1/roleplay/page`,{redirect:'error',
-      headers:{authorization:`Bearer ${this.token}`},signal:AbortSignal.timeout(5000)});
   }
   async cloudModel(input:Record<string,unknown>,signal?:AbortSignal):Promise<Response> {
     return fetch(`${this.endpoint}/v1/models/cloud`,{method:'POST',redirect:'error',

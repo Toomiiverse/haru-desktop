@@ -7,7 +7,6 @@ import { bridgeIOS } from './core-ios';
 import { coreGmail } from './core-gmail';
 import { gmailPage } from './gmail-page';
 import { CoreServiceClient, coreServiceOptions } from './core-service-client';
-import { assertOutboundSafe } from './outbound';
 import { timingFor } from './turn-timing';
 import {callTelemetry} from './call-telemetry';
 // The door itself: an HTTP server that lets one phone reach one Haru.
@@ -1112,50 +1111,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // not JSON; each checks its own body below rather than being waved through.
   if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && path !== '/api/voice/enrol' && path !== '/api/speaker/enroll' && path !== '/api/speaker/validate' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
-  }
-
-  // Authenticated fixed proxy. No credential, arbitrary URL, provider choice,
-  // retry, session mutation or outcome decision is exposed to the phone.
-  if ((req.method === 'POST' && path === '/api/roleplay') || (req.method === 'GET' && path === '/characters')) {
-    try {
-      const options = coreServiceOptions();
-      if (!options) return json(res,503,{error:'Character mode is unavailable.'});
-      const client = new CoreServiceClient(options);
-      if (req.method === 'GET') {
-        const reply = await client.roleplayPage();
-        if (!reply.ok) return json(res,reply.status,{error:'Character mode is unavailable.'});
-        return send(res,200,await reply.text(),'text/html; charset=utf-8');
-      }
-      if (req.headers.origin) {
-        try { if (new URL(req.headers.origin).host !== req.headers.host) return json(res,403,{error:'Same origin required.'}); }
-        catch { return json(res,403,{error:'Same origin required.'}); }
-      }
-      let body: any;
-      try { body = await readBody(req,8*1024*1024); } catch { return json(res,400,{error:'Invalid character request.'}); }
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res,400,{error:'Invalid character request.'});
-      // Execute the existing outbound validator at this transport boundary.
-      // Core requires this observation; clients cannot assert or bypass it.
-      if (body.op === 'custom-save') {
-        const fields = ['name','description','instructions','background'];
-        if (fields.some(k => typeof body[k] !== 'string')) return json(res,400,{error:'Invalid character profile.'});
-        try { const {avatarData:_avatar,...creator} = body.creator && typeof body.creator==='object' ? body.creator : {}; assertOutboundSafe([...fields.map(k => ({role:'user' as const,content:body[k]})),{role:'user',content:JSON.stringify(creator)}]); }
-        catch { return json(res,403,{error:'This profile cannot be sent to Venice under your privacy rules.'}); }
-      }
-      let privacyDigest = '';
-      if (['send','context-save','context-update','generate','extract','insight-extract','regenerate'].includes(body.op)) {
-        const view = await client.roleplay({...body,op:'privacy-view',targetOp:body.op,actor:createHash('sha256').update(me.source).digest('hex'),privacyChecked:false,privacyDigest:''});
-        const prepared = await view.json().catch(()=>null);
-        if (!view.ok) return json(res,view.status,{error:typeof prepared?.detail==='string'?prepared.detail:'Privacy preview failed.'});
-        if (!Array.isArray(prepared?.messages) || typeof prepared?.digest!=='string') return json(res,503,{error:'Privacy preview is unavailable.'});
-        try { assertOutboundSafe(prepared.messages); }
-        catch { return json(res,403,{error:'This content cannot be sent to Venice under your privacy rules.'}); }
-        privacyDigest = prepared.digest;
-      }
-      const reply = await client.roleplay({...body,actor:createHash('sha256').update(me.source).digest('hex'),privacyDigest,privacyChecked:['send','custom-save','context-save','context-update','generate','extract','insight-extract','regenerate'].includes(body.op)});
-      const result = await reply.json().catch(()=>null);
-      if (!reply.ok) return json(res,reply.status,{error:typeof result?.detail==='string'?result.detail:'Character request failed.'});
-      return json(res,reply.status,result);
-    } catch { return json(res,503,{error:'Character mode is unreachable. Check the existing reply before sending again.'}); }
   }
 
   if (req.method === 'GET' && path === '/api/chat') {
