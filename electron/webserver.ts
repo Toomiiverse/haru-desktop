@@ -1140,6 +1140,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       if (!/^[a-zA-Z0-9-]{16,80}$/.test(id)) return json(res,400,{error:'Invalid request ID.'});
       try {
         const receipt = await intake.get(id,deps.slate()?.at ?? 'none');
+        // 4460: retries are not in the durable intake; their receipts are the in-memory ones below.
+        const retried = receipt ? undefined : receiptsFor(deps).get(id, deps.slate()?.at ?? 'none');
+        if (retried) return json(res, 200, publicReceipt(retried));
         return json(res,receipt ? 200 : 404,receipt ?? {state:'unknown'});
       } catch { return json(res,503,{error:'Delivery status is temporarily unavailable.'}); }
     }
@@ -1363,18 +1366,45 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Her last reply, done again. Same stream as above; the page swaps the bubble
   // rather than adding one. A reply she never gave cannot be given again.
   if (req.method === 'POST' && path === '/api/chat/retry') {
+    // 4460: a retry carries a request ID like a send, so a phone whose stream drops can ask /api/chat/receipt how it ended.
+    // Kept in memory only (retry never went through the durable intake); a restart forgets it and the phone falls back.
+    const body = await readBody(req).catch(() => null) as { requestId?: unknown } | null;
+    const requestId = typeof body?.requestId === 'string' ? body.requestId : undefined;
+    if (body?.requestId !== undefined && (!requestId || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId))) return json(res, 400, { error: 'Invalid request ID.' });
+    let receipt: ChatReceipt | undefined;
+    let fresh = true;
+    if (requestId) {
+      try {
+        const started = receiptsFor(deps).begin(requestId, 'retry', deps.slate()?.at ?? 'none');
+        receipt = started.entry; fresh = started.fresh;
+      } catch (error) {
+        return json(res, (error as Error).message === 'receipt_conflict' ? 409 : 429, { error: 'That request cannot be accepted.' });
+      }
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
       'Connection': 'keep-alive',
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
+    if (!fresh && receipt) {
+      if (receipt.state === 'done') emit({ done: true, reply: receipt.reply, ignored: receipt.ignored });
+      else if (receipt.state === 'error') emit({ error: receipt.error });
+      else emit({ pending: true });
+      return res.end();
+    }
     try {
       const answer = await deps.retryStream(chunk => emit({ text: chunk }), (sentence, emotion) => emit({ sentence, emotion }));
-      if (!answer) emit({ error: 'There is nothing of hers to do again.' });
-      else emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
+      if (!answer) {
+        if (receipt) Object.assign(receipt, { state: 'error', error: 'There is nothing of hers to do again.' });
+        emit({ error: 'There is nothing of hers to do again.' });
+      } else {
+        if (receipt) Object.assign(receipt, { state: 'done', reply: answer.reply, ignored: Boolean(answer.ignored) });
+        emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
+      }
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      if (receipt) Object.assign(receipt, { state: 'error', error: 'Her reply failed. Check the conversation before sending again.' });
       emit({ error: error instanceof Error ? error.message : String(error) });
     }
     return res.end();
