@@ -173,7 +173,7 @@ import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsThei
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { turnImages, withImageBytes } from './core-harness-media';
-import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
+import { httpFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
@@ -2830,11 +2830,14 @@ function imageForSending(file: string): string {
  */
 function ourFiles(attachments: Attachment[] | undefined): Attachment[] {
   if (!attachments?.length) return [];
-  const folder = path.resolve(photoFolder());
-  return readAttachments(attachments).filter(file => {
-    if (path.resolve(file.saved).startsWith(folder + path.sep)) return true;
+  const folders = [photoFolder(), pictureFolder()].map(folder => path.resolve(folder) + path.sep);
+  return readAttachments(attachments).flatMap(file => {
+    // 4470: her own pictures are kept by bare name in her pictures folder (makeAndSendPicture); resolved against the
+    // working directory they looked foreign, so every selfie was dropped from her view on every turn.
+    const saved = path.resolve(file.saved.includes(path.sep) ? file.saved : path.join(pictureFolder(), file.saved));
+    if (folders.some(folder => saved.startsWith(folder))) return [{ ...file, saved }];
     console.warn(`[attach] ignoring ${file.name} — it is not in the pictures folder`);
-    return false;
+    return [];
   });
 }
 
@@ -4284,7 +4287,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
       return sendToProvider(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
     }
-    throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
+    throw httpFailure(response.status, detail, (config.provider as Provider) ?? 'openai');
   }
   if (onChunk) return streamOpenAI(response, onChunk, config.model);
   const reply = await response.json();
@@ -4519,7 +4522,7 @@ async function sendToProviderUnchecked(conversation: OllamaMessage[], config: Pr
     const response = await coreCloudFetch((url,init)=>net.fetch(url,init), `${trimEndpoint(config.endpoint)}/responses`, {
       method: 'POST', headers: modelHeaders(config.endpoint), body: JSON.stringify(body), ...(signal ? { signal } : {}),
     });
-    if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), 'openai'));
+    if (!response.ok) throw httpFailure(response.status, await response.text().catch(() => ''), 'openai');
     return onChunk ? streamResponses(response, config.model, onChunk) : fromResponsesReply(await response.json(), config.model);
   }
   // Routed here rather than at every call site: there are a dozen composers in
@@ -4531,7 +4534,7 @@ async function sendToProviderUnchecked(conversation: OllamaMessage[], config: Pr
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': keyFor(config.endpoint), 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(body), ...(signal ? { signal } : {}),
     });
-    if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), 'anthropic'));
+    if (!response.ok) throw httpFailure(response.status, await response.text().catch(() => ''), 'anthropic');
     return onChunk ? streamAnthropic(response, config.model, onChunk) : fromAnthropicReply(await response.json(), config.model);
   }
   if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, table, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
@@ -6712,7 +6715,7 @@ function modelBehind(history: { id?: string; role: string; content?: string; rea
 async function openAIModels(endpoint: string, provider: Provider) {
   requireKeyFor(endpoint, provider);
   const response = await net.fetch(`${trimEndpoint(endpoint)}/models`, { headers: modelHeaders(endpoint) });
-  if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), provider));
+  if (!response.ok) throw httpFailure(response.status, await response.text().catch(() => ''), provider);
   const payload = await response.json() as { data?: { id?: string }[] };
   return (payload.data ?? []).map(model => model.id).filter((id): id is string => Boolean(id)).sort();
 }
@@ -6746,7 +6749,7 @@ async function verifyRemoteModel(endpoint: string, provider: Provider, model: st
     // max_completion_tokens is not failed by the one probe meant to vouch for it.
     body: JSON.stringify(toOpenAIBody({ model: model || 'grok-4', conversation: [{ role: 'user', content: 'hi' }], temperature: 1, maxTokens: 1 })),
   });
-  if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), provider));
+  if (!response.ok) throw httpFailure(response.status, await response.text().catch(() => ''), provider);
   return { models: [], note: 'The key works. This provider will not list its models to it, which is a permission on the key rather than a problem.' };
 }
 
@@ -11467,7 +11470,10 @@ process.on('uncaughtException', error => {
   noteCrash('uncaught exception', error);
   if (quitting) app.exit(0);
 });
-process.on('unhandledRejection', reason => noteCrash('unhandled rejection', reason));
+process.on('unhandledRejection', reason => {
+  if ((reason as { name?: unknown } | null)?.name === 'AbortError') return;   // 4470: a dropped call answer (dropHerVoice) is a cancellation, not a crash
+  noteCrash('unhandled rejection', reason);
+});
 
 app.on('before-quit', () => {
   quitting = true;

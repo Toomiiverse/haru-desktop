@@ -299,6 +299,11 @@ export function fromOpenAIReply(payload: OpenAIReply, model?: string): ChatMessa
  * JSON error and the app was throwing the raw status at the user, which tells
  * them nothing about which of the three things they got wrong.
  */
+/** 4470: the thrown form keeps the status, so a settlement can tell an answered refusal (nothing ran, nothing spent) from a broken stream. */
+export function httpFailure(status: number, body: string, provider: Provider): Error & { status: number } {
+  return Object.assign(new Error(describeFailure(status, body, provider)), { status });
+}
+
 export function describeFailure(status: number, body: string, provider: Provider): string {
   let message = '';
   try { const parsed = JSON.parse(body) as OpenAIReply; message = (typeof parsed.error === 'string' ? parsed.error : parsed.error?.message) ?? ''; } catch { /* not JSON */ }

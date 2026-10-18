@@ -21,6 +21,17 @@ export const activeTask = new AsyncLocalStorage<TaskController>();
 export type HandoffContext = { messages: ChatMessage[]; failure: string; currentModel: string; remainingBudgetMicros: number };
 export type TaskTiming = { stage: 'dispatch' | 'first_provider_text' | 'provider_complete' | 'settled' | 'provider_failed'; at: number;
   attempt: number; model: string; providerMs?: number; costMicros?: number; basis?: string; promptTokens?: number; cachedTokens?: number };
+/**
+ * 4470: how a failed attempt is booked. An HTTP error response (httpFailure carries the status) means the provider ran
+ * nothing, so nothing was spent; before this every failure settled `unknown` and kept its whole reservation (the eight
+ * weekly-reflection attempts refused by Anthropic on 2026-10-18 booked $1.39). A broken stream or timeout has no status
+ * and stays `unknown`: tokens may have been generated.
+ */
+export function settlementFor(error: unknown): { status: 'failed'; costMicros: 0 } | { status: 'unknown' } {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 ? { status: 'failed', costMicros: 0 } : { status: 'unknown' };
+}
+
 export class TaskController {
   private snapshot: any;
   private readonly abort = new AbortController();
@@ -128,7 +139,7 @@ export class TaskController {
       // Settlement is idempotent only for the same outcome; a post-settlement stale check is separate.
       const settled = await this.rpc('get', { taskId: this.snapshot.id });
       if (settled.reservedMicros || cost === 0) {
-        await this.rpc('settle', { attemptId: attempt.attemptId, status: 'unknown' }).catch(() => {});
+        await this.rpc('settle', { attemptId: attempt.attemptId, ...settlementFor(error) }).catch(() => {});
       }
       mark('provider_failed', { costMicros: cost, basis: 'reservation', providerMs: dispatchedAt ? Date.now() - dispatchedAt : undefined });
       throw error;
