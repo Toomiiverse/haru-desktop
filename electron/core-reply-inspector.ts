@@ -6,6 +6,7 @@ import {isReadTool} from './tool-receipt';
 import {evidenceProblem} from './evidence-check';
 import {claimsDesktopAction,claimsTickOff,readsLikeAssistant,deniesItExists,thinksAloud,dropThinkingAloud,recitedSpan,dropRecitedPrompt,claimsChecked,asksToLookUp} from './reply';
 import {hasCheckingEvidence,ToolLoopFailure,type ToolLoopDeps} from './toolloop';
+import {priorLookups} from './lookup-notes';
 export type ReplyInspection=({kind:'accept';content:string}|{kind:'retry';flag:string;code?:string;reason?:string;includeMessage:boolean;note:string;content:string}|{kind:'fail';code:string;reason:string})&{resetCount:number};
 export function inspectCoreReply(input:{conversation:ChatMessage[];message:ChatMessage&{content:string};receipts:ToolReceipt[];ran:string[];flags:string[];tools:boolean;theirWords:string;nativeClaimsChecked?:boolean},deps:Pick<ToolLoopDeps,'pageWasRead'|'handsAllowed'|'hasOpenTask'|'canSearch'|'warn'|'log'>):ReplyInspection {
  const {message,receipts,tools}=input;const ran=new Set(input.ran),spent=new Set(input.flags),pushed:ChatMessage[]=[];
@@ -116,6 +117,7 @@ export function inspectCoreReply(input:{conversation:ChatMessage[];message:ChatM
         && !/[;&|`$<>\n]/.test(r.scope.command)
         && /^(?:nvidia-smi|journalctl|cat|head|tail|rg|df|du|ps|uptime|free)\b|^systemctl\s+(?:--user\s+)?(?:is-active|status|show)\b/.test(r.scope.command.trim())))
       .map(r => r.tool));
+    for (const tool of priorLookups(input.conversation)) readEvidence.add(tool);   // 4530: "I looked it up" about her last few replies
     if (!explicitlyFictional && claimsChecked(message.content) && !hasCheckingEvidence(message.content, readEvidence)) {
       if (checkRetried) fail('unsupported_lookup', 'The model claimed it checked something without a successful read result.');
       checkFailed('unsupported_lookup', 'The model claimed it checked something without a successful read result.');

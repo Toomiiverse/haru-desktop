@@ -28,6 +28,7 @@ import type { ChatMessage, ChatTool, ToolCall } from './provider';
 import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, recitedSpan, dropRecitedPrompt, claimsChecked, asksToLookUp } from './reply';
 import { stripDelivery } from './delivery';
 import { makeToolReceipt, storedToolReceipt, isReadTool, type ToolReceipt } from './tool-receipt';
+import { priorLookups } from './lookup-notes';
 import { evidenceProblem } from './evidence-check';
 import { toolContract, toolCallProblem } from './tool-contract';
 import type { CoreReadOnlyBridge } from './core-read-only';
@@ -454,6 +455,7 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
         && !/[;&|`$<>\n]/.test(r.scope.command)
         && /^(?:nvidia-smi|journalctl|cat|head|tail|rg|df|du|ps|uptime|free)\b|^systemctl\s+(?:--user\s+)?(?:is-active|status|show)\b/.test(r.scope.command.trim())))
       .map(r => r.tool));
+    for (const tool of priorLookups(conversation)) readEvidence.add(tool);   // 4530: as in core-reply-inspector
     if (!explicitlyFictional && claimsChecked(message.content) && !hasCheckingEvidence(message.content, readEvidence)) {
       if (checkRetried) fail('unsupported_lookup', 'The model claimed it checked something without a successful read result.');
       checkFailed('unsupported_lookup', 'The model claimed it checked something without a successful read result.');

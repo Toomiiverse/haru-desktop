@@ -107,6 +107,8 @@ import {runCoreWeek,runCoreStanding} from './core-own-time';
 import {coreEntropyPolicy} from './core-policy-observations';
 import {runCoreProjectStep,runCoreProjectBirth,runCoreReadingOutcome,runCoreProjectSettlement} from './core-projects';
 import {appendPhoneTurn,type PhoneTurn} from './core-brain-history';
+import {withLookupNotes,lookupOf,dropLookupNote,type Lookup} from './lookup-notes';
+import {makeToolReceipt} from './tool-receipt';
 import { ProviderAvailability } from './provider-availability';
 import {coreChatPrompt,corePrepareNaturalConversation} from './core-prompts';
 import { markTurn, timeTurnReview, runTimedTurn, spanCountingSink } from './turn-timing';
@@ -5598,6 +5600,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'received', at: enteredAt })}`);
   const turn = createTurnContext({ hands, web, choices });
   const latest = messages.at(-1)?.content ?? '';
+  messages = withLookupNotes(messages);   // 4530: what each of her replies was looked up from
+  const lookups: Lookup[] = [];
   const affect = currentAffect();
   if (affect) messages = [{ role: 'system', content: affect.guidance }, ...messages];
   const narratedTools:string[]=[];
@@ -6479,6 +6483,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
           }
         } catch(error) { console.warn('[ai] tool narration unavailable:',error instanceof Error?error.message:'transport'); }
       const result = await runChatTool(call, latest, toolDeps(turn));
+      try { const read = lookupOf(makeToolReceipt(tool, (call as { function?: { arguments?: unknown } }).function?.arguments, result, null, Date.now())); if (read) lookups.push(read); }
+      catch { /* a lookup that cannot be described is simply not kept */ }
       // Written down here, at the one seam every tool passes through, and only
       // for the ones that changed something. She had no record of her own
       // conduct at all, so a claim about what she did had nothing behind it to
@@ -6686,7 +6692,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   noteWhoSpoke(config.model, brainName);
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'complete', elapsedMs: Date.now() - enteredAt })}`);
   markTurn('harness_end');
-  return { content, ignored: false, irritation, ego, choices: turn.pendingChoices(), attachments: turn.pictures() };
+  return { content: dropLookupNote(content), ignored: false, irritation, ego, choices: turn.pendingChoices(), attachments: turn.pictures(), lookups };
 }
 
 /** The route that just spoke, kept so a rating can be read by model. */
@@ -9490,7 +9496,7 @@ function webDeps(): WebDeps {
       const reply = stripDelivery(answer.content ?? '');
       rememberDelivery(answer.content ?? '', reply);
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}), ...(answer.lookups?.length ? { lookups: answer.lookups } : {}) });
       // Her face used to be read here, before returning, and the phone waited on
       // it — a second round trip to a model, spent so her eyebrows would be
       // right at the instant the text appeared rather than a moment after. That
@@ -9609,7 +9615,7 @@ function webDeps(): WebDeps {
       })); } catch (error) {
         if (published === null || flushError || !options?.call || options?.signal?.aborted) throw error;
         console.log('[turn-failed] '+JSON.stringify({id:trace.id,callId:options.callTrace?.id??null,turn:options.callTrace?.turn??null,kept:true,reason:(error instanceof Error?error.name+': '+error.message:String(error)).slice(0,300)}));   // 3760: the reply was kept
-        answer = { content: published as unknown as string, ignored: false, irritation: undefined, ego: undefined, choices: [], attachments: [] };
+        answer = { content: published as unknown as string, ignored: false, irritation: undefined, ego: undefined, choices: [], attachments: [], lookups: [] };
       }
       if (flushError) throw flushError;
       options?.signal?.throwIfAborted();
@@ -9621,7 +9627,7 @@ function webDeps(): WebDeps {
       // this is the reply's end, so what is left is hers to say.
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}), ...(answer.lookups?.length ? { lookups: answer.lookups } : {}) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
@@ -9662,7 +9668,7 @@ function webDeps(): WebDeps {
       rememberDelivery(answer.content ?? '', reply);   // 4030: same for a retried reply
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
+      sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}), ...(answer.lookups?.length ? { lookups: answer.lookups } : {}) });
       console.log(`[web] said it again in ${Date.now() - started}ms, ${reply.length} chars`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
@@ -11156,7 +11162,7 @@ function registerApplicationChannels() {
     // it up and coming back to the window does not mean finding half a
     // conversation missing. ollamaChat has already spoken it and pushed the
     // caption on its way through.
-    sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}) });
+    sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored), ...(answer.attachments?.length ? { herAttachments: answer.attachments } : {}), ...(answer.lookups?.length ? { lookups: answer.lookups } : {}) });
     console.log(`[summon] answered ${said.length} chars with ${reply.length}${choices.length ? ` and ${choices.length} choices` : ''}`);
     return { reply, ignored: Boolean(answer.ignored), choices };
   });
