@@ -1,0 +1,80 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+@page{size:A4;margin:0}
+*{box-sizing:border-box}
+body{margin:0;width:172mm;height:243mm;padding:11mm 10mm 8mm;zoom:1.22;font-family:Helvetica,Arial,sans-serif;color:#1e2430;background:#fff}
+h1{margin:0;font-size:22pt;letter-spacing:.5px}
+.sub{margin:2mm 0 6mm;font-size:9.5pt;color:#5a6272}
+.org{display:flex;flex-direction:column;align-items:center;margin-bottom:6mm}
+.box{border-radius:3mm;padding:3mm 5mm;color:#fff;text-align:center;font-size:9pt;line-height:1.3}
+.box b{display:block;font-size:11pt;margin-bottom:1mm}
+.head{background:#2b3a67;width:84mm}
+.kids{display:flex;gap:14mm;position:relative;margin-top:7mm}
+.kids:before{content:"";position:absolute;top:-7mm;left:25%;right:25%;height:3.5mm;border:1.5px solid #9aa3b5;border-bottom:0;border-radius:2mm 2mm 0 0}
+.org .head{position:relative}
+.org .head:after{content:"";position:absolute;left:50%;bottom:-3.5mm;width:1.5px;height:3.5mm;background:#9aa3b5}
+.kid{position:relative;width:60mm}
+.kid:before{content:"";position:absolute;left:50%;top:-3.5mm;width:1.5px;height:3.5mm;background:#9aa3b5}
+.ev{background:#d9772b}.so{background:#1f8a7a}
+.flow{display:flex;gap:2mm;align-items:stretch;margin-bottom:5mm}
+.step{flex:1;border-top:4px solid #2b3a67;background:#f3f5f9;border-radius:0 0 2mm 2mm;padding:2.5mm 2mm;font-size:7.6pt;line-height:1.3;position:relative}
+.step .n{position:absolute;top:-4.5mm;left:2mm;width:7mm;height:7mm;border-radius:50%;background:#2b3a67;color:#fff;font-weight:bold;font-size:8.5pt;display:flex;align-items:center;justify-content:center}
+.step h3{margin:3mm 0 1mm;font-size:9pt}
+.step.e{border-top-color:#d9772b}.step.e .n{background:#d9772b}
+.step.s{border-top-color:#1f8a7a}.step.s .n{background:#1f8a7a}
+.step.b{border-top-color:#1f8a7a;border-image:linear-gradient(90deg,#d9772b,#1f8a7a) 1}
+.step.b .n{background:linear-gradient(135deg,#d9772b,#1f8a7a)}
+.tag{display:inline-block;font-size:6.6pt;padding:.4mm 1.5mm;border-radius:1mm;color:#fff;margin-bottom:1mm}
+.gate{margin-top:1.5mm;padding-top:1.5mm;border-top:1px dashed #b7bfcf;font-size:6.8pt;color:#5a6272}
+.gate:before{content:"Gate: ";color:#2b3a67;font-weight:bold}
+.split{display:flex;gap:2mm;flex:1}
+.split .step{padding:2.5mm 2mm}
+.two{display:flex;gap:5mm}
+.card{flex:1;border:1px solid #d7dce6;border-radius:2mm;padding:3mm 4mm;font-size:8.2pt;line-height:1.4}
+.card h2{margin:0 0 2mm;font-size:10.5pt;color:#2b3a67}
+.card ul{margin:0;padding-left:4mm}
+.hand{display:flex;align-items:center;gap:2mm;margin:1.5mm 0}
+.pill{font-size:7pt;color:#fff;padding:.6mm 2mm;border-radius:1mm;white-space:nowrap}
+.arrow{color:#9aa3b5;font-size:10pt}
+.hand span.t{flex:1}
+.foot{margin-top:4mm;font-size:7.2pt;color:#8a92a3;text-align:right}
+</style></head><body>
+<h1>Marketing Campaign Workflow</h1>
+<div class="sub">Marketing owns the brief, budget, calendar and sign-off. Events and Social Media execute inside approved plans. Approvals happen only at the gates.</div>
+
+<div class="org">
+  <div class="box head"><b>Marketing</b>Brief · budget · calendar · approvals · final report</div>
+  <div class="kids">
+    <div class="box kid ev"><b>Events</b>Venues · vendors · run-of-show · attendee logistics · on-site capture</div>
+    <div class="box kid so"><b>Social Media</b>Channel strategy · content calendar · copy &amp; creative · community · analytics</div>
+  </div>
+</div>
+
+<div class="flow">
+  <div class="step"><div class="n">1</div><h3>Brief</h3><span class="tag" style="background:#2b3a67">Marketing</span><br>Goal, audience, budget, dates → one-page brief with KPIs.<div class="gate">Marketing lead approves brief</div></div>
+  <div class="step"><div class="n">2</div><h3>Kickoff</h3><span class="tag" style="background:#2b3a67">Marketing</span><br>Shared timeline, budget split, one campaign channel.<div class="gate">Both sub-leads confirm scope &amp; dates</div></div>
+  <div class="step"><div class="n">3</div><h3>Plan</h3>
+    <span class="tag ev" style="background:#d9772b">Events</span> Venue, run-of-show, vendors, registration page.<br>
+    <span class="tag" style="background:#1f8a7a">Social</span> Channel mix, content calendar, creative briefs.
+    <div class="gate">Marketing approves plans, spend &amp; messaging</div></div>
+  <div class="step b"><div class="n">4</div><h3>Production</h3><span class="tag" style="background:#d9772b">Events</span> <span class="tag" style="background:#1f8a7a">Social</span><br>Assets, signage, drafted posts, registration live.<div class="gate">Marketing reviews all outward-facing assets</div></div>
+  <div class="step"><div class="n">5</div><h3>Go / No-go</h3><span class="tag" style="background:#2b3a67">Marketing</span><br>Checklist signed across all assets and logistics.<div class="gate">All green, or launch date moves</div></div>
+  <div class="step b"><div class="n">6</div><h3>Launch &amp; run</h3><span class="tag" style="background:#d9772b">Events</span> <span class="tag" style="background:#1f8a7a">Social</span><br>Event delivered, posts live, real-time coverage, replies handled.<div class="gate">Daily standup during live window</div></div>
+  <div class="step"><div class="n">7</div><h3>Wrap &amp; report</h3><span class="tag" style="background:#2b3a67">Marketing</span><br>Report vs. brief KPIs, lessons, asset archive.<div class="gate">Shared in retro; feeds next brief</div></div>
+</div>
+
+<div class="two">
+  <div class="card"><h2>Handoffs between sub-departments</h2>
+    <div class="hand"><span class="pill" style="background:#d9772b">Events</span><span class="arrow">→</span><span class="pill" style="background:#1f8a7a">Social</span><span class="t">Dates, speakers and visuals at stage 3, so the content calendar is built around the event.</span></div>
+    <div class="hand"><span class="pill" style="background:#1f8a7a">Social</span><span class="arrow">→</span><span class="pill" style="background:#d9772b">Events</span><span class="t">Registration link placement, hashtag and on-site shot list before stage 4.</span></div>
+    <div class="hand"><span class="pill" style="background:#d9772b">Events</span><span class="arrow">⇄</span><span class="pill" style="background:#1f8a7a">Social</span><span class="t">Stage 6: photos and quotes flow out in real time; attendee questions route back.</span></div>
+  </div>
+  <div class="card"><h2>Rules that keep it moving</h2><ul>
+    <li><b>One brief, one budget, one calendar</b>, all owned by Marketing. No second source of truth.</li>
+    <li><b>Approvals only at the gates.</b> Inside a stage, sub-leads decide.</li>
+    <li><b>Date or budget changes</b> go to Marketing first, then to both subs the same day.</li>
+    <li><b>Every campaign ends with a report</b>, even small ones. Reports make the next brief faster.</li>
+  </ul></div>
+</div>
+<div class="foot">Marketing · Events · Social Media — campaign workflow v1</div>
+</body></html>
