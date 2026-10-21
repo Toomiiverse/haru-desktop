@@ -54,6 +54,8 @@ import type { Aside, NudgePreference } from './asides';
 import type { CodeModeLink } from './codemode';
 
 export type WebDeps = {
+  /** 4570: the desk's New chat; its conversation joins today's archive and starts again. */
+  newDeskChat?: () => { cleared: number };
   /** 4560: one remark the desk composed the prompt for (a poke, a fullscreen title, a notice); no tools, no conversation. */
   compose?: (messages: { role: 'system' | 'user'; content: string }[], options: { temperature: number; maxTokens?: number }) => Promise<string>;
   /** Core-authored status text; the web transport makes no credit or route decisions. */
@@ -1337,6 +1339,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   // What they thought of a reply. A thumb, a note, or both; the reply is named
   // by the id the history handed out, so nothing here trusts the page's text.
+  // 4570: only the desk's conversation can be started again from here; the
+  // phone's is the day's, and the 5am roll is what ends it.
+  if (req.method === 'POST' && path === '/api/chat/new') {
+    if (readThread(url.searchParams.get('thread')) !== 'desk' || !deps.newDeskChat) return json(res, 400, { error: 'Only the desk starts a new chat.' });
+    return json(res, 200, deps.newDeskChat());
+  }
+
   if (req.method === 'POST' && path === '/api/chat/rate') {
     const body = await readBody(req) as { id?: unknown; reaction?: unknown; note?: unknown };
     const id = typeof body.id === 'string' ? body.id.trim().slice(0, 80) : '';

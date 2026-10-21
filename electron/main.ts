@@ -9445,6 +9445,15 @@ function webDeps(): WebDeps {
     tune(id, wrong, rather) {
       return appendTuning({ id, wrong, rather, source: 'phone' });
     },
+    newDeskChat() {
+      // Into the same day as everything else said today (archiveMessages), so the
+      // 5am roll still distils one day; the phone's conversation stays as it is.
+      const rows = (store.get('chat.desk.messages') as Record<string, unknown>[] | undefined) ?? [];
+      if (rows.length) archiveMessages(rows.map(row => ({ ...row, thread: 'desk' })), (store.get('chat.dayKey') as string | undefined) ?? currentChatDayKey());
+      store.delete('chat.desk.messages');
+      console.log(`[web] the desk started a new chat (${rows.length} rows archived)`);
+      return { cleared: rows.length };
+    },
     async compose(messages, options) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
