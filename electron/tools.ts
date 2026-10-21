@@ -985,6 +985,8 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
+  /** The desk's own screen (the portrait monitor) has collected panels lately. A fact for Core's menu, not a decision. */
+  screen: boolean;
   /** Ignored compatibility input; the retired specialist cannot be offered. */
   minecraft?: boolean;
   /** The anime stack is wired up (anime.ts): Jellyfin, Sonarr and Prowlarr reachable in config. Optional so fixtures need not name it. */
@@ -1049,6 +1051,9 @@ export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: S
  * app owns — the store, the lists, the flags a turn moves underneath it — and
  * none of it is reachable from a module that has to stay testable.
  */
+/** One thing she put up on her screen: a note, a reminder, a picture. `id` is Core's clock, which is also the desk's cursor. */
+export type ScreenPanel = { id: number; title: string; body: string; image: string; seconds: number };
+
 export type ToolDeps = {
   policyConfig?:()=>unknown;
   applyToolPlan?:(plan:unknown)=>void;
@@ -1075,6 +1080,10 @@ export type ToolDeps = {
   blockSources(query: string): BlockSources;
   getWardrobeControls(): { name: string }[];
   sendToWindows(channel: string, payload?: unknown): void;
+  /** Whether the desk's screen has asked for panels within the last two minutes. */
+  screenSeen(): boolean;
+  /** Keep a panel Core composed for the desk's screen until the desk collects it. */
+  showOnScreen(panel: ScreenPanel): void;
   getInterests(): { id: string; kind: 'game' | 'anime'; name: string; because: string; since: string; nights: number; lastAt: string; stance: string }[];
   setInterests(interests: unknown[]): void;
   readSystemConfig(): { enabled: boolean; level: number; allowlist: string[] };

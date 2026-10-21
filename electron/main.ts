@@ -232,7 +232,7 @@ import { runToolLoop } from './toolloop';
 import { composeLocalReply, finishLocalReply as finishLocalReplyUntimed, localReplyEvidence, GROUNDED_REPLY_SCHEMA } from './local-reply';
 import { canReplyDirectly, directReplyKind, directReplyAsideAllowed, composeConversationalReply, CONVERSATIONAL_REPLY_SCHEMA, VoiceReplyNeedsReview, directReplyEvidence, requestContextSize } from './reply-latency';
 import { createTurnContext, type TurnContext } from './turncontext';
-import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
+import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps, type ScreenPanel } from './tools';
 import { describeMyself, describeSettings, explicitModeOn, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
@@ -3893,6 +3893,18 @@ function withoutStaleDenials<T extends { role: string; content: string }>(messag
 }
 
 /** What is switched on right now, for chatTools to draw the table from. */
+// Her screen, the desk's portrait monitor. Panels she puts up wait here until
+// the desk collects them (GET /api/screen); a collection within two minutes
+// is what makes the screen a fact Core's menu can offer the tool on.
+const screenPanels: ScreenPanel[] = [];
+let screenPolledAt = 0;
+function screenSeen() { return Date.now() - screenPolledAt < 120_000; }
+function showOnScreen(panel: ScreenPanel) {
+  screenPanels.push(panel);
+  if (screenPanels.length > 20) screenPanels.shift();
+  sendToWindows('portrait:panel', panel);
+}
+
 function availableTools(turn: TurnContext): ToolAvailability {
   const search = readSearchConfig(store.get('search'));
   const systemConfig = readSystemConfig();
@@ -3919,6 +3931,7 @@ function availableTools(turn: TurnContext): ToolAvailability {
     desktop: ({launch:false,power:false}),
     knockedAwake: herKnockedAwakeNow(),
     anime: animeLink() !== null,
+    screen: screenSeen(),
   };
 }
 
@@ -4011,6 +4024,7 @@ function toolDeps(turn: TurnContext): ToolDeps {
     getMemories, setMemories, addMemory,
     setBlocks, blockSources,
     getWardrobeControls, sendToWindows,
+    screenSeen, showOnScreen,
     getInterests, setInterests,
     readSystemConfig, getKnowledgeConfig, getKnowledgeEmbedder,
     knowledgeStore: knowledge.current,
@@ -9671,6 +9685,7 @@ function webDeps(): WebDeps {
     // date math against the phone's own clock would disagree with her whenever
     // it is in a different timezone. Computed once here, against the timezone
     // she actually keeps.
+    screen: since => { screenPolledAt = Date.now(); return screenPanels.filter(panel => panel.id > since); },
     agenda: () => {
       return corePolicySync<any>('agenda-life.phone',[getKept(),localDateKey(zonedNow(CHAT_TIMEZONE))]);
     },

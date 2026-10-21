@@ -29,7 +29,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    onWeb:()=>deps.onWeb(),hands:()=>deps.handsAllowed(),pageRead:()=>deps.pageWasRead?.()??false,desktopSupported:()=>desktop.desktopSupported(),desktopConfig:()=>desktop.readDesktopConfig(deps.store.get('desktop')),
    searchConfig:()=>readSearchConfig(deps.store.get('search')),anilistConfig:()=>readAniListConfig(deps.store.get('anilist')),
    systemConfig:()=>deps.readSystemConfig(),lastResults:()=>deps.lastResults(),lastSearchQuery:()=>deps.lastSearchQuery(),
-   wardrobe:()=>deps.getWardrobeControls(),interests:()=>deps.getInterests(),config:()=>{if(!deps.policyConfig)throw Error('final_tool_config_required');return deps.policyConfig()},
+   wardrobe:()=>deps.getWardrobeControls(),screen:()=>deps.screenSeen(),interests:()=>deps.getInterests(),config:()=>{if(!deps.policyConfig)throw Error('final_tool_config_required');return deps.policyConfig()},
    clock:()=>{const now=zonedNow(deps.CHAT_TIMEZONE);return {day:localDateKey(now),iso:now.toISOString(),epochMs:Date.now()}},uuid:()=>randomUUID(),
    capabilities:()=>Object.fromEntries(['makePicture','showWebPicture','claude','code','downloads','shell','mangaShelf','anime','booking','chats'].map(key=>[key,Boolean((deps as any)[key])])),
    vaultRoot:()=>deps.vault.root(),knowledgeConfig:()=>deps.getKnowledgeConfig()
@@ -62,6 +62,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
    case 'search':return searchWeb(c.query,c.config,deps.net.fetch,deps.getSearchKey());
    case 'rememberSearch':return deps.rememberSearch(c.query,c.results);
    case 'showWardrobe':return deps.sendToWindows('wardrobe:open');
+   case 'showOnScreen':return deps.showOnScreen(c.panel);
    case 'commit':if(!deps.applyToolPlan)throw Error('final_tool_commit_required');return deps.applyToolPlan(c.plan);
    case 'picture':if(!deps.makePicture)throw Error('final_tool_capability_revoked');return deps.makePicture(c.prompt);
    case 'webPicture':if(!deps.showWebPicture)throw Error('final_tool_capability_revoked');return deps.showWebPicture(c.result);

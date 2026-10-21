@@ -52,6 +52,7 @@ import { readActivityReport, type ActivityReport } from './activity-observation'
 import { validNudgePreference } from './nudge-learning';
 import type { Aside, NudgePreference } from './asides';
 import type { CodeModeLink } from './codemode';
+import type { ScreenPanel } from './tools';
 
 export type WebDeps = {
   /** 4570: the desk's New chat; its conversation joins today's archive and starts again. */
@@ -132,6 +133,8 @@ export type WebDeps = {
   tune(id: string, wrong?: string, rather?: string): boolean;
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
+  /** Panels she put up on her screen with an id after `since`. Asking marks the screen as present. */
+  screen(since: number): ScreenPanel[];
   tickOff(id: string): Promise<void> | void;
   /** A task the phone wrote down — a reminder added to the Haru list in Apple Reminders. Null when the time does not read as one. */
   addAgenda(title: string, date: string, time?: string): { id: string; title: string; date: string; time?: string } | null;
@@ -1820,6 +1823,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   if (req.method === 'POST' && path === '/api/push/test') {
     return json(res, 200, { delivered: await deps.push.test() });
+  }
+
+  // Her screen, the desk's portrait monitor: what she has put up since the
+  // desk last asked. The desk asks every so often and after each reply.
+  if (req.method === 'GET' && path === '/api/screen') {
+    const since = Number(new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('since')) || 0;
+    return json(res, 200, { panels: deps.screen(since), now: Date.now() });
   }
 
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });
