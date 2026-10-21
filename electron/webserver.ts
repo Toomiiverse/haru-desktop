@@ -32,6 +32,8 @@ import { readThread, withChatThread } from './chat-thread';
 import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
+import { homedir } from 'node:os';
+import { openTerminal } from './terminal';
 import { clmTurnFrom, spokenReply, sseChunk, sseStop, SSE_DONE } from './evi';
 import { pcmToWav } from './voice';
 import type { Correction } from './hearing';
@@ -609,6 +611,20 @@ async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer,
     const me = whoIsThis(req, access, new Date());
     if (!access.enabled || !access.hash || !me.allowed || !me.device?.id) return refuseUpgrade(socket, 401, 'Unauthorized');
     calls.handleUpgrade(req, socket, head, ws => bridgeIOS(ws, me.device!.id, () => whoIsThis(req, deps.readAccess(), new Date()).allowed));
+    return;
+  }
+  // His shell from the Code tab: the same door as the phone's session socket, and only where coding mode is set up.
+  if (url.pathname === '/api/code/terminal') {
+    if (req.headers.origin) {
+      let source: URL;
+      try { source = new URL(req.headers.origin); } catch { return refuseUpgrade(socket, 403, 'Forbidden'); }
+      if (source.host !== req.headers.host) return refuseUpgrade(socket, 403, 'Forbidden');
+    }
+    const access = deps.readAccess();
+    const me = whoIsThis(req, access, new Date());
+    if (!access.enabled || !access.hash || !me.allowed || !me.device?.id) return refuseUpgrade(socket, 401, 'Unauthorized');
+    if (!deps.code) return refuseUpgrade(socket, 404, 'Not Found');
+    calls.handleUpgrade(req, socket, head, ws => { void openTerminal(ws, { cols: Number(url.searchParams.get('cols')), rows: Number(url.searchParams.get('rows')), home: homedir() }); });
     return;
   }
   if (url.pathname !== '/api/call/session' && url.pathname !== '/api/evi/session') return refuseUpgrade(socket, 404, 'Not Found');
