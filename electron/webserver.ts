@@ -54,6 +54,8 @@ import type { Aside, NudgePreference } from './asides';
 import type { CodeModeLink } from './codemode';
 
 export type WebDeps = {
+  /** 4560: one remark the desk composed the prompt for (a poke, a fullscreen title, a notice); no tools, no conversation. */
+  compose?: (messages: { role: 'system' | 'user'; content: string }[], options: { temperature: number; maxTokens?: number }) => Promise<string>;
   /** Core-authored status text; the web transport makes no credit or route decisions. */
   funding?(): { mode: string; notice: string; balanceUsd: number | null; fallbackBelowUsd: number };
   durableChat?: IntakeTransport;
@@ -1267,7 +1269,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
     const requestId = typeof body.requestId === 'string' ? body.requestId : undefined;
     if (body.requestId !== undefined && (!requestId || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId))) return json(res, 400, { error: 'Invalid request ID.' });
-    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'stream',interrupted,...(phoneTimeZone?{phoneTimeZone}:{}),...(replyTo ? {replyTo} : {}),...(quoted ? {quoted} : {})},body.requestId);
+    const thread = readThread(url.searchParams.get('thread'));
+    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'stream',interrupted,...(phoneTimeZone?{phoneTimeZone}:{}),...(replyTo ? {replyTo} : {}),...(quoted ? {quoted} : {}),...(thread==='desk'?{thread}:{})},body.requestId);
     const timingId = requestId ?? `web-${receivedAt}`;
     console.log(`[web-reply-timing] ${JSON.stringify({ request: timingId, stage: 'received', at: receivedAt })}`);
     let receipt: ChatReceipt | undefined;
@@ -1301,13 +1304,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (requestId) console.log(`[web-chat] accepted ${requestId}`);
     try {
       let visible = false;
-      const answer = await deps.sayStream(text, chunk => {
+      const answer = await withChatThread(thread, () => deps.sayStream(text, chunk => {
         emit({ text: chunk });
         if (!visible && chunk && chunk !== '\uFFFD') {
           visible = true;
           console.log(`[web-reply-timing] ${JSON.stringify({ request: timingId, stage: 'text_event', elapsedMs: Date.now() - receivedAt, connected: !res.destroyed })}`);
         }
-      }, files, { interrupted, ...(phoneTimeZone?{phoneTimeZone}:{}), ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion }));
+      }, files, { interrupted, ...(phoneTimeZone?{phoneTimeZone}:{}), ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion })));
       if (receipt) Object.assign(receipt, { state: 'done', reply: answer.reply, ignored: Boolean(answer.ignored) });
       if (requestId) console.log(`[web-chat] completed ${requestId} connected=${!res.destroyed}`);
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
@@ -1671,6 +1674,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Asked for when the page opens and while it stays open. This is how she
   // speaks first while she has their attention; the push routes below are how
   // she speaks first when she does not.
+  // 4560: the desk has no brain of its own when it is pointed here. A remark it
+  // wants (a poke, a fullscreen title, a notice) is composed by this one. One
+  // system prompt and at most one line of theirs: never tools, never the chat.
+  if (req.method === 'POST' && path === '/api/compose') {
+    if (!deps.compose) return json(res, 404, { error: 'Not here.' });
+    let body: { messages?: unknown; temperature?: unknown; maxTokens?: unknown };
+    try { body = await readBody(req, 32768) as typeof body; } catch { return json(res, 400, { error: 'Bad request.' }); }
+    const rows = Array.isArray(body.messages) ? body.messages as { role?: unknown; content?: unknown }[] : [];
+    if (!rows.length || rows.length > 2 || rows[0]?.role !== 'system' || rows.some(row => !row || (row.role !== 'system' && row.role !== 'user') || typeof row.content !== 'string' || !row.content.trim() || row.content.length > 12000)) return json(res, 400, { error: 'Bad request.' });
+    const temperature = typeof body.temperature === 'number' && Number.isFinite(body.temperature) ? Math.min(Math.max(body.temperature, 0), 1.5) : 0.9;
+    const maxTokens = Number.isInteger(body.maxTokens) ? Math.min(Math.max(body.maxTokens as number, 16), 600) : undefined;
+    try { return json(res, 200, { content: await deps.compose(rows.map(row => ({ role: row.role as 'system' | 'user', content: row.content as string })), { temperature, ...(maxTokens ? { maxTokens } : {}) }) }); }
+    catch { return json(res, 503, { error: 'She could not compose that just now.' }); }
+  }
+
   if (req.method === 'GET' && path === '/api/nudge') {
     const said = await deps.nudge();
     return json(res, 200, said ?? { line: null });

@@ -9445,6 +9445,12 @@ function webDeps(): WebDeps {
     tune(id, wrong, rather) {
       return appendTuning({ id, wrong, rather, source: 'phone' });
     },
+    async compose(messages, options) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) throw new Error('no model is set up');
+      const message = await ollamaPost(messages as OllamaMessage[], config, { tools: false, ...options });
+      return (message.content ?? '').trim();
+    },
     async say(text, attachments, options?: NonNullable<Parameters<WebDeps['say']>[2]> & WebTurnOptions) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
