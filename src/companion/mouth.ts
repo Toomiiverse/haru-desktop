@@ -11,8 +11,13 @@
 
 import type { SpeechClip } from '../types';
 
-/** What the parameter layer reads each frame. */
-export type MouthReading = { open: number; weight: number };
+/**
+ * What the parameter layer reads each frame. `bands` is the voice's balance right now, as fractions of the whole:
+ * low (150-900 Hz, the jaw's open vowels), mid (900-2600 Hz, the second formant, high for ee/eh and low for
+ * oo/oh) and high (3.5-9 kHz, s/sh/f/t hiss). Absent where there is no audio to measure.
+ */
+export type Bands = { low: number; mid: number; high: number };
+export type MouthReading = { open: number; weight: number; bands?: Bands };
 
 // Speech sits well below full scale, so the usable range is narrow. Below the
 // floor is the gap between words and should read as a closed mouth; above the
@@ -26,6 +31,9 @@ const RELEASE = 0.15;
 // How quickly the mouth hands control back to the pose layer when she stops.
 const WEIGHT_FADE = 0.12;
 const FFT_SIZE = 1024;
+// How quickly the band balance follows the voice (per frame): enough to see a vowel change, not a single noisy frame.
+const BANDS_FOLLOW = 0.4;
+const BAND_HZ = { low: [150, 900], mid: [900, 2600], high: [3500, 9000] } as const;
 
 // Synthesised speech comes back quiet — measured at about -17dB peak against
 // music and game audio that routinely runs close to full scale — so at matched
@@ -128,6 +136,8 @@ export function createVoicePlayer(): VoicePlayer {
   // Explicitly over an ArrayBuffer: getByteTimeDomainData will not take a view
   // that might sit on a SharedArrayBuffer.
   let samples: Uint8Array<ArrayBuffer> | null = null;
+  let spectrum: Float32Array<ArrayBuffer> | null = null;
+  const bands: Bands = { low: 0.7, mid: 0.2, high: 0.03 };
 
   let volume = 0.9;
   // How far the system output has been pulled down beneath her. She shares that
@@ -248,6 +258,7 @@ export function createVoicePlayer(): VoicePlayer {
     analyser.smoothingTimeConstant = 0.35;
     // The time-domain read wants one byte per sample in the window, not per bin.
     samples = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+    spectrum = new Float32Array(new ArrayBuffer(analyser.frequencyBinCount * 4));
     // Order matters: even her out, then lift, then catch what is left. Lifting
     // before compressing would just push the peaks into the compressor and
     // squash them back down, which is loud in the meter and no louder in the room.
@@ -357,6 +368,21 @@ export function createVoicePlayer(): VoicePlayer {
       sum += deviation * deviation;
     }
     const rms = Math.sqrt(sum / samples.length);
+    if (spectrum) {
+      analyser.getFloatFrequencyData(spectrum);
+      const hz = analyser.context.sampleRate / analyser.fftSize;
+      const mean = ([lo, hi]: readonly [number, number]) => {
+        let total = 0, n = 0;
+        for (let i = Math.ceil(lo / hz); i < Math.min(spectrum!.length, hi / hz); i++, n++) total += 10 ** (spectrum![i] / 20);
+        return n ? total / n : 0;
+      };
+      const low = mean(BAND_HZ.low), mid = mean(BAND_HZ.mid), high = mean(BAND_HZ.high), all = low + mid + high;
+      if (all > 0) {
+        bands.low += (low / all - bands.low) * BANDS_FOLLOW;
+        bands.mid += (mid / all - bands.mid) * BANDS_FOLLOW;
+        bands.high += (high / all - bands.high) * BANDS_FOLLOW;
+      }
+    }
     const scaled = (rms - LEVEL_FLOOR) / (LEVEL_CEILING - LEVEL_FLOOR);
     if (scaled <= 0) return 0;
     // Curved so ordinary speech uses most of the travel — linear, the mouth
@@ -413,7 +439,7 @@ export function createVoicePlayer(): VoicePlayer {
       // actually finished talking.
       weight += ((speaking ? 1 : 0) - weight) * WEIGHT_FADE;
       if (weight < 0.001) weight = 0;
-      return { open: level, weight };
+      return { open: level, weight, bands: current ? { ...bands } : undefined };
     },
     dispose() {
       stopAll();

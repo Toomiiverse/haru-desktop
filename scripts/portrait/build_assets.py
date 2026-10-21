@@ -295,7 +295,7 @@ drop = np.zeros(w, np.float32)
 drop[ux_min:] = np.clip(fit, 0, float((bots - tops).max()) + 3)   # remap needs float32 maps
 print('strokes', n_s - 1, '| drop at inner corner / middle / edge', [round(float(drop[x])) for x in (cols_o.min(), (cols_o.min() + cols_o.max()) // 2, cols_o.max())])
 LID_SHADOW = np.array([58, 34, 54], np.float32)
-BLINK_FRAMES = 17
+BLINK_FRAMES = 33
 SC = 1440 / 922
 geom = lambda x0, y0, x1, y1: {'x': round(690 + float(x0) / SC, 2), 'y': round(float(y0) / SC, 2), 'w': round(float(x1 - x0) / SC, 2), 'h': round(float(y1 - y0) / SC, 2)}
 

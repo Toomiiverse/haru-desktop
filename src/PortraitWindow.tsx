@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createVoicePlayer } from './companion/mouth';
+import { createVoicePlayer, type Bands } from './companion/mouth';
 import type { EmotionName } from './types';
 import { DEFAULT_VIEW, type Eye, type View } from './portraitRig';
 import { createHairLayer, type HairLayer } from './portraitHair';
@@ -58,31 +58,50 @@ const OVERSCAN = 1.05;
 // How far the face sits from that pivot, in picture px: turns the swing into the hair's lag.
 const FACE_RADIUS = 2176;
 
-// The blink, measured from the old wallpaper's recording (15 fps): shut in 0.2 s, held 0.3 s, open in 0.3 s
-// with a slow settle; its first blink is a double, the second starting 0.2 s after the first reopens.
-const BLINK = { close: 200, hold: 300, open: 300 };
+// The blink: the band drops fast and speeds up as it goes, rests shut a moment, and lifts slower, easing out at
+// the top, like a real blink; now and then a double, the second starting 0.2 s after the first reopens.
+const BLINK = { close: 120, hold: 70, open: 260 };
 const BLINK_MS = BLINK.close + BLINK.hold + BLINK.open;
 const DOUBLE_BLINK = 0.35, DOUBLE_GAP = 200;
 const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 /** How shut a blink that started `t` ms ago has the eye, 0..1. */
 function blinkShape(t: number) {
   if (t < 0 || t > BLINK_MS) return 0;
-  if (t < BLINK.close) return smooth(t / BLINK.close);
+  if (t < BLINK.close) return (t / BLINK.close) ** 2;
   if (t < BLINK.close + BLINK.hold) return 1;
-  return 1 - smooth((t - BLINK.close - BLINK.hold) / BLINK.open);
+  return (1 - (t - BLINK.close - BLINK.hold) / BLINK.open) ** 3;
 }
 
 // The mouth sheet as clean grey sprites (scripts/portrait/build_assets.py), all on the same 269x277 canvas.
 const MOUTH_FILES = import.meta.glob('../build/portrait/mouth-sprites/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 const mouthHref = (name: string) => MOUTH_FILES[`../build/portrait/mouth-sprites/${name}.png`];
 const MOUTH_CANVAS = { w: 269, h: 277 };
-// Speaking: closed line, then the sheet's fanged mouths opening wider, picked by voice level. The fanged ones are
-// drawn with full lips (about 2.5x the closed line's width on the sheet), so they are shrunk to about her mouth's
-// width, about the closed line's centre (canvas 139, 81).
-const SPEAK = ['M_01', 'M_30', 'M_29', 'M_27', 'M_31'];
-const SPEAK_SIZE = [1, 0.48, 0.48, 0.5, 0.55];
+// Speaking, after the mouth chart (closed for b/m/p and pauses; a narrow slit with the teeth showing for ee/s/sh/t/f;
+// round for oh, small round for oo/w; wide for ah; between for eh/l/th), each from the sheet's fanged mouths. Those are drawn with full lips (about 2.5x the
+// closed line's width on the sheet), so they are shrunk to about her mouth's width, about the closed line's centre
+// (canvas 139, 81).
+const SPEAK = ['M_01', 'M_30', 'M_29', 'M_27', 'M_31', 'M_39'];
+const SPEAK_SIZE = [1, 0.48, 0.48, 0.5, 0.55, 0.55];
+const MOUTH = { closed: 0, slit: 1, mid: 2, wide: 3, round: 4, roundSmall: 5 } as const;
 const MOUTH_ANCHOR = { x: 139, y: 81 };
-const SPEAK_FROM = [0, 0.06, 0.22, 0.4, 0.6];
+// Her synthesised voice is compressed, so its level sits near the top most of a line: the shape goes by the level
+// relative to how loud she has been over the last LOUD_S seconds (rising at once, never below LOUD_FLOOR). The
+// thresholds were tuned on her own voice clips (60 frames a second) to close between syllables about a tenth of
+// the time: hiss over HISS of the whole is a sibilant; a second formant under ROUNDED of the low band is a rounded
+// vowel, over FRONT a front one (ee/eh).
+const LOUD_S = 1.5, LOUD_FLOOR = 0.3;
+const SHUT = 0.06, CLOSED = 0.7, MID = 0.85, WIDE = 0.95, ROUND_OPEN = 0.88;
+const HISS = 0.12, ROUNDED = 0.15, FRONT = 0.9;
+/** The chart's mouth for this voice level (`rel`, relative to her recent loudness) and band balance. */
+function mouthFor(level: number, rel: number, bands?: Bands): number {
+  if (level < SHUT || rel < CLOSED) return MOUTH.closed;
+  const f2 = bands ? bands.mid / Math.max(bands.low, 1e-4) : 0.4;
+  if (bands && bands.high > HISS) return MOUTH.slit;
+  if (f2 < ROUNDED) return rel > ROUND_OPEN ? MOUTH.round : MOUTH.roundSmall;
+  if (f2 > FRONT) return rel > WIDE ? MOUTH.mid : MOUTH.slit;
+  return rel > WIDE ? MOUTH.wide : rel > MID ? MOUTH.mid : MOUTH.slit;
+}
+
 // At rest she has one line instead of M_01's traced patches: its centreline (fitted in canvas units), tapering to
 // points at the corners, `thick` times as thick in the middle.
 const neutralPath = (thick: number) => {
@@ -98,8 +117,11 @@ const neutralPath = (thick: number) => {
 const NEUTRAL_LINE = neutralPath(1.5), NEUTRAL_LIP = neutralPath(2.4);
 // Soft lip shade at the corners, as the talking mouths have.
 const NEUTRAL_CORNERS = [100, 178].map(x => [x, 0.00694 * x * x - 2.02394 * x + 222.7615]);
-// A shape is held at least this long, so quiet consonants do not flicker between two.
-const MOUTH_HOLD_MS = 70;
+// A shape is held at least this long, so quiet consonants do not flicker between two; shapes crossfade with this
+// time constant.
+const MOUTH_HOLD_MS = 70, MOUTH_FADE_MS = 18;
+// The voice level opens the mouth quickly and lets it close more slowly (per-frame easing at 60 fps).
+const MOUTH_ATTACK = 0.5, MOUTH_RELEASE = 0.22;
 
 const clamp = (v: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 type Panel = { id: number; title: string; body: string; image: string; seconds: number };
@@ -145,13 +167,15 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
     ];
     const gaze = { x: 0, y: 0 };
     let lid = 0, restLid = 0, blinks: number[] = [], nextBlink = performance.now() + 3000, mouth = 0, dilate = 1;
-    let mouthShown = 0, mouthAt = 0;
+    let mouthShown = 0, mouthAt = 0, last = performance.now(), loud = LOUD_FLOOR;
+    const mouthAlpha: number[] = SPEAK.map((_, k) => (k === 0 ? 1 : 0));
     let raf = 0;
     const still = matchMedia('(prefers-reduced-motion: reduce)');
     const swing = (s: number) => Math.sin(2 * Math.PI * s / SWAY_S) + 0.25 * Math.sin(2 * Math.PI * s / 13.7 + 1);
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const now = performance.now();
+      const now = performance.now(), dt = Math.min(100, now - last);
+      last = now;
       const root = svg.current;
       if (!root) return;
       // Eyes lead the cursor by a beat; the lag is what makes it a glance.
@@ -167,18 +191,16 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       lid = Math.max(restLid, blinking);
       dilate += ((DILATE[mood.current] ?? 1) - dilate) * 0.05;
       const reading = player.read();
-      mouth += (reading.open * reading.weight - mouth) * 0.6;
+      const voice = reading.open * reading.weight;
+      mouth += (voice - mouth) * (1 - (1 - (voice > mouth ? MOUTH_ATTACK : MOUTH_RELEASE)) ** (dt / 16.7));
       const breath = Math.sin(now / 2200);
       const dx = (gaze.x * view.travel.x).toFixed(1), dy = (gaze.y * view.travel.y).toFixed(1);
       root.querySelectorAll<SVGGElement>('[data-gaze]').forEach(el => el.setAttribute('transform', `translate(${dx} ${dy})`));
-      // The pupil fades as a blink brings the band down (its dark tip under the band read as the band
-      // bending); a resting half-lid, sleepy or smug, keeps it.
-      const pupilShown = (1 - smooth((blinking - 0.25) / 0.2)).toFixed(2);
+      // The pupil stays through a blink: the lid's skin and shadow in the blink frames cover it as they come down.
       root.querySelectorAll<SVGGElement>('[data-pupil]').forEach(el => {
         el.setAttribute('transform', `translate(${el.dataset.pupil}) scale(${dilate.toFixed(3)} 1)`);
-        el.setAttribute('opacity', pupilShown);
       });
-      // The pre-rendered blink: show the frame for this much shut.
+      // The pre-rendered blink: show the frame for this much shut (blending two would show the band twice).
       root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => {
         const shown = Number(el.dataset.shown ?? 0), next = Math.round(lid * (el.children.length - 1));
         if (next === shown) return;
@@ -193,12 +215,15 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       });
       // The mouth shape for her voice level right now.
       const shapes = root.querySelector('[data-mouth]')?.children;
-      const want = SPEAK_FROM.reduce((k, from, i) => (mouth >= from ? i : k), 0);
-      if (shapes && want !== mouthShown && now - mouthAt >= MOUTH_HOLD_MS) {
-        shapes[mouthShown].setAttribute('visibility', 'hidden');
-        shapes[want].setAttribute('visibility', 'visible');
-        mouthShown = want; mouthAt = now;
-      }
+      loud = Math.max(mouth, loud * Math.exp(-dt / (LOUD_S * 1000)), LOUD_FLOOR);
+      const want = mouthFor(mouth, mouth / loud, reading.bands);
+      if (want !== mouthShown && now - mouthAt >= MOUTH_HOLD_MS) { mouthShown = want; mouthAt = now; }
+      const fade = 1 - Math.exp(-dt / MOUTH_FADE_MS);
+      if (shapes) mouthAlpha.forEach((a, k) => {
+        const next = a + ((k === mouthShown ? 1 : 0) - a) * fade;
+        mouthAlpha[k] = next < 0.01 ? 0 : next > 0.99 ? 1 : next;
+        if (mouthAlpha[k] !== a) shapes[k].setAttribute('opacity', mouthAlpha[k].toFixed(2));
+      });
       root.querySelectorAll<SVGElement>('[data-blush]').forEach(el => el.setAttribute('opacity', String(BLUSH[mood.current] ?? 0)));
       const s = now / 1000, motion = still.matches ? 0 : 1;
       const angle = SWAY_DEG * swing(s) * motion;
@@ -273,7 +298,7 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
           <g data-mouth="">
             {SPEAK.map((name, k) => {
               if (k === 0) return (
-                <g key={name} transform={`translate(${view.mouth.x} ${view.mouth.y}) scale(${view.mouth.scale})`} visibility="visible">
+                <g key={name} transform={`translate(${view.mouth.x} ${view.mouth.y}) scale(${view.mouth.scale})`} opacity={1}>
                   <filter id="neutral-lip" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="1.4"/></filter>
                   {/* The talking mouths' traced line is a little rough: the same wobble, small. */}
                   <filter id="neutral-line" x="-10%" y="-100%" width="120%" height="300%">
@@ -287,7 +312,7 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
                 </g>
               );
               const s = view.mouth.scale * SPEAK_SIZE[k], d = view.mouth.scale - s;
-              return <image key={name} href={mouthHref(name)} x={view.mouth.x + MOUTH_ANCHOR.x * d} y={view.mouth.y + MOUTH_ANCHOR.y * d} width={MOUTH_CANVAS.w * s} height={MOUTH_CANVAS.h * s} visibility={k === 0 ? 'visible' : 'hidden'}/>;
+              return <image key={name} href={mouthHref(name)} x={view.mouth.x + MOUTH_ANCHOR.x * d} y={view.mouth.y + MOUTH_ANCHOR.y * d} width={MOUTH_CANVAS.w * s} height={MOUTH_CANVAS.h * s} opacity={0}/>;
             })}
           </g>
           {view.blush.map((b, i) => <ellipse key={i} data-blush="" cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
