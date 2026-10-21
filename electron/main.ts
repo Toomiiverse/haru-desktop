@@ -1,6 +1,7 @@
 import core_speaker_1 = require("./core-speaker");
 import {configureAffect,affectTurn,currentAffect,admitAffect,affectOutcome,affectDelivery,readAffectSettings,saveAffectSettings} from './core-affect';
 import {withIOSOrigin} from './core-ios';
+import { chatThread, otherThread, outsideThread, threadKey, elsewhereNote } from './chat-thread';
 import {coreWhatsAppPublish,coreWhatsAppSelf} from './core-whatsapp-watch';
 import {coreGmail} from './core-gmail';
 import {loadCallEngagement} from './call-engagement';
@@ -5597,6 +5598,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   signal?.throwIfAborted();
   markTurn('harness_start');
   const enteredAt = Date.now();
+  // 4550: what was said in the other conversation lately (chat-thread.ts).
+  const elsewhere = web ? (() => { const here = chatThread(), there = otherThread(here); return elsewhereNote((outsideThread(() => store.get(threadKey(there))) as { role: string; content?: unknown; at?: string }[] | undefined) ?? [], there, enteredAt); })() : '';
   console.log(`[reply-timing] ${JSON.stringify({ trace: traceId, stage: 'received', at: enteredAt })}`);
   const turn = createTurnContext({ hands, web, choices });
   const latest = messages.at(-1)?.content ?? '';
@@ -5853,6 +5856,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
           learnedLessons: learningNote(app.getPath('userData'), latest, conversationRoute()!.model),
           replyFeedback: store.get('chat.feedback') ?? null, replyFeedbackAt: Date.now(), replyFeedbackAfter: getSlate()?.at ?? null,
           ...(call ? { callContext: aside } : {}),
+          ...(elsewhere ? { elsewhere } : {}),
         }, assemblyCache);
         compactConversation = prepared.messages;
         compactSources = prepared.sources;
@@ -6203,6 +6207,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // after it (HOSTED_VOICE), since that is where a hosted model reads hardest.
   const preTurnSystem = ([]);
   conversation=corePolicySync('conversation-inputs.preTurn',[conversation,{natural:naturalKind??null,hosted:Boolean(brain.hosted),dynamic:assembledPrompt.dynamic,answering,aside,turnedUp,directions:directions?.note??'',hers,talking,quiet,rantRoom:rantRoomNow,wake:wakeNow,recentReplies:herRecentReplies,voice:voiceRoomNow}]);
+  if (elsewhere) { const at = conversation.map(message => message.role).lastIndexOf('user'); conversation.splice(at < 0 ? conversation.length : at, 0, { role: 'system', content: elsewhere } as OllamaMessage); }
   if (coreMemoryConfig.captureDir && coreMemory.coreProfile !== undefined) {
     try {
       const comparisonConversation = async (profile: string, graphIds: string[]) => {
@@ -9390,6 +9395,7 @@ function webDeps(): WebDeps {
       // from a page left open on the nightstand is not.
       if (!poll) store.set('web.lastOpenedAt', new Date().toISOString());
       const messages = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[] | undefined) ?? [];
+      if (chatThread() === 'desk') return messages;
       // What she said to the phone on her own — a chase, a nudge, the weather
       // — is an aside, not a message, and the notification that carried it
       // used to be the only place it existed: tap it, and the line was not

@@ -3,9 +3,10 @@ import { runTimedTurn, timingFor } from './turn-timing';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { coreServiceOptions, type CoreServiceOptions } from './core-service-client';
+import { withChatThread } from './chat-thread';
 
 export type IntakeTransport = { call(command: Record<string, unknown>): Promise<any> };
-export type ChatInput = { text: string; files: unknown[]; mode: 'plain' | 'stream'; interrupted?: boolean; replyTo?: string; quoted?: string; phoneTimeZone?: string; originDeviceId?: string };
+export type ChatInput = { text: string; files: unknown[]; mode: 'plain' | 'stream'; interrupted?: boolean; replyTo?: string; quoted?: string; phoneTimeZone?: string; originDeviceId?: string; thread?: 'desk' };
 export type DeliveryReceipt = { id: string; state: 'pending' | 'done' | 'error'; execution: string; reply?: string; ignored?: boolean; expression?: string | null; emotion?: string | null; error?: string; disposition?: string; ran?: unknown[] };
 export class IntakeFailure extends Error {
   constructor(readonly status: number) { super('chat_intake_unavailable'); }
@@ -96,8 +97,8 @@ export class ChatIntake {
       // the claim response was in flight. Never inject it into the new slate.
       if (claim.scope !== this.runner.scope() || !this.runner.enabled()) throw Error('chat_scope_changed');
       const input = claim.input as ChatInput;
-      const answer = await withIOSOrigin(input.originDeviceId, () => runTimedTurn(claim.id, () => input.mode === 'plain' ? this.runner.say(input.text,input.files,{requestId:claim.id,...(input.phoneTimeZone?{phoneTimeZone:input.phoneTimeZone}:{})})
-        : this.runner.sayStream(input.text,text => emit({text}),input.files,{requestId:claim.id,interrupted:input.interrupted,...(input.phoneTimeZone?{phoneTimeZone:input.phoneTimeZone}:{}),...(input.replyTo ? {replyTo:input.replyTo} : {}),...(input.quoted ? {quoted:input.quoted} : {})},(sentence,emotion) => emit({sentence,emotion}))));
+      const answer = await withChatThread(input.thread, () => withIOSOrigin(input.originDeviceId, () => runTimedTurn(claim.id, () => input.mode === 'plain' ? this.runner.say(input.text,input.files,{requestId:claim.id,...(input.phoneTimeZone?{phoneTimeZone:input.phoneTimeZone}:{})})
+        : this.runner.sayStream(input.text,text => emit({text}),input.files,{requestId:claim.id,interrupted:input.interrupted,...(input.phoneTimeZone?{phoneTimeZone:input.phoneTimeZone}:{}),...(input.replyTo ? {replyTo:input.replyTo} : {}),...(input.quoted ? {quoted:input.quoted} : {})},(sentence,emotion) => emit({sentence,emotion})))));
       completion = {op:'finish',owner:this.owner,id:claim.id,result:{reply:answer.reply,ignored:Boolean(answer.ignored),expression:answer.expression ?? null,emotion:answer.emotion ?? null,...(answer.disposition ? {disposition:answer.disposition,ran:answer.ran} : {})}};
     } catch (error) {
       // Stored for diagnosis only; the phone still gets the generic receipt. Only coded

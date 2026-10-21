@@ -3,6 +3,7 @@ import { CoreStore, coreStoreOptions, type CoreStoreOptions } from './core-store
 import { assertIdentityWritable, coreIdentityValue } from './core-identity';
 import { memorySourceRevision } from './memory-revision';
 import { mergeDeletions, type MemoryDeletion } from './memorysync';
+import { chatThread, threadKey } from './chat-thread';
 // The persistence boundary for Haru's memory and application state.
 // HARU_CORE_STORAGE=on selects the Core SQLite authority: typed documents and
 // dotted config keys are committed through CoreStore, with no JSON fallback.
@@ -260,6 +261,7 @@ export class HaruStore {
    *  so call sites that check `get(key, fallback) === x` or cast the result
    *  keep compiling unchanged. */
   get(key: string, defaultValue?: unknown): unknown {
+    key = threaded(key);
     const owned = coreIdentityValue(key);
     if (owned) return owned.value ?? defaultValue;
     if (this.core) {
@@ -276,15 +278,15 @@ export class HaruStore {
     assertIdentityWritable(typeof keyOrObject === 'string' ? [keyOrObject] : Object.keys(keyOrObject));
     if (this.core) {
       const config = this.core.get('config');
-      for (const [key, entry] of Object.entries(typeof keyOrObject === 'string' ? { [keyOrObject]: value } : keyOrObject)) {
-        const parts = key.split('.'); if (parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) throw new Error('invalid_config_path');
+      for (const [raw, entry] of Object.entries(typeof keyOrObject === 'string' ? { [keyOrObject]: value } : keyOrObject)) {
+        const parts = threaded(raw).split('.'); if (parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) throw new Error('invalid_config_path');
         let target = config; for (const part of parts.slice(0, -1)) { if (!target[part] || typeof target[part] !== 'object') target[part] = {}; target = target[part]; }
         target[parts.at(-1)!] = entry;
       }
       this.core.set('config', config); return;
     }
     if (typeof keyOrObject === 'string') {
-      this.electron.set(keyOrObject, value);
+      this.electron.set(threaded(keyOrObject), value);
     } else {
       this.electron.set(keyOrObject);
     }
@@ -292,6 +294,7 @@ export class HaruStore {
 
   delete(key: string): void {
     assertIdentityWritable([key]);
+    key = threaded(key);
     if (this.core) {
       const config = this.core.get('config'), parts = key.split('.');
       if (parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) throw new Error('invalid_config_path');
@@ -760,3 +763,6 @@ export class HaruStore {
     return null;
   }
 }
+
+// 4550: inside a desk turn the conversation key is the desk's (chat-thread.ts).
+function threaded(key: string): string { return key === 'chat.messages' ? threadKey(chatThread()) : key; }

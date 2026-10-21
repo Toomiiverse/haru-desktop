@@ -28,6 +28,7 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import { ChatReceipts, type ChatReceipt } from './chat-receipts';
 import { ChatIntake, intakeFromEnvironment, IntakeFailure, type IntakeTransport, type ChatInput } from './chat-intake';
+import { readThread, withChatThread } from './chat-thread';
 import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
@@ -1114,7 +1115,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/chat') {
-    return json(res, 200, { messages: deps.history(url.searchParams.get('poll') === '1').slice(-60) });
+    const messages = await withChatThread(readThread(url.searchParams.get('thread')), () => deps.history(url.searchParams.get('poll') === '1'));
+    return json(res, 200, { messages: messages.slice(-60) });
   }
 
   // Whether a call can be placed, on which engine, and how much of today's allowance is left.
@@ -1237,8 +1239,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const phoneTimeZone=typeof zoneHeader==='string'&&zoneHeader.length<=80?zoneHeader:undefined;
     const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
     if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
-    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'plain',...(phoneTimeZone?{phoneTimeZone}:{})},body.requestId);
-    const answer = await deps.say(text, files, phoneTimeZone?{phoneTimeZone}:undefined);
+    const thread = readThread(url.searchParams.get('thread'));
+    if (durableIntakes.has(deps)) return durableChat(req,res,deps,{text,files,mode:'plain',...(phoneTimeZone?{phoneTimeZone}:{}),...(thread==='desk'?{thread}:{})},body.requestId);
+    const answer = await withChatThread(thread, () => deps.say(text, files, phoneTimeZone?{phoneTimeZone}:undefined));
     return json(res, 200, answer);
   }
 
@@ -1339,7 +1342,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!id) return json(res, 400, { error: 'Which reply?' });
     if (!reaction && note === undefined) return json(res, 400, { error: 'A thumb or a note.' });
     let rated;
-    try { rated = await deps.rate(id, reaction, note); }
+    try { rated = await withChatThread(readThread(url.searchParams.get('thread')), () => deps.rate(id, reaction, note)); }
     catch { return json(res, 503, { error: 'Feedback could not be confirmed. Refresh the conversation before rating again.' }); }
     if (!rated) return json(res, 404, { error: 'No such reply of hers.' });
     return json(res, 200, { ok: true, line: rated.line });
