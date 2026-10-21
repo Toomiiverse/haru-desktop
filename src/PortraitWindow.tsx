@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createVoicePlayer } from './companion/mouth';
 import type { EmotionName } from './types';
 import { DEFAULT_VIEW, type Eye, type View } from './portraitRig';
+import { createHairLayer, type HairLayer } from './portraitHair';
 import irisSprite from '../build/portrait/iris.png';
 import pupilSprite from '../build/portrait/pupil.png';
 import './portrait.css';
@@ -14,16 +15,25 @@ import './portrait.css';
  * from the part sheet — sclera, the sheet's iris and slit pupil sliding with
  * the gaze and narrowing with the mood, its reflections fixed, and a
  * skin-coloured lid with a lash edge that drops for blinks and half-lidded
- * moods — so the artwork's own eyes are never edited, only covered. The hair is
- * cut into strand groups: a copy of the picture clipped to a region and masked
- * to hair pixels, each turning a fraction of a degree about its root with the
- * breath, so the fringe and side locks drift the way the old wallpaper's did.
+ * moods — so the artwork's own eyes are never edited, only covered. Face and
+ * hair are separate layers: the face is a plate with the hair painted out,
+ * never warped; the hair is drawn over it by portraitHair.ts as rigid locks that
+ * swing with the head's sway and a gusting wind; the brow sits on the face
+ * behind them, and below the jaw everything is a still, out-of-focus background.
+ * The motion follows the old wallpaper (measured from its recording): the head
+ * sways about 1% of the screen on a ~9 s swing, pivoting from the crown, and
+ * the locks lag it so their tips hang nearly still while the face moves under.
  * An open mouth is drawn over the drawn-on one while her voice plays; the voice
  * plays here too, muted at the window level by main, so the mouth reads real
  * amplitude rather than a guess timed against the text.
  */
 // The picture is grey apart from her eyes; these are the only colours drawn.
-const SCLERA = '#f4eef4', LID = '#c4c4c4', LASH = '#1a1216';
+// The lid matches her lit skin; its lash edge is soft grey like the rest of her lines.
+const SCLERA = '#f4eef4', LID = '#cdcdcd';
+// The sheet's complete eye shades the top of the eyeball under the lid, lilac fading to nothing.
+const LID_SHADE = '#b48aa8';
+// The upper face's shade, multiplied: the close-up's assets are toned for exactly this.
+const SHADE = '#ababab';
 // Highlights after the cel reference: shapes in iris units (centre 0,0; radius
 // 1; y down), so the same drawing fits any eye. Corners are rounded by a stroke
 // of the same colour.
@@ -39,6 +49,28 @@ const LOOK_RANGE = 1900;
 const LIDS: Partial<Record<EmotionName, number>> = { sleepy: 0.55, smug: 0.38, annoyed: 0.28, bored: 0.3, happy: 0.12 };
 const DILATE: Partial<Record<EmotionName, number>> = { surprised: 2.2, curious: 1.6, affectionate: 1.5, annoyed: 0.7, determined: 0.7, sleepy: 0.9 };
 const BLUSH: Partial<Record<EmotionName, number>> = { embarrassed: 1, affectionate: 0.7, happy: 0.3 };
+
+// The head's swing: degrees about a pivot 30% of the screen above the top
+// edge, so the face moves ~1% of the screen; period from the recording.
+const SWAY_DEG = 0.5, SWAY_S = 9.2;
+// The picture is drawn this much larger so the swing never shows an edge.
+const OVERSCAN = 1.05;
+// How far the face sits from that pivot, in picture px: turns the swing into the hair's lag.
+const FACE_RADIUS = 2176;
+
+// The blink, measured from the old wallpaper's recording (15 fps): shut in 0.2 s, held 0.3 s, open in 0.3 s
+// with a slow settle; its first blink is a double, the second starting 0.2 s after the first reopens.
+const BLINK = { close: 200, hold: 300, open: 300 };
+const BLINK_MS = BLINK.close + BLINK.hold + BLINK.open;
+const DOUBLE_BLINK = 0.35, DOUBLE_GAP = 200;
+const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+/** How shut a blink that started `t` ms ago has the eye, 0..1. */
+function blinkShape(t: number) {
+  if (t < 0 || t > BLINK_MS) return 0;
+  if (t < BLINK.close) return smooth(t / BLINK.close);
+  if (t < BLINK.close + BLINK.hold) return 1;
+  return 1 - smooth((t - BLINK.close - BLINK.hold) / BLINK.open);
+}
 
 const clamp = (v: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 type Panel = { id: number; title: string; body: string; image: string; seconds: number };
@@ -57,6 +89,20 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
   const sleeping = useRef(false);
   const svg = useRef<SVGSVGElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const hair = useRef<HairLayer | null>(null);
+  // The plate replaces the picture only once the hair layer is drawing; until
+  // then (or without WebGL) the painted-on hair stays.
+  const [hairReady, setHairReady] = useState(false);
+  useEffect(() => {
+    if (!view.hair || !canvas.current) return;
+    let live = true;
+    void createHairLayer(canvas.current, { image: view.image, mask: view.hair.mask, locks: view.hair.locks, kink: view.hair.kink }).then(layer => {
+      if (!live) { layer?.dispose(); return; }
+      hair.current = layer; setHairReady(!!layer);
+    });
+    return () => { live = false; hair.current?.dispose(); hair.current = null; setHairReady(false); };
+  }, [view]);
 
   useEffect(() => {
     const player = createVoicePlayer();
@@ -69,8 +115,10 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       window.haru?.life.onTick(({ vitals, action, night }) => { sleeping.current = action === 'doze' || (night && vitals.sleepiness > 0.85); }),
     ];
     const gaze = { x: 0, y: 0 };
-    let lid = 0, blinkUntil = 0, nextBlink = performance.now() + 3000, mouth = 0, dilate = 1;
+    let lid = 0, restLid = 0, blinks: number[] = [], nextBlink = performance.now() + 3000, mouth = 0, dilate = 1;
     let raf = 0;
+    const still = matchMedia('(prefers-reduced-motion: reduce)');
+    const swing = (s: number) => Math.sin(2 * Math.PI * s / SWAY_S) + 0.25 * Math.sin(2 * Math.PI * s / 13.7 + 1);
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const now = performance.now();
@@ -79,17 +127,35 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       // Eyes lead the cursor by a beat; the lag is what makes it a glance.
       gaze.x += (cursor.current.x - gaze.x) * 0.08;
       gaze.y += (cursor.current.y - gaze.y) * 0.08;
-      if (now >= nextBlink) { blinkUntil = now + 150; nextBlink = now + 2500 + Math.random() * 4500; }
+      if (now >= nextBlink) {
+        blinks = Math.random() < DOUBLE_BLINK ? [now, now + BLINK_MS + DOUBLE_GAP] : [now];
+        nextBlink = blinks[blinks.length - 1] + BLINK_MS + 3000 + Math.random() * 4000;
+      }
       const rest = sleeping.current ? 1 : LIDS[mood.current] ?? 0;
-      const lidTarget = now < blinkUntil ? 1 : rest;
-      lid += (lidTarget - lid) * (lidTarget > lid ? 0.5 : 0.3);
+      restLid += (rest - restLid) * 0.08;
+      const blinking = Math.max(0, ...blinks.map(start => blinkShape(now - start)));
+      lid = Math.max(restLid, blinking);
       dilate += ((DILATE[mood.current] ?? 1) - dilate) * 0.05;
       const reading = player.read();
       mouth += (reading.open * reading.weight - mouth) * 0.6;
       const breath = Math.sin(now / 2200);
       const dx = (gaze.x * view.travel.x).toFixed(1), dy = (gaze.y * view.travel.y).toFixed(1);
       root.querySelectorAll<SVGGElement>('[data-gaze]').forEach(el => el.setAttribute('transform', `translate(${dx} ${dy})`));
-      root.querySelectorAll<SVGGElement>('[data-pupil]').forEach(el => el.setAttribute('transform', `translate(${el.dataset.pupil}) scale(${dilate.toFixed(3)} 1)`));
+      // The pupil fades as a blink brings the band down (its dark tip under the band read as the band
+      // bending); a resting half-lid, sleepy or smug, keeps it.
+      const pupilShown = (1 - smooth((blinking - 0.25) / 0.2)).toFixed(2);
+      root.querySelectorAll<SVGGElement>('[data-pupil]').forEach(el => {
+        el.setAttribute('transform', `translate(${el.dataset.pupil}) scale(${dilate.toFixed(3)} 1)`);
+        el.setAttribute('opacity', pupilShown);
+      });
+      // The pre-rendered blink: show the frame for this much shut.
+      root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => {
+        const shown = Number(el.dataset.shown ?? 0), next = Math.round(lid * (el.children.length - 1));
+        if (next === shown) return;
+        el.children[shown].setAttribute('visibility', 'hidden');
+        el.children[next].setAttribute('visibility', 'visible');
+        el.dataset.shown = String(next);
+      });
       root.querySelectorAll<SVGGElement>('[data-lid]').forEach(el => {
         const eye = view.eyes[Number(el.dataset.lid)];
         const drop = eye.bottom - eye.top + 24;
@@ -101,14 +167,21 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       open?.setAttribute('ry', (view.mouth.ry * mouth).toFixed(1));
       open?.setAttribute('opacity', Math.min(1, mouth * 5).toFixed(2));
       root.querySelectorAll<SVGElement>('[data-blush]').forEach(el => el.setAttribute('opacity', String(BLUSH[mood.current] ?? 0)));
-      // Strands drift with a slow swell, a little with the breath, a little with speech.
-      root.querySelectorAll<SVGGElement>('[data-strand]').forEach(el => {
-        const strand = view.strands[Number(el.dataset.strand)];
-        const angle = strand.amp * (Math.sin(now / 2600 + strand.phase) * 0.7 + breath * 0.3 + mouth * 0.4);
-        el.setAttribute('transform', `rotate(${angle.toFixed(3)} ${strand.pivot[0]} ${strand.pivot[1]})`);
-      });
+      const s = now / 1000, motion = still.matches ? 0 : 1;
+      const angle = SWAY_DEG * swing(s) * motion;
+      // The hair trails the head: its tips hang nearly still while the face swings
+      // beneath, then catch up. Gusts come and go on slow, unrelated clocks.
+      const lag = -0.8 * SWAY_DEG * swing(s - 0.7) * Math.PI / 180 * FACE_RADIUS;
+      const gust = Math.max(0, Math.sin(2 * Math.PI * s / 9) * Math.sin(2 * Math.PI * s / 14 + 0.7));
+      // Each piece flutters on a fast clock of its own phase.
+      if (hair.current && view.hair) hair.current.draw(view.hair.locks.map((lock, i) => {
+        const px = lag + 12 * gust + (5 + 7 * gust + 4 * mouth) * Math.sin(2 * Math.PI * s / 1.6 + i * 1.7);
+        return -motion * px / lock.reach;
+      }));
       if (frame.current) {
-        frame.current.style.transform = `translateY(${(breath * 2 + 2 + mouth * 2).toFixed(1)}px) scale(${(1.003 + breath * 0.002).toFixed(4)})`;
+        // Scaling about the pivot (30% above the frame) pushes the picture down by
+        // 1.5% and leaves a gap at the top; 4% up splits the overscan evenly.
+        frame.current.style.transform = `translateY(-4%) translateY(${(motion * (6 * Math.sin(2 * Math.PI * s / SWAY_S + 1.2) + breath * 2) + mouth * 2).toFixed(1)}px) rotate(${angle.toFixed(3)}deg) scale(${OVERSCAN})`;
         frame.current.style.filter = sleeping.current ? 'brightness(0.55)' : '';
       }
     };
@@ -117,20 +190,23 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
   }, [view]);
 
   const [fx, fy, fw, fh] = view.frame;
-  const picture = <image href={view.image} x={fx} y={fy} width={fw} height={fh}/>;
+  const picture = <image href={hairReady && view.hair ? view.hair.plate : view.image} x={fx} y={fy} width={fw} height={fh}/>;
   return (
     <div className="portrait">
       <div className="portrait-frame" ref={frame}>
         <svg ref={svg} viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice">
           <defs>
             {view.eyes.map((eye, i) => <clipPath key={i} id={`eye-${i}`}><polygon points={eye.open}/></clipPath>)}
-            {view.strands.map((strand, i) => <clipPath key={i} id={`strand-${i}`}><polygon points={strand.points}/></clipPath>)}
-            <mask id="hair" maskUnits="userSpaceOnUse" x={fx} y={fy} width={fw} height={fh}><image href={view.mask} x={fx} y={fy} width={fw} height={fh}/></mask>
+            {/* Eased out to nothing (a smoothstep in stops): a straight ramp ends in a visible straight line. */}
+            <linearGradient id="lid-shade" x1="0" y1="0" x2="0" y2="1">
+              {[0, 0.2, 0.4, 0.6, 0.8, 1].map(o => <stop key={o} offset={o} stopColor={LID_SHADE} stopOpacity={(0.6 * (1 - o * o * (3 - 2 * o))).toFixed(3)}/>)}
+            </linearGradient>
             <radialGradient id="blush"><stop offset="0" stopColor="#f6a3b0" stopOpacity="0.5"/><stop offset="1" stopColor="#f6a3b0" stopOpacity="0"/></radialGradient>
           </defs>
           {picture}
           {view.eyes.map((eye, i) => (
-            <g key={i} clipPath={`url(#eye-${i})`}>
+            <g key={i}>
+            <g clipPath={`url(#eye-${i})`}>
               <polygon points={eye.open} fill={SCLERA}/>
               <g data-gaze="">
                 {/* The sheet's own iris and pupil, placed by the traced centre and radius. */}
@@ -144,21 +220,33 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
               {/* Reflections, fixed on the eye: one angular catch-light high on the left and two slanted dashes right of the pupil. */}
               <polygon points={irisPoints(eye, CATCH)} fill={CATCHLIGHT} stroke={CATCHLIGHT} strokeWidth={eye.iris.r * 0.07} strokeLinejoin="round"/>
               {DASHES.map((dash, j) => <polygon key={j} points={irisPoints(eye, dash)} fill={CATCHLIGHT} stroke={CATCHLIGHT} strokeWidth={eye.iris.r * 0.025} strokeLinejoin="round" opacity="0.9"/>)}
-              {/* The lid: skin that drops from above the opening, with a lash line along its edge. */}
-              <g data-lid={i}>
+              <rect x={eye.iris.cx - 400} y={eye.top} width={800} height={(eye.bottom - eye.top) * 0.6} fill="url(#lid-shade)"/>
+              {/* The lid: skin that drops from above the opening (eyes without a pre-rendered blink). */}
+              {!eye.blink && <g data-lid={i}>
                 <rect x={eye.iris.cx - 400} y={eye.top - 400} width={800} height={eye.bottom - eye.top + 400 + 24} fill={LID}/>
-                <rect x={eye.iris.cx - 400} y={eye.bottom + 16} width={800} height={10} fill={LASH}/>
-              </g>
+              </g>}
             </g>
-          ))}
-          {view.strands.map((_, i) => (
-            <g key={i} data-strand={i}>
-              <g mask="url(#hair)"><g clipPath={`url(#strand-${i})`}>{picture}</g></g>
+            {/* The lower lid line and lashes from the eye sheet; the upper band is in the blink frames. */}
+            {eye.outline && <image href={eye.outline.href} x={eye.outline.x} y={eye.outline.y} width={eye.outline.w} height={eye.outline.h} preserveAspectRatio="none"/>}
+            {eye.blink && <g data-blink={i}>
+              {Array.from({ length: eye.blink.frames }, (_, k) => (
+                <svg key={k} x={eye.blink!.x} y={eye.blink!.y} width={eye.blink!.w} height={eye.blink!.h} viewBox={`0 ${k * eye.blink!.frameH} ${eye.blink!.frameW} ${eye.blink!.frameH}`} preserveAspectRatio="none" visibility={k === 0 ? 'visible' : 'hidden'}>
+                  <image href={eye.blink!.href} width={eye.blink!.frameW} height={eye.blink!.frameH * eye.blink!.frames}/>
+                </svg>
+              ))}
+            </g>}
             </g>
           ))}
           <ellipse data-mouth="" cx={view.mouth.cx} cy={view.mouth.cy} rx={view.mouth.rx} ry={0} opacity={0} fill="#3a1a24"/>
           {view.blush.map((b, i) => <ellipse key={i} data-blush="" cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
         </svg>
+        {view.hair && <canvas ref={canvas} className="portrait-layer"/>}
+        {view.shadow && (
+          <svg className="portrait-layer portrait-shadow" viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice">
+            <defs><filter id="shadow-edge" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter></defs>
+            <polygon points={view.shadow} fill={SHADE} filter="url(#shadow-edge)"/>
+          </svg>
+        )}
       </div>
       <div className="portrait-panels">
         {panels.map(panel => (
