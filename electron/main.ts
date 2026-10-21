@@ -247,6 +247,7 @@ function setMicrophoneListening(active: boolean) {
 }
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
+let portraitWindow: BrowserWindow | null = null;
 
 /** Where screenshots pushed from a desk are kept. A folder per day under here,
  *  which is the folder the activity log is describing. */
@@ -4276,7 +4277,11 @@ async function considerReminding(environment: Environment): Promise<boolean> {
     sendToWindows('voice:insistence', reminderVolume(tier));
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'reminder', about: target.item.title })) void speak(line, emotion);
+    if (interject(line, { source: 'reminder', about: target.item.title })) {
+      void speak(line, emotion);
+      // Up on her screen as well, where it outlasts the spoken line.
+      sendToWindows('portrait:panel', { id: Date.now(), title: target.item.title, body: line, image: '', seconds: 120 });
+    }
     return true;
   } catch (error) {
     console.warn('[remind] could not write a reminder:', error instanceof Error ? error.message : error);
@@ -5816,6 +5821,7 @@ function availableTools(): ToolAvailability {
     web: talkingOnWeb,
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
+    screen: !!portraitWindow && !portraitWindow.isDestroyed(),
     browser: readBrowserControlConfig(store.get('browser')).enabled,
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
@@ -8891,7 +8897,31 @@ async function serverChat(messages: { role: string; content: string; attachments
   const history = await serverMessages().catch(() => undefined);
   const authoritative = history?.some(message => message.role === 'assistant' && message.content === reply.content);
   console.log('[server] native desktop reply received; ' + files.length + ' attachment(s)');
+  // Anything she put up on her screen while answering is collected now rather
+  // than on the next poll, so the panel lands with the reply.
+  void collectScreenPanels();
   return { ...reply, ...(authoritative ? { messages: history } : {}) };
+}
+
+// Her screen in server mode: panels she put up on the server (show_on_screen,
+// decided there) wait on a shelf until the desk collects them. Collecting is
+// also how the server learns the screen is on, so this runs on a steady clock
+// as well as after each reply. Starts ten minutes back: a note she left while
+// the desk was off is the point of leaving it.
+let screenCursor = Date.now() - 10 * 60_000;
+async function collectScreenPanels() {
+  if (!desktopServer() || !portraitWindow || portraitWindow.isDestroyed()) return;
+  try {
+    const { panels } = await serverJson<{ panels: { id: number; title: string; body: string; image: string; seconds: number }[] }>(serverRequest, `/api/screen?since=${screenCursor}`);
+    for (const panel of panels) {
+      screenCursor = Math.max(screenCursor, panel.id);
+      // A path on this machine becomes a file URL the page can load; a missing one shows nothing rather than a broken image.
+      const image = /^https:\/\//i.test(panel.image) ? panel.image : panel.image && existsSync(panel.image) ? pathToFileURL(panel.image).toString() : '';
+      portraitWindow.webContents.send('portrait:panel', { ...panel, image });
+    }
+  } catch (error) {
+    console.warn('[screen] could not collect panels:', error instanceof Error ? error.message : error);
+  }
 }
 
 function createWindow() {
@@ -8972,6 +9002,58 @@ function createCompanionWindow() {
     const bounds = companionWindow.getBounds();
     companionWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
   }, CURSOR_POLL_MS);
+}
+
+/**
+ * Her own screen: a portrait monitor, if one is attached, filled edge to edge
+ * with her face. Not a stage like the companion — nothing perches or walks here
+ * — just the picture, watching the main monitor and mouthing her lines.
+ *
+ * Muted at the window level: the page runs the same voice player as the
+ * companion so the mouth tracks real amplitude, but the companion is the one
+ * audio sink. Two sinks would be a chorus.
+ */
+function createPortraitWindow() {
+  const primary = screen.getPrimaryDisplay();
+  const display = screen.getAllDisplays().find(d => d.id !== primary.id && d.bounds.height > d.bounds.width);
+  if (!display) return;
+  portraitWindow = new BrowserWindow({
+    icon: appIcon(),
+    ...display.bounds,
+    frame: false,
+    // Windows' default size limit for a window is the primary monitor, and the
+    // portrait monitor is taller than the primary is wide: without an explicit
+    // maximum it came up square, 1440 by 1440. Resizable so the explicit limits
+    // are what Chromium reports; there is no frame to drag anyway.
+    resizable: true,
+    minWidth: display.bounds.width, maxWidth: display.bounds.width,
+    minHeight: display.bounds.height, maxHeight: display.bounds.height,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#000000',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, backgroundThrottling: false },
+  });
+  portraitWindow.webContents.setAudioMuted(true);
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) portraitWindow.loadURL(`${devUrl}?view=portrait`);
+  else portraitWindow.loadURL(`${pathToFileURL(path.join(__dirname, '../dist/index.html')).toString()}?view=portrait`);
+  portraitWindow.on('closed', () => { portraitWindow = null; });
+  // Never focused, so nothing ever raises it: one launch in four it came up
+  // underneath Wallpaper Engine's window on that monitor and was invisible
+  // until something lifted it. Lifted once, it stays put.
+  // ponytail: one lift at start; a periodic moveTop if the wallpaper reclaims the top again
+  portraitWindow.once('ready-to-show', () => portraitWindow?.moveTop());
+  setInterval(() => void collectScreenPanels(), 20_000);
+  // Where the cursor is, in her window's pixels: on the main monitor it sits far
+  // off to the side, which is exactly the direction she should be looking.
+  setInterval(() => {
+    if (!portraitWindow || portraitWindow.isDestroyed()) return;
+    const point = screen.getCursorScreenPoint();
+    const bounds = portraitWindow.getBounds();
+    portraitWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
+  }, CURSOR_POLL_MS * 2);
 }
 
 // Handing someone a shortcut for when she has not come up guarantees it gets
@@ -14806,6 +14888,7 @@ app.whenReady().then(() => {
   // leave the app running with nothing on screen and no way back into it.
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
+  createPortraitWindow();
   reportCapabilities();
   reportSetup();
   startWindowsHelper();

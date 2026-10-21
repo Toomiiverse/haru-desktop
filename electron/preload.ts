@@ -456,6 +456,11 @@ contextBridge.exposeInMainWorld('haru', {
     open: () => ipcRenderer.invoke('companion:open') as Promise<string>,
     close: () => ipcRenderer.invoke('companion:close'),
     ask: (text: string) => ipcRenderer.invoke('companion:ask', text) as Promise<{ reply: string; ignored: boolean; choices: string[] }>,
+    onPanel: (callback: (panel: { id: number; title: string; body: string; image: string; seconds: number }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, panel: { id: number; title: string; body: string; image: string; seconds: number }) => callback(panel);
+      ipcRenderer.on('portrait:panel', listener);
+      return () => ipcRenderer.removeListener('portrait:panel', listener);
+    },
     onSay: (callback: (line: string | null) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string | null) => callback(line);
       ipcRenderer.on('companion:say', listener);

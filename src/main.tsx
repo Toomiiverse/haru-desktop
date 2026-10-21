@@ -9,11 +9,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { CompanionWindow } from './CompanionWindow';
+import { PortraitWindow } from './PortraitWindow';
 import './styles.css';
 import './live2d.css';
 import './svgAvatar.css';
 
-const isCompanion = new URLSearchParams(window.location.search).get('view') === 'companion';
-if (isCompanion) document.documentElement.dataset.view = 'companion';
+const view = new URLSearchParams(window.location.search).get('view');
+const isCompanion = view === 'companion';
+if (isCompanion || view === 'portrait') document.documentElement.dataset.view = view;
 
-createRoot(document.getElementById('root')!).render(<StrictMode>{isCompanion ? <CompanionWindow /> : <App />}</StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode>{isCompanion ? <CompanionWindow /> : view === 'portrait' ? <PortraitWindow /> : <App />}</StrictMode>);

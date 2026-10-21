@@ -19,7 +19,8 @@
 import path from 'node:path';
 import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
 import { createFolder, listVault, readNote, writeNote, type WriteMode } from './vaultnotes';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -658,11 +659,11 @@ export const TRANSCRIPT_TOOL: ChatTool = {
   },
 };
 
-export const JOURNAL_TOOL: ChatTool = {
+export const SCREEN_TOOL: ChatTool = {
   type: 'function',
   function: {
-    name: 'save_journal_entry',
-    description: "Write today's journal entry when they have told you how their day went or how they feel, after you asked or they offered. Use their words as closely as you can — it is their diary, not your summary of them. Only once they have actually said something; never invent an entry, and not for ordinary chat they did not mean as a journal.",
+    name: 'show_on_screen',
+    description: 'Put a panel up on your own screen, the tall monitor with your face on it: a note, a reminder, a picture you want them to see. It sits over your portrait for a while and then fades. Use it when you want to show rather than only say.',
     parameters: {
       type: 'object',
       properties: {
@@ -1003,6 +1004,8 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
+  /** Whether her own screen — the portrait monitor — is up to put things on. */
+  screen: boolean;
 };
 
 /** Whether the message is about the machine or the apps on it. The gate that
@@ -1039,10 +1042,10 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // call it and nothing would appear, which is a worse failure than not having
   // it: she would think she had asked and be met with silence.
   if (available.choices && !available.web) tools.push(CHOICES_TOOL);
-  if (available.journal) tools.push(JOURNAL_TOOL);
-  // Always offered, journal or not: a check-in is a note about a moment, and
-  // the moments worth noting happen whether or not anyone keeps a diary.
+  // Always offered: a check-in is a note about a moment.
   tools.push(CHECKIN_TOOL);
+  // Any door: her screen is at home, and "show me when I get back" is the point.
+  if (available.screen) tools.push(SCREEN_TOOL);
   if (available.booking && (!latest || laterRelevant(latest))) tools.push(BOOK_TOOL);
   if (available.chats && (!latest || pastRelevant(latest))) tools.push(CHATS_TOOL);
   if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
@@ -1417,6 +1420,18 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       console.warn(`[search] "${query}" failed: ${reason}`);
       return `The search did not go through (${reason}). Tell them you could not check just now. Do not answer from memory as though you had looked it up.`;
     }
+  }
+  if (name === 'show_on_screen') {
+    const title = typeof args.title === 'string' ? args.title.trim().slice(0, 80) : '';
+    if (!title) return JSON.stringify({ error: 'The panel needs a title.' });
+    const body = typeof args.body === 'string' ? args.body.trim().slice(0, 1200) : '';
+    let image = typeof args.image === 'string' ? args.image.trim() : '';
+    // A path becomes a file URL the page can load; anything else must be https.
+    if (image && !/^https:\/\//i.test(image)) image = existsSync(image) ? pathToFileURL(image).toString() : '';
+    if (!body && !image) return JSON.stringify({ error: 'Nothing to show: give it a body or a picture that exists.' });
+    const seconds = typeof args.seconds === 'number' ? Math.min(600, Math.max(5, args.seconds)) : 45;
+    sendToWindows('portrait:panel', { id: Date.now(), title, body, image, seconds });
+    return JSON.stringify({ shown: true, seconds });
   }
   if (name === 'show_wardrobe') {
     const controls = getWardrobeControls();

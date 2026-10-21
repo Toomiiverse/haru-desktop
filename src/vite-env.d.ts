@@ -157,6 +157,7 @@ interface Window {
       ask(text: string): Promise<{ reply: string; ignored: boolean; choices: string[] }>;
       onWalking(callback: (state: { moving: boolean; facing: number }) => void): () => void;
       onSay(callback: (line: string | null) => void): () => void;
+      onPanel(callback: (panel: { id: number; title: string; body: string; image: string; seconds: number }) => void): () => void;
       onWatching(callback: (gaze: { x: number; y: number } | null) => void): () => void;
       onCursor(callback: (point: { x: number; y: number }) => void): () => void;
       onPose(callback: (name: string) => void): () => void;

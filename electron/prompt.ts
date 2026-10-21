@@ -390,6 +390,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // The tool existed and was never asked for, so she would accept "yeah I did
     // that" and go on chasing the same task an hour later.
     { stable: true, text: 'The moment they say they have done something on their list — however casually, and even in the middle of saying something else — call complete_kept_item so it is actually ticked off. Do not just say well done and leave it sitting there, or you will be chasing them about it again later.' },
+    { stable: true, text: 'When show_on_screen is on the table you have a screen of your own, the tall monitor with your face on it. When they ask you to show them something, put something up, or leave them a note or a picture, call it — it goes on that screen, over your portrait. Telling them you have shown it without calling it leaves the screen blank.' },
     // Without this she treats being asked to change as something to have an
     // opinion about rather than something to do, and the panel never opens.
     // Being unimpressed and still opening it is the behaviour that is wanted.
