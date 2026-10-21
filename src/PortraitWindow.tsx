@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { createVoicePlayer } from './companion/mouth';
 import type { EmotionName } from './types';
-import { DEFAULT_VIEW, type View } from './portraitRig';
+import { DEFAULT_VIEW, type Eye, type View } from './portraitRig';
 import irisSprite from '../build/portrait/iris.png';
 import pupilSprite from '../build/portrait/pupil.png';
-import shineSprite from '../build/portrait/shine.png';
 import './portrait.css';
 
 /**
@@ -25,9 +24,14 @@ import './portrait.css';
  */
 // The picture is grey apart from her eyes; these are the only colours drawn.
 const SCLERA = '#f4eef4', LID = '#c4c4c4', LASH = '#1a1216';
-// The reflection sprite is 272x218 with its large spot centred about (55,55)
-// at radius 48; these place that spot on the traced one and size the rest.
-const SHINE_SCALE = 272 / 48, SHINE_BIG = 55 / 48;
+// Highlights after the cel reference: shapes in iris units (centre 0,0; radius
+// 1; y down), so the same drawing fits any eye. Corners are rounded by a stroke
+// of the same colour.
+const CATCH = [[-0.72, -0.30], [-0.42, -0.36], [-0.22, -0.18], [-0.28, 0.04], [-0.60, 0.10], [-0.74, -0.08]];
+const DASHES = [[[0.44, -0.30], [0.64, -0.35], [0.62, -0.26], [0.42, -0.22]], [[0.34, -0.12], [0.54, -0.17], [0.52, -0.08], [0.32, -0.03]]];
+const LOWER_GLOW = [[-0.30, 0.18], [0.0, 0.12], [0.36, 0.18], [0.52, 0.42], [0.36, 0.72], [0.0, 0.80], [-0.34, 0.70], [-0.46, 0.44]];
+const CATCHLIGHT = '#fff0fb', GLOW = '#f27fe6';
+const irisPoints = (eye: Eye, shape: number[][]) => shape.map(([x, y]) => `${(eye.iris.cx + x * eye.iris.r).toFixed(1)},${(eye.iris.cy + y * eye.iris.r).toFixed(1)}`).join(' ');
 // Cursor distance, in window pixels from her centre, that reads as "all the way
 // over". The main monitor's centre sits about 2000px to her right.
 const LOOK_RANGE = 1900;
@@ -131,12 +135,15 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
               <g data-gaze="">
                 {/* The sheet's own iris and pupil, placed by the traced centre and radius. */}
                 <image href={irisSprite} x={eye.iris.cx - eye.iris.r} y={eye.iris.cy - eye.iris.r} width={eye.iris.r * 2} height={eye.iris.r * 2}/>
+                {/* The cel-style glow across the lower iris; it belongs to the iris, so it slides with the gaze and the pupil cuts through it. */}
+                <polygon points={irisPoints(eye, LOWER_GLOW)} fill={GLOW} stroke={GLOW} strokeWidth={eye.iris.r * 0.08} strokeLinejoin="round"/>
                 <g data-pupil={`${eye.pupil.cx} ${eye.pupil.cy}`} transform={`translate(${eye.pupil.cx} ${eye.pupil.cy})`}>
                   <image href={pupilSprite} x={-eye.pupil.rx} y={-eye.pupil.ry} width={eye.pupil.rx * 2} height={eye.pupil.ry * 2} preserveAspectRatio="none"/>
                 </g>
               </g>
-              {/* The sheet's reflections, scaled so the large one sits where the picture's did. */}
-              <image href={shineSprite} x={eye.shine.cx - eye.shine.r * SHINE_BIG} y={eye.shine.cy - eye.shine.r * SHINE_BIG} width={eye.shine.r * SHINE_SCALE} height={eye.shine.r * SHINE_SCALE * 218 / 272}/>
+              {/* Reflections, fixed on the eye: one angular catch-light high on the left and two slanted dashes right of the pupil. */}
+              <polygon points={irisPoints(eye, CATCH)} fill={CATCHLIGHT} stroke={CATCHLIGHT} strokeWidth={eye.iris.r * 0.07} strokeLinejoin="round"/>
+              {DASHES.map((dash, j) => <polygon key={j} points={irisPoints(eye, dash)} fill={CATCHLIGHT} stroke={CATCHLIGHT} strokeWidth={eye.iris.r * 0.025} strokeLinejoin="round" opacity="0.9"/>)}
               {/* The lid: skin that drops from above the opening, with a lash line along its edge. */}
               <g data-lid={i}>
                 <rect x={eye.iris.cx - 400} y={eye.top - 400} width={800} height={eye.bottom - eye.top + 400 + 24} fill={LID}/>
