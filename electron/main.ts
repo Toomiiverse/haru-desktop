@@ -224,9 +224,7 @@ import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOver
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { roomHeldBack } from './rantgate';
-import { journalStance } from './journal';
-import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
-import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
+import { readEntries, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
@@ -268,7 +266,7 @@ import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPasswo
 import { conversationMayLeave, mayLeaveTheMachine, outboundNamesFrom } from './sensitivity';
 import { makePicture, PictureRefused } from './venice-image';
 import { fetchWebPicture } from './web-picture';
-import {commitUserRecord,runOwnedJournal} from './core-user-records';
+import {commitUserRecord} from './core-user-records';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
 import { herFrom } from './her';
@@ -3902,7 +3900,6 @@ function availableTools(turn: TurnContext): ToolAvailability {
     choices: turn.offeringChoices(),
     booking: true,
     chats: true,
-    journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
     web: turn.onWeb(),
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
@@ -4008,10 +4005,8 @@ function toolDeps(turn: TurnContext): ToolDeps {
     net,
     store,
     getCheckIns, setCheckIns,
-    getJournal, writeJournal,
     memoryTool:(name,args,message)=>runCoreMemoryTool(name,args,message,{core:remainingStore(app.getPath('userData')),sources:()=>blockSources(''),publish:events=>memoryStore.notifyCommitted(events)}),
     userRecord: (action,args)=>coreUserRecord(action,args),
-    noteJournalAsked: (date: string) => { journalAskedOn = date; },
     getKept, addKeptItem, toggleKept, removeKept, updateKept,
     getMemories, setMemories, addMemory,
     setBlocks, blockSources,
@@ -4901,38 +4896,6 @@ function tickOffSpoken(said: string) {
 }
 
 /**
- * The day she last raised it. One attempt per day and no more: being asked twice
- * how your day was is how a journal turns into a chore, and the whole feature
- * depends on it staying something you want to answer.
- */
-/**
- * Long enough not to hammer, short enough to catch a gap in the conversation.
- *
- * She asks in the evening, which is exactly when someone is most likely to be
- * mid-exchange with her — so the retry has to be quick enough to find a quiet
- * moment the same night rather than giving up until tomorrow.
- */
-const JOURNAL_RETRY_MS = 6 * 60_000;
-let journalTriedAt = 0;
-/**
- * Survives a restart. Held only in memory it reset on every launch, so a day she
- * had already asked about could be asked about again — and this app is restarted
- * a great deal.
- */
-let journalAskedOn = store.get('journal.askedOn') as string | undefined;
-
-/**
- * Her once-a-day ask. Written as a nudge she composes herself rather than a
- * fixed line, because the same sentence every evening at eight is a notification,
- * not a companion — and it is routed through interject so it obeys the same gap
- * as everything else she says unprompted, and waits until she has stopped
- * talking.
- */
-async function askForJournal() {
-  return askForOwnedJournal();
-}
-
-/**
  * She noticed you moved. Called from the renderer on a tab change; nearly every
  * call does nothing, which is the intent — see noticing.ts for the budget.
  */
@@ -5338,19 +5301,7 @@ async function watchFetch(job: Job): Promise<Outcome> {
 function coreUserRecord(action:string,args:unknown):any{
   const core=remainingStore(app.getPath('userData'));
   return commitUserRecord(action,args,{core,read:()=>{const now=zonedNow(CHAT_TIMEZONE);return {config:core.get('config',{}),today:localDateKey(now),at:new Date().toISOString()};},
-    publish:(name,value)=>sendToWindows(name,value),asked:date=>{journalAskedOn=date;}});
-}
-async function askForOwnedJournal(){
-  const core=remainingStore(app.getPath('userData'));const scope=activeScheduledJob.getStore();
-  if(!scope)throw Error('core_journal_scope_required');
-  let context='';
-  const read=()=>{if(JSON.stringify(activeScheduledJob.getStore())!==JSON.stringify(scope))throw Error('core_journal_scope_changed');
-    const now=zonedNow(CHAT_TIMEZONE),character=getActiveCharacter();return {scope,config:core.get('config',{}),today:localDateKey(now),at:new Date().toISOString(),nowMs:Date.now(),hour:now.getHours(),minute:now.getMinutes(),identity:character.identity,style:character.style,context};};
-  try{const result=await runOwnedJournal({core,read,prepare:()=>{context=unpromptedContext();},compose:c=>ollamaPost(c.messages,c.provider,c.options),publish:c=>interject(c.line,{source:c.source})});
-    if(result.askedOn!==undefined)journalAskedOn=result.askedOn;
-    if(result.speech)void speak(result.speech.line,classifyEmotion(result.speech.line,result.speech.provider));
-    console.log('[core-journal] '+JSON.stringify({status:result.status}));
-  }catch(error){console.warn('[core-journal] attempt unresolved:',error instanceof Error?error.message:String(error));}
+    publish:(name,value)=>sendToWindows(name,value),asked:()=>{}});
 }
 function getCheckIns() {
   return readCheckIns(store.get('checkins'));
@@ -5369,17 +5320,6 @@ function getJournal(): JournalEntry[] {
   return readEntries(store.get('journal.entries'));
 }
 
-function setJournal(entries: JournalEntry[]) {
-  coreUserRecord('journal.replace',{entries});return;
-}
-
-/**
- * Saves what she was told. Returns the day's entry so she can react to it having
- * landed rather than announcing a save she did not verify.
- */
-function writeJournal(text: string, ratings: { mood?: number; anxiety?: number; energy?: number; sleep?: number }, prompted: boolean) {
-  return coreUserRecord('journal.write',{text,...ratings,prompted}) as JournalEntry|undefined;
-}
 
 /**
  * The item she has just demanded an account of, waiting on the answer.
@@ -6089,8 +6029,6 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     // in motion.
     profile: coreMemory.profile,
     aniList: aniListSummary(),
-    journalConfig: readJournalConfig(store.get('journal.config')),
-    journal: getJournal(),
     checkInsToday: checkInsOn(getCheckIns(), localDateKey(promptNow)),
     screen: { label: currentActivity?.label, haunt: currentPlace ? getHaunts()[currentPlace] : undefined, scene: sceneNow(), memory: gameMemoryNow() },
     // The spliced ones are in the conversation already; quoting them beside it as well is what made her repeat one.
@@ -10089,10 +10027,6 @@ function webDeps(): WebDeps {
       if (what) console.log('[memory] from the desk: ' + what);
       return { added: report.added, updated: report.updated, deleted: report.deleted };
     },
-    journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
-    writeJournal(entry) {
-      coreUserRecord('journal.write',{...entry,prompted:false});return;
-    },
     knowledge: {
       async search(query, category) {
         {
@@ -10900,18 +10834,6 @@ function registerApplicationChannels() {
     console.log(`[gaming] ${saved.enabled ? `on — ${saved.model} while playing` : 'off'}${saved.quiet ? ', quiet' : ''}`);
     return saved;
   });
-  ipcMain.handle('journal:list', () => getJournal());
-  ipcMain.handle('journal:getConfig', () => readJournalConfig(store.get('journal.config')));
-  ipcMain.handle('journal:setConfig', (_e, config: JournalConfig) => {
-    return coreUserRecord('journal.configure',config);
-  });
-  ipcMain.handle('journal:save', (_e, entry: { date?: string; text: string; mood?: number; anxiety?: number; energy?: number; sleep?: number }) => {
-    return coreUserRecord('journal.save',entry);
-  });
-  ipcMain.handle('journal:remove', (_e, id: string) => { return coreUserRecord('journal.remove',{id}); });
-  ipcMain.handle('journal:trend', () => recentTrend(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
-  ipcMain.handle('journal:stats', (_e, range: RangeName) => rangeStats(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE)), range));
-  ipcMain.handle('journal:note', () => haruNote(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
   ipcMain.handle('anilist:get', () => readAniListConfig(store.get('anilist')));
   ipcMain.handle('anilist:set', (_e, config: AniListConfig) => {
     const saved = readAniListConfig(config);
@@ -11232,7 +11154,6 @@ function startNativePeriodicWork() {
             'steam-index': () => { steamGames = buildGameIndex(); },
             'voice-revive': reviveVoiceServer,
             'chat-reset': performChatResetIfDue,
-            'journal': askForJournal,
             'google-sync': async () => { await Promise.all([backgroundSync(), (async () => { if (process.env.HARU_CORE_GMAIL !== 'on') return; const core = remainingStore(app.getPath('userData')); const result = await coreGmail('maintenance', { memories: core.get('memories', []), config: core.get('config', {}) }); if (result.memoryPlan) { commitDayNightPlan(core, result.memoryPlan, () => {}); memoryStore.notifyCommitted(['memories']); } })()]); },
             'balance': () => checkVeniceBalance('native periodic check'),
             'check-ins': () => pullCheckIns().then(syncMemories),
@@ -11287,9 +11208,6 @@ function startCoreLifeWork() {
   performChatResetIfDue();
   mergeArchiveFragments();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
-  // Same minute tick as the chat reset. shouldAsk does all the deciding, so this
-  // is a cheap check that does nothing on all but one minute of the day.
-  setInterval(() => { void askForJournal(); }, CHAT_RESET_POLL_MS);
   scheduleBackgroundSync();
   startLifeLoop();
 }

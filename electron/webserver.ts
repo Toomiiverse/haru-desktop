@@ -163,8 +163,6 @@ export type WebDeps = {
     /** Throws when the day or the name is refused — that is a 400, not a 500. */
     keep(day: unknown, name: unknown, bytes: Buffer): void;
   };
-  journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
-  writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
   /** Today's little notes, oldest first. */
   checkIns(): CheckIn[];
   /** Jot one down. Returns today's, including the new one. */
@@ -1928,16 +1926,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { entries: deps.addCheckIn(note.slice(0, 1000), anxiety) });
   }
 
-  if (req.method === 'GET' && path === '/api/journal') return json(res, 200, { entries: deps.journal().slice(-30) });
-
-  if (req.method === 'POST' && path === '/api/journal') {
-    const body = await readBody(req) as { text?: unknown; mood?: unknown; anxiety?: unknown };
-    const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) return json(res, 400, { error: 'Write something.' });
-    const rating = (value: unknown) => (typeof value === 'number' && value >= 1 && value <= 10 ? Math.round(value) : undefined);
-    await deps.writeJournal({ text, mood: rating(body.mood), anxiety: rating(body.anxiety) });
-    return json(res, 200, { entries: deps.journal().slice(-30) });
-  }
 
   // Her own knowledge store: what she has been given to read, searched or
   // inspected from the terminal. Same auth as everything else here.

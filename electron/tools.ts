@@ -31,7 +31,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
-import { readJournalConfig, SCALE_MAX, type JournalEntry } from './journal';
 import { formatMedia, formatMissing, lookUp, readAniListConfig, type MediaKind } from './anilist';
 import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
@@ -655,12 +654,6 @@ export const READ_PAGE_TOOL: ChatTool = {
  * shop listing.
  */
 /**
- * Recording what they told her, when the journal came up in conversation. The
- * description leans hard on using their own words: the point of a journal is
- * what they said, and a model left to summarise turns "work was a nightmare and
- * I barely slept" into "had a difficult day", which is not their entry any more.
- */
-/**
  * The words in a video, when they hand her a link or one turns up in a search.
  *
  * Described as reading rather than watching, in the tool as well as in what
@@ -683,29 +676,11 @@ export const TRANSCRIPT_TOOL: ChatTool = {
   },
 };
 
-export const JOURNAL_TOOL: ChatTool = {
-  type: 'function',
-  function: {
-    name: 'save_journal_entry',
-    description: "Write today's journal entry when they have told you how their day went or how they feel, after you asked or they offered. Use their words as closely as you can — it is their diary, not your summary of them. Only once they have actually said something; never invent an entry, and not for ordinary chat they did not mean as a journal.",
-    parameters: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: "What they said about their day and how they are feeling, in their words, tidied only where speech-to-text mangled it. Write it as they said it — first person." },
-        mood: { type: 'number', description: `How good they feel, 0–${SCALE_MAX}, only if they gave a number or said something plain enough to place on it. Leave it out rather than guessing.` },
-        anxiety: { type: 'number', description: `How anxious they feel, 0–${SCALE_MAX}, where 0 is calm. Only if they said. Leave it out rather than guessing.` },
-        energy: { type: 'number', description: `How much energy they have, 0–${SCALE_MAX}. Only if they said.` },
-      },
-      required: ['text'],
-    },
-  },
-};
-
 export const CHECKIN_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'note_check_in',
-    description: "Write a short check-in when they mention how they are feeling in passing — a rough hour, a spike, something that just happened. Read back at the end of the day to ask about it properly. Not a full-day account — that is save_journal_entry.",
+    description: "Write a short check-in when they mention how they are feeling in passing — a rough hour, a spike, something that just happened. Read back at the end of the day to ask about it properly.",
     parameters: {
       type: 'object',
       properties: {
@@ -975,7 +950,6 @@ type KeptLike = { id: string; title: string; date: string; time?: string; kind: 
 export type ToolAvailability = {
   /** Whether there is a box on screen to draw the replies in. */
   choices: boolean;
-  journal: boolean;
   anilist: boolean;
   /** True while she is answering someone on the web, where the desk tools are off the table. */
   web: boolean;
@@ -1089,10 +1063,6 @@ export type ToolDeps = {
   userRecord?: (action:string,args:Record<string,unknown>)=>unknown;
   getCheckIns(): CheckInStore;
   setCheckIns(entries: CheckInStore): void;
-  getJournal(): JournalEntry[];
-  writeJournal(text: string, ratings: { mood?: number; anxiety?: number; energy?: number; sleep?: number }, prompted: boolean): JournalEntry | undefined;
-  /** Records that today's entry is written, so she stops asking for it. */
-  noteJournalAsked(date: string): void;
   getKept(): KeptLike[];
   addKeptItem(item: { title: string; date: string; time?: string; kind: 'task' | 'event' }): KeptLike;
   toggleKept(id: string, force?: boolean): void;
@@ -1198,7 +1168,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   // Destructured under the names the body already used, so what moved here is
   // the same code and not a rewrite of it.
   const {
-    CHAT_TIMEZONE, net, store, getCheckIns, setCheckIns, getJournal, writeJournal, noteJournalAsked,
+    CHAT_TIMEZONE, net, store, getCheckIns, setCheckIns,
     getKept, addKeptItem, toggleKept, removeKept, updateKept, getMemories, setMemories, addMemory,
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
@@ -1222,9 +1192,6 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'note_check_in') {
     if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));
-  }
-  if (name === 'save_journal_entry') {
-    if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));
   }
   if (name === 'look_up_anime') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';

@@ -92,7 +92,7 @@ export function localReplyEvidence(state: PromptState) {
     screen: state.screen, machine: state.machineNote, server: state.serverNote,
     whereabouts: state.whereabouts, weather: state.weather, body: state.body,
     kept: state.kept, booked: state.booked, movedJustNow: state.movedJustNow,
-    directions: state.directionsNote, journal: state.journal,
+    directions: state.directionsNote,
     checkInsToday: state.checkInsToday, herSleep: state.herSleep,
     onHerMind: state.onHerMind, fresh: state.fresh, known: state.known,
   };

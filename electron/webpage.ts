@@ -1956,7 +1956,7 @@ async function drawBell(){
   const row=(id,label,on)=>'<label class=prow><input type=checkbox id='+id+(on?' checked':'')+'> '+label+'</label>';
   $('pushpart').innerHTML=
     row('pr','Her own thoughts',p.random)+
-    row('pe','Reminders and the journal',p.events)+
+    row('pe','Reminders',p.events)+
     row('ps','The machine she runs on',p.system)+
     row('pw','The weather where you are',p.weather)+
     '<div class=prow>Quiet from <input type=time id=pf value="'+p.quietFrom+'"> to <input type=time id=pt value="'+p.quietTo+'"></div>'+

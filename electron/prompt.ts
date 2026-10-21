@@ -11,7 +11,6 @@ import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
 import { summariseFollowing, type Following } from './following';
 import { CONTINUITY, EXPRESSIVE, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction } from './room';
-import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } from './journal';
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
 import { LAYER, compileBehaviour, type Candidate, type Compiled } from './compile';
@@ -79,8 +78,6 @@ export type PromptState = {
   character: { identity: string; style: string };
   profile: string;
   aniList: string;
-  journalConfig: JournalConfig;
-  journal: JournalEntry[];
   checkInsToday: CheckIn[];
   screen: { label?: string; haunt?: Haunt; scene?: string; memory?: string };
   asides: Aside[];
@@ -157,7 +154,6 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.onHerMind ?? '' },
     { stable: false, text: state.profile },
     { stable: false, text: state.aniList },
-    { stable: false, text: journalPrompt(state.journalConfig, state.journal, today) },
     { stable: false, text: checkInInstruction(state.checkInsToday, state.timezone) },
     { stable: false, text: screenContext(state.screen, nowMs) },
     { stable: false, text: asideContext(state.asides, nowMs) },
@@ -200,7 +196,6 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: behaviourOf(state).text },
     { stable: false, text: notTwiceInstruction(state.herRecentReplies) },
     { stable: false, text: emojiRut(state.herRecentReplies) },
-    { stable: false, text: journalStance(state.journal, today) },
     // roomInstruction is already uncensored from the room.ts edit — it tells
     // her she decides how to meet a rough moment, nothing forces softness.
     { stable: false, text: roomInstruction(readsAsRough(latestMessage)) },
