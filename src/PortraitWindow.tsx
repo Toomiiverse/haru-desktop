@@ -23,7 +23,7 @@ import './portrait.css';
  * The motion follows the old wallpaper (measured from its recording): the head
  * sways about 1% of the screen on a ~9 s swing, pivoting from the crown, and
  * the locks lag it so their tips hang nearly still while the face moves under.
- * An open mouth is drawn over the drawn-on one while her voice plays; the voice
+ * The mouth comes from the mouth sheet and opens with her voice; the voice
  * plays here too, muted at the window level by main, so the mouth reads real
  * amplitude rather than a guess timed against the text.
  */
@@ -72,6 +72,35 @@ function blinkShape(t: number) {
   return 1 - smooth((t - BLINK.close - BLINK.hold) / BLINK.open);
 }
 
+// The mouth sheet as clean grey sprites (scripts/portrait/build_assets.py), all on the same 269x277 canvas.
+const MOUTH_FILES = import.meta.glob('../build/portrait/mouth-sprites/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+const mouthHref = (name: string) => MOUTH_FILES[`../build/portrait/mouth-sprites/${name}.png`];
+const MOUTH_CANVAS = { w: 269, h: 277 };
+// Speaking: closed line, then the sheet's fanged mouths opening wider, picked by voice level. The fanged ones are
+// drawn with full lips (about 2.5x the closed line's width on the sheet), so they are shrunk to about her mouth's
+// width, about the closed line's centre (canvas 139, 81).
+const SPEAK = ['M_01', 'M_30', 'M_29', 'M_27', 'M_31'];
+const SPEAK_SIZE = [1, 0.48, 0.48, 0.5, 0.55];
+const MOUTH_ANCHOR = { x: 139, y: 81 };
+const SPEAK_FROM = [0, 0.06, 0.22, 0.4, 0.6];
+// At rest she has one line instead of M_01's traced patches: its centreline (fitted in canvas units), tapering to
+// points at the corners, `thick` times as thick in the middle.
+const neutralPath = (thick: number) => {
+  const x0 = 100, x1 = 178, n = 40, y = (x: number) => 0.00694 * x * x - 2.02394 * x + 222.7615;
+  const top: string[] = [], bottom: string[] = [];
+  for (let i = 0; i <= n; i++) {
+    const x = x0 + (x1 - x0) * i / n, w = (0.15 + 0.85 * Math.sin(Math.PI * i / n) ** 0.7) * thick;
+    top.push(`${x.toFixed(2)},${(y(x) - w).toFixed(2)}`); bottom.unshift(`${x.toFixed(2)},${(y(x) + w).toFixed(2)}`);
+  }
+  return `M${top.join('L')}L${bottom.join('L')}Z`;
+};
+// Drawn like the talking mouths: their line grey, softened, over a blurred band of their lip grey.
+const NEUTRAL_LINE = neutralPath(1.5), NEUTRAL_LIP = neutralPath(2.4);
+// Soft lip shade at the corners, as the talking mouths have.
+const NEUTRAL_CORNERS = [100, 178].map(x => [x, 0.00694 * x * x - 2.02394 * x + 222.7615]);
+// A shape is held at least this long, so quiet consonants do not flicker between two.
+const MOUTH_HOLD_MS = 70;
+
 const clamp = (v: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 type Panel = { id: number; title: string; body: string; image: string; seconds: number };
 
@@ -116,6 +145,7 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
     ];
     const gaze = { x: 0, y: 0 };
     let lid = 0, restLid = 0, blinks: number[] = [], nextBlink = performance.now() + 3000, mouth = 0, dilate = 1;
+    let mouthShown = 0, mouthAt = 0;
     let raf = 0;
     const still = matchMedia('(prefers-reduced-motion: reduce)');
     const swing = (s: number) => Math.sin(2 * Math.PI * s / SWAY_S) + 0.25 * Math.sin(2 * Math.PI * s / 13.7 + 1);
@@ -161,11 +191,14 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
         const drop = eye.bottom - eye.top + 24;
         el.setAttribute('transform', `translate(0 ${(drop * lid - drop).toFixed(1)})`);
       });
-      // Nothing drawn at rest: the picture's own mouth is the closed one.
-      const open = root.querySelector<SVGEllipseElement>('[data-mouth]');
-      open?.setAttribute('rx', (view.mouth.rx * (1 + mouth * 0.4)).toFixed(1));
-      open?.setAttribute('ry', (view.mouth.ry * mouth).toFixed(1));
-      open?.setAttribute('opacity', Math.min(1, mouth * 5).toFixed(2));
+      // The mouth shape for her voice level right now.
+      const shapes = root.querySelector('[data-mouth]')?.children;
+      const want = SPEAK_FROM.reduce((k, from, i) => (mouth >= from ? i : k), 0);
+      if (shapes && want !== mouthShown && now - mouthAt >= MOUTH_HOLD_MS) {
+        shapes[mouthShown].setAttribute('visibility', 'hidden');
+        shapes[want].setAttribute('visibility', 'visible');
+        mouthShown = want; mouthAt = now;
+      }
       root.querySelectorAll<SVGElement>('[data-blush]').forEach(el => el.setAttribute('opacity', String(BLUSH[mood.current] ?? 0)));
       const s = now / 1000, motion = still.matches ? 0 : 1;
       const angle = SWAY_DEG * swing(s) * motion;
@@ -237,7 +270,26 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
             </g>}
             </g>
           ))}
-          <ellipse data-mouth="" cx={view.mouth.cx} cy={view.mouth.cy} rx={view.mouth.rx} ry={0} opacity={0} fill="#3a1a24"/>
+          <g data-mouth="">
+            {SPEAK.map((name, k) => {
+              if (k === 0) return (
+                <g key={name} transform={`translate(${view.mouth.x} ${view.mouth.y}) scale(${view.mouth.scale})`} visibility="visible">
+                  <filter id="neutral-lip" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="1.4"/></filter>
+                  {/* The talking mouths' traced line is a little rough: the same wobble, small. */}
+                  <filter id="neutral-line" x="-10%" y="-100%" width="120%" height="300%">
+                    <feTurbulence type="fractalNoise" baseFrequency="0.35" numOctaves={2} seed={3} result="n"/>
+                    <feDisplacementMap in="SourceGraphic" in2="n" scale="0.9" xChannelSelector="R" yChannelSelector="G" result="d"/>
+                    <feGaussianBlur in="d" stdDeviation="0.12"/>
+                  </filter>
+                  <path d={NEUTRAL_LIP} fill="#9a9a9a" opacity={0.4} filter="url(#neutral-lip)" transform="translate(0 3.5)"/>
+                  <path d={NEUTRAL_LINE} fill="#545454" filter="url(#neutral-line)"/>
+                  {NEUTRAL_CORNERS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={1.6} fill="#9a9a9a" opacity={0.7} filter="url(#neutral-lip)"/>)}
+                </g>
+              );
+              const s = view.mouth.scale * SPEAK_SIZE[k], d = view.mouth.scale - s;
+              return <image key={name} href={mouthHref(name)} x={view.mouth.x + MOUTH_ANCHOR.x * d} y={view.mouth.y + MOUTH_ANCHOR.y * d} width={MOUTH_CANVAS.w * s} height={MOUTH_CANVAS.h * s} visibility={k === 0 ? 'visible' : 'hidden'}/>;
+            })}
+          </g>
           {view.blush.map((b, i) => <ellipse key={i} data-blush="" cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
         </svg>
         {view.hair && <canvas ref={canvas} className="portrait-layer"/>}

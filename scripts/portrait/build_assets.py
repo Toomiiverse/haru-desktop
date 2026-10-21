@@ -186,6 +186,11 @@ plate = np.where((grey & (above_soft > 0.5) & (plate.mean(2) > skinL + 2))[..., 
 # old strokes, faint outlines that show on a large monitor.
 near_skin = grey & (above_soft > 0.5) & (np.abs(plate.mean(2) - skinL) <= 2)
 plate = np.where(near_skin[..., None], np.repeat(skinL[..., None], 3, 2), plate)
+# The drawn mouth goes: the mouth sheet's shapes (build/portrait/mouths) are drawn over this spot instead.
+MOUTH_BOX = (400, 1790, 810, 1895)
+mouth_box = np.zeros((h, w), bool); mouth_box[MOUTH_BOX[1]:MOUTH_BOX[3], MOUTH_BOX[0]:MOUTH_BOX[2]] = True
+mouth_ink = (cv2.dilate((mouth_box & (plate.mean(2) < skinL - 3)).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0) & mouth_box
+plate = np.where(mouth_ink[..., None], np.repeat(skinL[..., None], 3, 2), plate)
 
 # The nose: the reference's flat shadow (its outline, relative to its nose tick, in reference px; the
 # reference and this screen share a scale of 1.28 base px per reference px), placed on her own nose tick and
@@ -401,6 +406,91 @@ Image.fromarray(base_out).save(OUT + 'haru-closeup.webp', quality=94, method=6)
 Image.fromarray(plate_out).save(OUT + 'closeup-plate.webp', lossless=True, quality=100, method=6)
 Image.fromarray(np.dstack([r, g, np.zeros_like(r)])).save(OUT + 'closeup-hair.png', optimize=True)
 
+# --- The mouth sheet (build/portrait/mouths, traced SVGs on one 269x277 canvas, viewBox 538x554) as clean grey
+#     sprites: each traced path's outline is smoothed (the trace's wobble and stair-steps go), the paths are painted in
+#     order, supersampled, in their own grey; the dark line paths are shaved so the line is thinner.
+import re, glob, os, time
+MOUTH_PX = 6                    # final px per canvas unit: about what the screen shows (2.5 view px x 2.34)
+MOUTH_SS = 4
+MOUTH_SMOOTH = 1.6              # viewBox units of smoothing along each path's outline
+MOUTH_LINE = 80                 # paths darker than this grey are the line
+MOUTH_THIN = 0.45               # canvas units shaved off each side of the line
+MOUTH_BLEND = 22                # grey difference below which neighbouring patches blend
+os.makedirs(OUT + 'mouth-sprites', exist_ok=True)
+
+
+def cubic(p0, p1, p2, p3, n=12):
+    t = np.linspace(0, 1, n + 1)[1:, None]
+    return (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t ** 2 * p2 + t ** 3 * p3
+
+
+def smooth_loop(pts, step=0.4):
+    """The closed outline resampled every `step` units and blurred along itself."""
+    seg = np.linalg.norm(np.diff(np.vstack([pts, pts[:1]]), axis=0), axis=1)
+    t = np.concatenate([[0], np.cumsum(seg)]); n = max(8, int(t[-1] / step))
+    u = np.linspace(0, t[-1], n, endpoint=False)
+    loop = np.vstack([pts, pts[:1]])
+    q = np.stack([np.interp(u, t, loop[:, i]) for i in (0, 1)], 1).astype(np.float32)
+    sig = min(MOUTH_SMOOTH / step, n / 6)
+    pad = int(3 * sig) + 1
+    w_ = np.vstack([q[-pad:], q, q[:pad]]) if pad < n else np.vstack([q, q, q])[n - pad:2 * n + pad]
+    return np.stack([cv2.GaussianBlur(w_[:, i:i + 1].T, (0, 0), sig, borderType=cv2.BORDER_REPLICATE)[0] for i in (0, 1)], 1)[pad:pad + n]
+
+
+def raster_mouth(svg_path):
+    s = open(svg_path).read()
+    k = MOUTH_PX * MOUTH_SS / 2                          # px per viewBox unit
+    W_, H_ = int(269 * MOUTH_PX * MOUTH_SS), int(277 * MOUTH_PX * MOUTH_SS)
+    paths = []
+    for d, fill, tx, ty in re.findall(r'<path d="([^"]*)" fill="#([0-9A-Fa-f]{6})" transform="translate\(([-\d.]+),([-\d.]+)\)"', s):
+        r_, g_, b_ = (int(fill[j:j + 2], 16) for j in (0, 2, 4))
+        polys, cur = [], []
+        toks = re.findall(r'[MCZ]|-?[\d.]+(?:e-?\d+)?', d)
+        j = 0
+        while j < len(toks):
+            c = toks[j]; j += 1
+            if c == 'M':
+                if len(cur) > 2: polys.append(np.array(cur))
+                cur = [np.array([float(toks[j]), float(toks[j + 1])])]; j += 2
+            elif c == 'C':
+                while j < len(toks) and toks[j] not in 'MCZ':
+                    p_ = [np.array([float(toks[j + 2 * m]), float(toks[j + 2 * m + 1])]) for m in range(3)]; j += 6
+                    cur.extend(cubic(cur[-1], *p_))
+            elif c == 'Z':
+                if len(cur) > 2: polys.append(np.array(cur))
+                cur = []
+        if len(cur) > 2: polys.append(np.array(cur))
+        polys = [np.round((smooth_loop(pp) + [float(tx), float(ty)]) * k * 8).astype(np.int32) for pp in polys]
+        paths.append((0.299 * r_ + 0.587 * g_ + 0.114 * b_, polys))
+    # The line: every dark path together, shaved on both sides.
+    line = np.zeros((H_, W_), np.uint8)
+    cv2.fillPoly(line, [pp for g_, ps in paths if g_ < MOUTH_LINE for pp in ps], 1, cv2.LINE_8, 3)
+    shave = int(round(MOUTH_THIN * MOUTH_PX * MOUTH_SS))
+    line_keep = cv2.erode(line, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * shave + 1, 2 * shave + 1)))
+    grey = np.zeros((H_, W_), np.float32); alpha = np.zeros((H_, W_), np.float32)
+    for g_, ps in paths:
+        m = np.zeros((H_, W_), np.uint8)
+        cv2.fillPoly(m, ps, 1, cv2.LINE_8, 3)
+        if g_ < MOUTH_LINE: m &= line_keep
+        on = m > 0
+        grey[on] = g_; alpha[on] = 1
+    small = (W_ // MOUTH_SS, H_ // MOUTH_SS)
+    a = cv2.resize(alpha, small, interpolation=cv2.INTER_AREA)
+    g = cv2.resize(grey * alpha, small, interpolation=cv2.INTER_AREA) / np.maximum(a, 1e-4)
+    # The trace's shading is posterized into patches: close tones blend (the line and teeth edges stay), and the lip
+    # shading's own outer edge goes soft, like the sheet's airbrushed lips.
+    g = np.where(a > 0.5, g, cv2.dilate(g, np.ones((5, 5), np.uint8)))
+    for _ in range(3): g = cv2.bilateralFilter(g.astype(np.float32), 0, MOUTH_BLEND, MOUTH_PX * 1.5)
+    a = np.where(g > MOUTH_LINE + 40, np.minimum(a, cv2.GaussianBlur(a, (0, 0), MOUTH_PX * 0.8) * 1.15), a)
+    return np.dstack([g, g, g, a * 255]).clip(0, 255).astype(np.uint8)
+
+
+t0 = time.time()
+for svg in sorted(glob.glob('build/portrait/mouths/M_*.svg')):
+    name = os.path.basename(svg)[:-4]
+    Image.fromarray(raster_mouth(svg)).save(OUT + f'mouth-sprites/{name}.png', optimize=True)
+print('mouth sprites', len(glob.glob(OUT + 'mouth-sprites/*.png')), 'in', round(time.time() - t0, 1), 's')
+
 # Preview with the live shade, only when a preview folder is given (the eye sprite on the plate; the rig's sclera and iris are not drawn).
 if len(sys.argv) < 3: sys.exit()
 P = sys.argv[2]
@@ -413,3 +503,4 @@ comp = np.clip(comp * (1 - shadow[..., None] * (1 - SHADE)), 0, 255).astype(np.u
 Image.fromarray(comp).save(f'{P}/tone_full.png')
 Image.fromarray(comp).resize((540, 960)).save(f'{P}/tone_preview.png')
 print('ok')
+

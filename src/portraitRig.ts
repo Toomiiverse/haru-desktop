@@ -58,7 +58,12 @@ export type View = {
   viewBox: [number, number, number, number];
   /** The picture's rectangle in view pixels; the image and its layers are drawn into it. */
   frame: [number, number, number, number];
-  eyes: Eye[]; mouth: { cx: number; cy: number; rx: number; ry: number };
+  eyes: Eye[];
+  /**
+   * Where the mouth sheet's canvas (build/portrait/mouths, 269x277, every shape on the same canvas) sits: its
+   * top-left corner in view px, and its scale.
+   */
+  mouth: { x: number; y: number; scale: number };
   blush: { cx: number; cy: number; rx: number; ry: number }[];
   /** How far the pupil may slide before it leaves the iris. */
   travel: { x: number; y: number };
@@ -94,7 +99,9 @@ export const VIEWS: Record<'closeup' | 'bust', View> = {
       // Her left eye, mostly past the window's edge: the right one mirrored onto its inner corner.
       eyeFrom(closeupEyes.left, closeupEyeLeft, closeupBlinkLeft),
     ],
-    mouth: { cx: 1075, cy: 1192, rx: 60, ry: 50 },
+    // The closed shape's line (canvas 139, 81) centred on her drawn mouth (view 1077, 1175), which the plate
+    // paints out; at 2.5x the open shapes stay well clear of her chin.
+    mouth: { x: 1077 - 139 * 2.5, y: 1175 - 81 * 2.5, scale: 2.5 },
     blush: [{ cx: 1380, cy: 880, rx: 130, ry: 70 }, { cx: 800, cy: 960, rx: 130, ry: 70 }],
     travel: { x: 30, y: 16 },
   },
@@ -107,7 +114,7 @@ export const VIEWS: Record<'closeup' | 'bust', View> = {
       { open: '907,940 953,903 1000,888 1053,885 1095,890 1120,912 1118,932 1100,950 1060,978 1020,997 970,1003 928,1000 897,990 884,970',
         iris: { cx: 985, cy: 932, r: 70 }, pupil: { cx: 982, cy: 940, rx: 7, ry: 44 }, shine: { cx: 948, cy: 937, r: 15 }, top: 883, bottom: 1006 },
     ],
-    mouth: { cx: 778, cy: 1310, rx: 40, ry: 40 },
+    mouth: { x: 778 - 139, y: 1310 - 81, scale: 1 },
     blush: [{ cx: 380, cy: 1190, rx: 110, ry: 60 }, { cx: 1060, cy: 1110, rx: 110, ry: 60 }],
     travel: { x: 22, y: 12 },
   },
