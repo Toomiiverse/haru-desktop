@@ -8,7 +8,7 @@
 // fallback for a machine without Core.
 
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -21,15 +21,23 @@ export const DRY = process.env.HARU_WATCHDOG_DRY === '1';
 
 /** Her live settings: Core's authority config, else the old desktop file, else {}. */
 export function liveConfig() {
+  // Only a machine without Core may use the old file: its token is known stale,
+  // so a read failure here must be loud, not a quiet 410 later.
+  if (!existsSync(CORE_DB)) {
+    try { return JSON.parse(readFileSync(CONFIG, 'utf8')); } catch { return {}; }
+  }
   try {
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(CORE_DB, { readOnly: true });
     try {
       const row = db.prepare("SELECT body FROM authority_documents WHERE name = 'config'").get();
       if (row?.body) return JSON.parse(row.body);
+      console.warn(`[alert] Core at ${CORE_DB} has no 'config' document`);
     } finally { db.close(); }
-  } catch { /* no Core here: fall back to the file */ }
-  try { return JSON.parse(readFileSync(CONFIG, 'utf8')); } catch { return {}; }
+  } catch (error) {
+    console.warn(`[alert] could not read Core config at ${CORE_DB}:`, error instanceof Error ? error.message : error);
+  }
+  return {};
 }
 
 /** One line to every phone that asked. The 'system' switch can refuse it; the
