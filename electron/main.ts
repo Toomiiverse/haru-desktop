@@ -7243,6 +7243,13 @@ async function readDayIntoGraph(day: string, messages: { role?: string; content?
       await task.start(`Graph extraction ${day} piece ${index+1} ${job.fingerprint.slice(0,16)}`,brain.model,'background',signal);
       content=await task.compose(()=>ollamaPost(conversation,brain,{tools:false,temperature:0.1,format:EXTRACTION_SCHEMA,maxTokens:3000}),conversation);
     }catch(error){
+      // 4620: the privacy check refuses the same unchanged day every time, so retrying it every 30 minutes forever
+      // (2026-10-19: 130+ refusals) is a permanent failure, not an outage — count it as unreadable (blocked after 3).
+      if(/outbound_(privacy_blocked|local_only_requested)/.test(error instanceof Error?error.message:String(error))){
+        saveGraphProgress(day,graphFailure(job,'unreadable',Date.now()));
+        console.warn(`[graph] piece ${index+1} refused by the privacy check; counted as unreadable`);
+        return 'unreadable';
+      }
       job=graphFailure(job,'unanswered',Date.now());saveGraphProgress(day,job);
       console.warn(`[graph] piece ${index+1} deferred without marking the day read`);
       return 'unanswered';
