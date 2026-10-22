@@ -5729,7 +5729,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     const packet=corePolicySync<any>('agenda-life.directReminder',[agendaFacts(ownedAgendaCore()),{lastIsUser:messages.at(-1)?.role==='user',latest,previous:typeof herPrevious==='string'?herPrevious:null,recentUsers:theirRecent,clock:agendaClock(zonedNow(CHAT_TIMEZONE))},new Date().toISOString(),randomUUID()]);
     applyAgendaPlan(ownedAgendaCore(),packet,ownedAgendaChanged);
     if(packet.plan)onActed?.();   // 3770: a reminder written from his words: this turn acted (a call does not merge it into the next)
-    if(packet.result){reminder=packet.result.reminder;aside=[aside,packet.result.aside].filter(Boolean).join(' ');}
+    if(packet.result){reminder=packet.result.reminder??null;aside=[aside,packet.result.aside].filter(Boolean).join(' ');
+      if(packet.result.wake){   // 4750: "wake me up at …": the phone rings an alarm at it (WakeAlarm.swift reads prefs.wakeAt); the forced push wakes the app so it schedules it now
+        const wake=packet.result.wake,at=`${wake.date}T${wake.time}`;savePush({prefs:{...getPush().prefs,wakeAt:at}});console.log('[wake-alarm] '+at);
+        void pushToPhone('events',`Alarm set for ${wake.spoken}.`,'/',true,'haru-wake').catch(error=>console.warn('[wake-alarm]',error instanceof Error?error.message:'failed'));}}
     else if(messages.at(-1)?.role==='user'){   // 3910: his own thing with a time books her comeback for after it (no planner needed)
       const followUp=corePolicySync<any>('final-booking.direct',[latest,Date.now(),CHAT_TIMEZONE]);
       if(followUp)void bookFollowUp(followUp).then(r=>console.log('[follow-up] '+JSON.stringify(r))).catch(error=>console.warn('[follow-up]',error instanceof Error?error.message:'failed'));

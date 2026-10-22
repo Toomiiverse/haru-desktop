@@ -54,6 +54,8 @@ export type PushPrefs = {
    * means she waits for a sign of life however long it takes.
    */
   upBy: string;
+  /** 4750: his one-off "wake me up at …", 'YYYY-MM-DDTHH:MM' in his zone or ''. The phone rings an alarm at it; stale once past. */
+  wakeAt: string;
   /**
    * Her nudges held for now: a Focus on the phone has said so, through the
    * app's Focus filter. Nothing timed about it — it lifts when the Focus does,
@@ -122,6 +124,7 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     quietFrom: time(record.quietFrom, '23:00'),
     quietTo: time(record.quietTo, '08:00'),
     upBy: typeof record.upBy === 'string' && (record.upBy === '' || TIME.test(record.upBy)) ? record.upBy : '09:00',
+    wakeAt: typeof record.wakeAt === 'string' && /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(record.wakeAt) ? record.wakeAt : '',
     held: flag(record.held, false),
   };
 }
