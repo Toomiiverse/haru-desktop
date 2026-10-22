@@ -21,3 +21,4 @@ export async function coreWhatsAppPublish(key:string,capture:()=>object,commit:(
   try {commit(reserved.commitPlan);} catch(error) {await request('publish',{phase:'reject',grant:reserved.grant,owner:t.owner}).catch(()=>{});throw error;}
   return request('publish',{phase:'send',grant:reserved.grant,owner:t.owner,facts:capture()});
 }
+export async function coreWhatsAppReceipt(grant:string,status:'delivered'|'failed') {const t=binding();return request('publish',{phase:'receipt',grant,owner:t.owner,status});}

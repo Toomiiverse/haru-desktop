@@ -2,7 +2,7 @@ import core_speaker_1 = require("./core-speaker");
 import {configureAffect,affectTurn,currentAffect,admitAffect,affectOutcome,affectDelivery,readAffectSettings,saveAffectSettings} from './core-affect';
 import {withIOSOrigin} from './core-ios';
 import { chatThread, otherThread, outsideThread, threadKey, elsewhereNote } from './chat-thread';
-import {coreWhatsAppPublish,coreWhatsAppSelf} from './core-whatsapp-watch';
+import {coreWhatsAppPublish,coreWhatsAppReceipt,coreWhatsAppSelf} from './core-whatsapp-watch';
 import {coreGmail} from './core-gmail';
 import {loadCallEngagement} from './call-engagement';
 import {naturalTurn,naturalSelection} from './core-natural-turn';
@@ -7930,7 +7930,12 @@ async function composeSpontaneousNudge(feedback: Map<string, NudgeFeedback>, for
   if (!selected) return null;
   const subject = selected.subject;
   if (process.env.HARU_CORE_WHATSAPP_WATCH === 'on' && subject.key.startsWith('wa-reply:')) {
-    await coreWhatsAppPublish(subject.key, () => ({ at: Date.now(), blocked: Boolean(whyNotInterject()), asleep: herAsleepNow(), quiet: inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE)), awake: theyAreUpNow(), prefs: getPush().prefs }), plan => applyRemainingPlan(remainingStore(app.getPath('userData')), plan));
+    const published = await coreWhatsAppPublish(subject.key, () => ({ at: Date.now(), blocked: Boolean(whyNotInterject()), asleep: herAsleepNow(), quiet: inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE)), awake: theyAreUpNow(), prefs: getPush().prefs }), plan => applyRemainingPlan(remainingStore(app.getPath('userData')), plan));
+    // 4650: the reminder goes to his phone through Apple, never to his WhatsApp self chat (user 2026-10-22).
+    if (published?.published && typeof published.line === 'string' && typeof published.grant === 'string') {
+      const reached = await pushThroughApple('random', published.line, '/', 'haru-random', published.grant);
+      await coreWhatsAppReceipt(published.grant, reached > 0 ? 'delivered' : 'failed');
+    }
     return null;
   }
   let delivery: ReturnType<typeof chooseNudgeDelivery> = null!;
@@ -10270,7 +10275,7 @@ function webDeps(): WebDeps {
       if (!whatsAppConfig().enabled) return;
       const message = readHeard(body);
       if (!message) return;
-      if (!isForHer(message)) {
+      { // 4650: never a turn: she reads WhatsApp, she does not answer on it (user 2026-10-22).
         // Not a turn: she is reading over his shoulder, not sitting in Sam's
         // conversation. It goes into the window a Tier 1 pass reads later.
         const line = asOverheard(message);
@@ -10280,9 +10285,6 @@ function webDeps(): WebDeps {
         console.log(`[whatsapp] overheard in an allowed chat — ${line.slice(0, 80)}`);
         return;
       }
-      whatsAppTurn = whatsAppTurn
-        .then(() => answerOnWhatsApp(message))
-        .catch(error => console.error('[whatsapp] a turn failed: ' + (error instanceof Error ? error.message : String(error))));
     },
   };
 
