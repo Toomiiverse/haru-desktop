@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {markTurn,currentTurn} from './turn-timing';
 import {coreServiceOptions} from './core-service-client';
-const LIMIT=2097152;
+const LIMIT=8388608;   // 4760: the own-time read and the desktop activity merge passed 2 MB (activity 964 KB + dreams 695 KB); knowledge ops were already here
 let worker:Worker|undefined;
 // One caller blocks synchronously until the worker has completed its write.
 // Reuse that worker's transport buffers, never its decisions or authority.
