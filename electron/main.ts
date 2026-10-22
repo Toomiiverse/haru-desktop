@@ -7726,8 +7726,10 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
       if (result.gone) {
         saveApnsDevices(getApns().devices.filter(d => d.token !== device.token));
         console.log(`[push] "${device.name}" is gone from Apple — dropped its token`);
+        console.log('[core-nudge] '+JSON.stringify({op:'apple',status:result.status,reason:'gone'}));
       } else if (result.status !== 200) {
         console.warn(`[push] Apple refused for "${device.name}": ${result.status} ${result.reason ?? ''}`.trim());
+        console.log('[core-nudge] '+JSON.stringify({op:'apple',status:result.status,reason:result.reason??null}));
         if (result.status === 403) apnsBearer = null;
       } else {
         delivered += 1;
@@ -7737,6 +7739,7 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
     } catch (error) {
       onUnknown?.();
       console.warn('[push] could not reach Apple:', error instanceof Error ? error.message : error);
+      console.log('[core-nudge] '+JSON.stringify({op:'apple',status:0,reason:'unreachable'}));
     }
   }
   return delivered;
@@ -7745,23 +7748,29 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
 async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather' | 'followup', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string, nudge?: { id: string; expiresAt: number; scheduled?: boolean }, urgent = false, asideContext?: { source: AsideSource; opportunityPresent: boolean }): Promise<boolean> {
   const { devices } = getPush();
   const deliveryKey = nudge?.id ?? `random:${Date.now()}:${Math.random()}`;
+  const spontaneous=kind==='random'&&!nudge?.scheduled;
   const capture = () => {
     const { prefs } = getPush();
     return {kind,id:deliveryKey,state:getPhoneNudges(),prefs:{enabled:prefs[kind],held:prefs.held,quietFrom:prefs.quietFrom,quietTo:prefs.quietTo},
       hasDevices:Boolean(getPush().devices.length||getApns().devices.length),force,urgent,scheduled:Boolean(nudge?.scheduled),
-      momentBlocked:(corePolicySync<boolean>('publication.deliveryBlocked',[publicationSnapshot()])),
+      // 4730: only a spontaneous push asks the moment; a scheduled one (her goodnight) must not trip the fence when its own announcement flips it.
+      momentBlocked:spontaneous&&corePolicySync<boolean>('publication.deliveryBlocked',[publicationSnapshot()]),
       fromAside:Boolean(asideContext),userAwake:theyAreUpNow(),opportunityRequired:Boolean(asideContext&&['idle','thought','hanging'].includes(asideContext.source)),
       opportunityPresent:Boolean(asideContext?.opportunityPresent),lastReachedAt:getPush().lastReachedAt,expiresAt:nudge?.expiresAt??null};
   };
   const before=capture(),clockMinute=Math.floor(Date.now()/60000);
+  // 4730: why a push did not go out, in the journal (the brain's own log is discarded); no words in it.
+  const refused=(reason:string)=>{console.log('[core-nudge] '+JSON.stringify({op:'reserve',kind,source:asideContext?.source??null,reason}));return false;};
   let decision;
   try { decision=await coreReserveDelivery(before,Date.now()); }
-  catch { console.log('[core-nudge] '+JSON.stringify({op:'reserve',reason:'admission_unavailable'})); return false; }
-  if(!decision.allowed||Math.floor(Date.now()/60000)!==clockMinute||!sameCoreDelivery(before,capture())||nudge&&nudge.expiresAt<=Date.now()&&kind==='random'&&!nudge.scheduled&&!force)return false;
+  catch { return refused('admission_unavailable'); }
+  if(!decision.allowed)return refused(decision.reason);
+  if(Math.floor(Date.now()/60000)!==clockMinute)return refused('minute_rolled');
+  if(!sameCoreDelivery(before,capture()))return refused('state_changed');
+  if(nudge&&nudge.expiresAt<=Date.now()&&spontaneous&&!force)return refused('expired');
   // No await between the fresh-state fence and durable reservation. Racing grants lose this fence.
   const deliveryId=decision.id;
   if(deliveryId)store.set('chat.phoneNudges',decision.state);
-  const spontaneous=kind==='random'&&!nudge?.scheduled;
   let uncertain=false;
   const finish=async (sent:boolean) => {
     if(deliveryId&&!sent&&uncertain) {
@@ -7786,7 +7795,8 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather' | 'f
   let web = 0;
   // How many copies went out, in one line: two Apple tokens and three web
   // subscriptions all named "iPhone" were each taking every push (2026-09-06).
-  const readout = () => console.log(`[push] ${JSON.stringify(text.slice(0, 40))} went to ${apple} Apple token(s) and ${web} web subscription(s)`);
+  const readout = () => { console.log(`[push] ${JSON.stringify(text.slice(0, 40))} went to ${apple} Apple token(s) and ${web} web subscription(s)`);
+    console.log('[core-nudge] '+JSON.stringify({op:'sent',kind,source:asideContext?.source??null,apple,web})); };
   if (!devices.length) { readout(); return finish(delivered); }
   let keys: ReturnType<typeof vapidKeys>;
   try { keys=vapidKeys(); } catch { return finish(delivered); }

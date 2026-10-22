@@ -154,7 +154,7 @@ export type CoreDeliveryInput = {
   lastReachedAt:number; expiresAt:number|null;
 };
 export const sameCoreDelivery = (before:CoreDeliveryInput,after:CoreDeliveryInput) => JSON.stringify(before)===JSON.stringify(after);
-export async function coreReserveDelivery(input:CoreDeliveryInput,now:number):Promise<{allowed:boolean;state:PhoneNudgeState;id:string|null}> {
+export async function coreReserveDelivery(input:CoreDeliveryInput,now:number):Promise<{allowed:boolean;state:PhoneNudgeState;id:string|null;reason:string}> {
   
   const r=await request('delivery','reserve',now,input);
   const reasons=['no_devices','preference','quiet','no_opportunity','user_asleep','breather','moment_blocked','expired','duplicate','daily_cap','spacing','deliver','reserved'];
@@ -162,13 +162,13 @@ export async function coreReserveDelivery(input:CoreDeliveryInput,now:number):Pr
     ||r.allowed!==['deliver','reserved'].includes(r.reason))throw Error('core_nudge_protocol_error');
   if(!r.allowed||r.reason==='deliver') {
     if(r.reservation!==null)throw Error('core_nudge_protocol_error');
-    return {allowed:r.allowed,state:input.state,id:null};
+    return {allowed:r.allowed,state:input.state,id:null,reason:r.reason};
   }
   const d=r.reservation;
   if(!d||d.id!==input.id||d.at!==now||d.status!=='pending'||!/^\d{4}-\d{2}-\d{2}$/.test(d.day)
     ||!Number.isInteger(d.hour)||d.hour<0||d.hour>23||Object.keys(d).sort().join(',')!=='at,day,hour,id,status'
     ||input.kind!=='random'||input.scheduled||input.force||input.state.deliveries.some(d=>d.id===input.id))throw Error('core_nudge_protocol_error');
-  return {allowed:true,state:{...input.state,deliveries:[...input.state.deliveries,d].slice(-300)},id:input.id};
+  return {allowed:true,state:{...input.state,deliveries:[...input.state.deliveries,d].slice(-300)},id:input.id,reason:r.reason};
 }
 export async function coreFinishDelivery(state:PhoneNudgeState,id:string,sent:boolean,now:number) {
   
