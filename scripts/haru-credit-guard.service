@@ -1,0 +1,7 @@
+[Unit]
+Description=Check her paid services' credit and warn his phone when one is low or out
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /home/toomii/haru-desktop/scripts/haru-credit-guard.mjs

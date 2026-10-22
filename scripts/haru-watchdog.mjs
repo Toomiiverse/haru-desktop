@@ -25,19 +25,13 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { EMPTY_LIVENESS, probeOutcome, readLivenessFile, writeLivenessFile, unreachableMessage } = require('../dist-electron/liveness.js');
-const apns = require('../dist-electron/apns.js');
+import { liveConfig as config, alert, DRY } from './haru-alert.mjs';
 
 const DOOR = process.env.HARU_WATCHDOG_DOOR || 'http://127.0.0.1:8787/api/health';
-const CONFIG = process.env.HARU_CONFIG || path.join(homedir(), '.config', 'haru-desktop', 'config.json');
 const STATE_FILE = process.env.HARU_LIVENESS_FILE || undefined;
-const DRY = process.env.HARU_WATCHDOG_DRY === '1';
 const SERVICE = process.env.HARU_WATCHDOG_SERVICE || 'haru.service';
 if (!['haru.service', 'haru-core-python.service'].includes(SERVICE)) throw Error('invalid_watchdog_service');
 const PROBE_TIMEOUT_MS = 5_000;
-
-function config() {
-  try { return JSON.parse(readFileSync(CONFIG, 'utf8')); } catch { return {}; }
-}
 
 function serviceActive() {
   try { return execFileSync('systemctl', ['--user', 'is-active', SERVICE], { encoding: 'utf8' }).trim() === 'active'; }
@@ -65,29 +59,6 @@ async function doorAnswers() {
 
 function webDoorEnabled(c) {
   return Boolean(c && c.webAccess && c.webAccess.enabled && c.webAccess.hash);
-}
-
-/** One line to every phone that asked. The 'system' switch can refuse it; the
- *  quiet hours cannot — an outage is not a nudge (the same rule the app keeps). */
-async function alert(text) {
-  const c = config();
-  if (c?.push?.prefs?.system === false) { console.log('[watchdog] system pushes are off — not alerting'); return; }
-  const conf = apns.readApnsConfig(c.apns);
-  const devices = apns.readApnsDevices(c.apns?.devices);
-  if (!conf || !devices.length) { console.warn('[watchdog] nothing to alert with — no APNs device configured'); return; }
-  if (DRY) { console.log(`[watchdog] DRY would alert: ${text}`); return; }
-  const jwt = apns.apnsSigner(conf)();
-  const payload = apns.apnsPayload('Haru 🌸', text, '/', 'haru-system', { kind: 'system' });
-  for (const device of devices) {
-    try {
-      // One collapse id, so a long outage is a single notification that stays
-      // where he last looked rather than a stack of the same line.
-      const result = await apns.sendApns(device, payload, conf, jwt, 'haru-system');
-      console.log(`[watchdog] alert to "${String(device.name).slice(0, 40)}": ${result.status}${result.reason ? ` ${result.reason}` : ''}`);
-    } catch (error) {
-      console.warn('[watchdog] could not reach Apple:', error instanceof Error ? error.message : error);
-    }
-  }
 }
 
 const now = Date.now();

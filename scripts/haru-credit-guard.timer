@@ -1,0 +1,11 @@
+[Unit]
+Description=Check her paid services' credit every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=1min
+Unit=haru-credit-guard.service
+
+[Install]
+WantedBy=timers.target
