@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {
   readEviConfig, DEFAULT_EVI, sessionSettingsFor, newSessionId, deviceFromSession, audioInput,
   relay, clmTurnFrom, withoutExpressionNote, sseChunk, sseStop, SSE_DONE, secondsUsedToday, noteUsage, underCap,
-  callAside, CALL_ASIDE, spokenReply,
+  callAside, CALL_ASIDE, CAR_ASIDE, spokenReply,
 } from '../electron/evi';
 import { INTERRUPTED_ASIDE } from '../electron/wake';
 import { openEviSession } from '../electron/evibridge';
@@ -136,6 +136,13 @@ test('a call turn asks for spoken sentences, and says so after being cut off too
   assert.ok(callAside(true).endsWith(CALL_ASIDE));
   // Nothing in the aside she could say back as a line of her own.
   assert.doesNotMatch(CALL_ASIDE, /["“”]/);
+});
+
+test('a call turn from the car adds the driving aside after the call one', () => {
+  assert.equal(callAside(false, true), CALL_ASIDE + ' ' + CAR_ASIDE);
+  assert.ok(callAside(true, true).startsWith(INTERRUPTED_ASIDE));
+  assert.ok(callAside(true, true).endsWith(CAR_ASIDE));
+  assert.doesNotMatch(CAR_ASIDE, /["“”]/);
 });
 
 // -- the cap -----------------------------------------------------------------------------

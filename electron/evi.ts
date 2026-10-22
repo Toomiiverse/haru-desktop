@@ -133,8 +133,14 @@ export function relay(event: unknown): Record<string, unknown> | null {
  */
 export const CALL_ASIDE = 'They are on a voice call with you: what you say is spoken aloud, not read. Answer the way you would out loud — one or two short sentences, then let them talk. No lists, no headings, no emoji, nothing typed like a message. Ask one thing at a time.';
 
-export function callAside(interrupted: boolean): string {
-  return [interrupted ? INTERRUPTED_ASIDE : '', CALL_ASIDE].filter(Boolean).join(' ');
+/**
+ * 4700: added while the phone's car screen is in a conversation (core-ios drivingNow). The spoken drive
+ * briefing that used to say this went with iOS 5717883, so she answered a driver like a phone call.
+ */
+export const CAR_ASIDE = 'They are driving: you are on the car speakers through CarPlay and they cannot look at a screen, so keep it to a sentence or two and never send them to the phone. If they want to go somewhere and ios_maps is on offer, call it with the destination; the route then waits behind a Navigate button on the car screen, so tell them to tap it when it is safe.';
+
+export function callAside(interrupted: boolean, driving = false): string {
+  return [interrupted ? INTERRUPTED_ASIDE : '', CALL_ASIDE, driving ? CAR_ASIDE : ''].filter(Boolean).join(' ');
 }
 
 /** The reply as it should be said: markdown, links and emoji off, initialisms kept, shouting lowered. */

@@ -1,6 +1,6 @@
 import core_speaker_1 = require("./core-speaker");
 import {configureAffect,affectTurn,currentAffect,admitAffect,affectOutcome,affectDelivery,readAffectSettings,saveAffectSettings} from './core-affect';
-import {withIOSOrigin} from './core-ios';
+import {withIOSOrigin,drivingNow} from './core-ios';
 import { chatThread, otherThread, outsideThread, threadKey, elsewhereNote } from './chat-thread';
 import {coreWhatsAppPublish,coreWhatsAppReceipt,coreWhatsAppSelf} from './core-whatsapp-watch';
 import {coreGmail} from './core-gmail';
@@ -9579,7 +9579,7 @@ function webDeps(): WebDeps {
         hands: false,
         web: true,
         away: 'it came in from the phone',
-        ...(options?.call ? { aside: callAside(Boolean(options.interrupted)), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
+        ...(options?.call ? { aside: callAside(Boolean(options.interrupted), drivingNow()), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         ...(options?.onActed ? { onActed: options.onActed } : {}),
         ...(options?.repeated ? { repeated: options.repeated } : {}),
