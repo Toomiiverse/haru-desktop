@@ -65,6 +65,23 @@ test('driving: a tool call stands the car wait down', async () => {
   } finally { car('ready'); mock.timers.reset(); }
 });
 
+test('driving: a hold for road noise ends at 3 s', async () => {
+  try {
+    car('listening');
+    const h = call(['what is the status', '']);
+    h.feed(0.002, 600); h.feed(0.3, 800); h.feed(0.002, 900);   // his words end; recognition is in flight
+    h.feed(0.3, 200); await settle();                             // noise again before the words land: the turn is held
+    assert.ok(h.lines.some(l => l.includes('they are still talk')), h.lines.join('\n'));
+    assert.equal(h.asked.length, 0, 'held');
+    h.feed(0.3, 2000); await settle();                            // the noise never stops
+    assert.equal(h.asked.length, 0, 'still held under 3 s');
+    h.feed(0.3, 1200); await settle();
+    assert.equal(h.asked.length, 1, 'answered at 3 s despite the noise');
+    assert.ok(h.lines.some(l => l.includes('[call-hold]') && l.includes('"outcome":"timeout"')));
+    h.c.close('test');
+  } finally { car('ready'); }
+});
+
 test('parked: no car wait', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
   try {

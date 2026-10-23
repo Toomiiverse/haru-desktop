@@ -49,6 +49,7 @@ const HER_LINES_KEPT = 3;
 const SMALL_WORDS = new Set(['the', 'and', 'you', 'your', 'that', 'this', 'for', 'with', 'are', 'was', 'but', 'not', 'have', 'its', "it's", "i'm", 'just', 'like', 'what', 'yeah', 'okay']);
 /** How long a sentence that reads as unfinished waits for its other half. */
 export const UNFINISHED_HOLD_MS = 700;
+export const CAR_HOLD_MS = 3000;   // 4810: in the car the 'still talking' hold ends here; road noise kept the VAD out of quiet for 12.4 s on 10-23
 /**
  * After the first sentence, which goes out at once for the sake of the wait,
  * the rest of a reply is voiced in stretches of about this many characters,
@@ -347,7 +348,8 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         : prepare()).catch(() => null).finally(() => {item.settled=true;});
       preparation = item;
     }
-    if (pending && holdUntil && !transcribing && !vad.possibleSpeech() && t >= holdUntil && !event) {
+    const carHoldOver = holdStarted?.reason==='still_talking' && drivingNow() && now()-holdStarted.at>=CAR_HOLD_MS;
+    if (pending && holdUntil && !transcribing && (carHoldOver || !vad.possibleSpeech() && t >= holdUntil) && !event) {
       // Nothing more came: the half they said is the whole of it.
       const text = pending;
       const timing = pendingTiming;
