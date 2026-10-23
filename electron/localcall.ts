@@ -29,6 +29,7 @@ import { looksUnfinished } from './call';
 import { completeNaturalUtterance } from './natural-conversation';
 import {randomUUID} from 'node:crypto';
 import type {CallEngagement, ReactionCommand, ReactionClip} from './call-engagement';
+import {drivingNow} from './core-ios';
 
 /** The phone's rate; what its ear already makes. */
 export const CALL_RATE = 16_000;
@@ -451,11 +452,11 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   }
 
   /** They started talking. Over her, that is an interruption; over her thinking, the reply will not be voiced. */
-  function spokeOver(source:'onset'|'probe'|'final'|'commit') {
+  function spokeOver(source:'onset'|'probe'|'final'|'commit', words?:string) {
     // 3750: a reaction clip is not her reply: it stops, and talking over it is no interruption (her answer was told it was).
     const action=(phoneHearsHer&&!reactionAudible) || (sending&&!activeReaction) || (activeSpeech&&!activeReaction) || queue.some(line=>!line.reaction) || (thinking && spokeThisTurn) ? 'interrupt' : thinking && source!=='onset' ? 'preempt' : null;   // 4040: a sound alone no longer cancels her pending answer; words do (commit). 10-16 call 1 lost 6 turns this way with recognition off
     stopReaction();
-    if(action)log('[call-overlap] '+JSON.stringify({callId,source,action,repeat:action==='interrupt'&&interrupted}));
+    if(action)log('[call-overlap] '+JSON.stringify({callId,source,action,repeat:action==='interrupt'&&interrupted,...(words?{words:words.slice(0,80)}:{})}));   // 4770: what pre-empted her (10-23 08:23: a commit killed the reply 4 s before he hung up)
     if (action==='interrupt') {
       interrupted = true;
       dropHerVoice();
@@ -545,7 +546,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       commit(text,timing,(corePolicySync<string>('speech-boundary.commandReply',[command])));
       return;
     }
-    spokeOver('commit');   // 4040: words arrived; this is now the only pre-emption when recognition is off (the onset no longer is)
+    spokeOver('commit', text);   // 4040: words arrived; this is now the only pre-emption when recognition is off (the onset no longer is)
     timing.segments += pendingTiming?.segments ?? 0;
     if (pending) holdLine('merged');
     text = pending ? `${pending} ${text}` : text;
@@ -634,6 +635,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       stretch = '';
       if (text) say({ text, emotion: mood, seed, filler: false });
     };
+    // 4770: in the car silence reads as a dead line (10-23 08:00: 18.5 s to her first word, he hung up at 33 s). A holding line
+    // at 8 s; at 16 s (the 4680 retry's own 8 s) she gives the turn up aloud instead of leaving him waiting.
+    const carWait = drivingNow() && !localReply ? [8000, 16000].map((ms, i) => setTimeout(() => {
+      if (generation !== myGeneration || turns !== mine || firstQueuedAt !== null || answering.signal.aborted || closed) return;
+      log(`[call-car-wait] ${JSON.stringify({ callId, turn: mine, ms, action: i ? 'gave up' : 'holding' })}`);
+      if (i) { answering.abort(); say({ text: 'That is taking too long, ask me again in a moment.', emotion: mood, seed, filler: false }); }
+      else { fillerThisTurn = true; say({ text: deps.filler(), emotion: mood, seed, filler: true }); }
+    }, ms)) : [];
     try {
       const answer = localReply ? {reply:localReply,ignored:false} : await deps.answer(text, {
         signal:answering.signal,
@@ -676,6 +685,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         emit({ type: 'error', message: 'She lost her train of thought.' });
       } else log('[call-cancelled] '+JSON.stringify({callId,turn:mine}));
     } finally {
+      for (const t of carWait) clearTimeout(t);
       if(activeAnswer===answering)activeAnswer=null;
       if (turns === mine) {
         thinking = false;
