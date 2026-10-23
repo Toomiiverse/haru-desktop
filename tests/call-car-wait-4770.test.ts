@@ -21,13 +21,14 @@ function call(heard: string[]) {
   const lines: string[] = [], asked: { text: string; signal?: AbortSignal }[] = [], said: string[] = [];
   const deps: LocalCallDeps = {
     hear: async () => heard.shift() ?? '',
-    answer: (text, options) => { asked.push({ text, signal: options.signal }); return new Promise(() => {}); },   // a brain that never answers
+    answer: (text, options) => { asked.push({ text, signal: options.signal }); if (h.toolCall) setImmediate(() => options.onToolCall(h.toolCall!)); return new Promise(() => {}); },   // a brain that never answers
     speak: async (text: string) => { said.push(text); return { stream: new ReadableStream({ start(c) { c.close(); } }), sampleRate: 24000 }; },
     filler: () => 'One sec.', moodNow: () => 'neutral', said: () => {}, now: () => clock, vad: { endAfterMs: 500 }, log: line => lines.push(line),
   };
   const c = openLocalCall({ onEvent: () => {}, onAudio: () => {}, onClose: () => {} }, deps);
   const feed = (level: number, ms: number) => { for (let i = 0; i < ms / FRAME_MS; i++) { c.feed(frame(level)); clock += FRAME_MS; } };
-  return { c, lines, asked, said, feed };
+  const h = { c, lines, asked, said, feed, toolCall: '' as string };
+  return h;
 }
 const car = (state: string) => noteDeviceFrame(JSON.stringify({ type: 'heartbeat', carPlay: state }));
 
@@ -45,6 +46,21 @@ test('driving: a holding line at 8 s, given up aloud at 16 s', async () => {
     assert.ok(h.lines.some(l => l.includes('"action":"gave up"')));
     assert.equal(h.asked[0].signal?.aborted, true, 'the answer was abandoned');
     assert.deepEqual(h.said, ['One sec.', 'That is taking too long, ask me again in a moment.']);
+    h.c.close('test');
+  } finally { car('ready'); mock.timers.reset(); }
+});
+
+test('driving: a tool call stands the car wait down', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    car('listening');
+    const h = call(['search it up', '']);
+    h.toolCall = 'browser_control';
+    h.feed(0.002, 600); h.feed(0.3, 800); h.feed(0.002, 900); await settle();
+    assert.equal(h.asked.length, 1);
+    mock.timers.tick(20000); await settle();
+    assert.ok(!h.lines.some(l => l.includes('[call-car-wait]')), h.lines.join('\n'));
+    assert.equal(h.asked[0].signal?.aborted ?? false, false, 'the tool round runs on');
     h.c.close('test');
   } finally { car('ready'); mock.timers.reset(); }
 });

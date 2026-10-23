@@ -254,6 +254,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   const hers = () => (!reactionAudible && phoneHearsHer) || (!activeReaction && sending) || now() < herEchoUntil;
   function react(event:string) {
     if(!deps.engagement || engagementFailed || closed || !engagementStarted && event!=='ready')return;
+    if(event==='tick'&&drivingNow())return;   // 4800: no 'Hurry up' / 'I'm listening' clips every 6-15 s over the car speakers (10-23: three in 20 s of road silence read as broken speech)
     // 3750: filter on, a refused sound while her brain is on his turn must not end her wait (the waiting filler was lost). Filter off
     // keeps the old event: there the refused sound is usually her filler's own echo, and re-arming it would loop.
     if(event==='hearingRejected'&&deps.speaker?.enabled&&thinking&&!spokeThisTurn)event='thinking';
@@ -638,7 +639,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     // 4770: in the car silence reads as a dead line (10-23 08:00: 18.5 s to her first word, he hung up at 33 s). A holding line
     // at 8 s; at 16 s (the 4680 retry's own 8 s) she gives the turn up aloud instead of leaving him waiting.
     const carWait = drivingNow() && !localReply ? [8000, 16000].map((ms, i) => setTimeout(() => {
-      if (generation !== myGeneration || turns !== mine || firstQueuedAt !== null || answering.signal.aborted || closed) return;
+      if (generation !== myGeneration || turns !== mine || firstQueuedAt !== null || answering.signal.aborted || closed || (!i && fillerThisTurn)) return;
       log(`[call-car-wait] ${JSON.stringify({ callId, turn: mine, ms, action: i ? 'gave up' : 'holding' })}`);
       if (i) { answering.abort(); say({ text: 'That is taking too long, ask me again in a moment.', emotion: mood, seed, filler: false }); }
       else { fillerThisTurn = true; say({ text: deps.filler(), emotion: mood, seed, filler: true }); }
@@ -657,6 +658,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         onActed: () => acted(mine),
         ...(repeated ? { repeated } : {}),   // 3770: the merged words already heard once (counted once, not again)
         onToolCall: name => {
+          for (const t of carWait) clearTimeout(t);   // 4800: a tool round has its own filler and its own time (10-23 09:09: the 16 s give-up killed a browser search)
           acted(mine);   // even after a drop: the tool ran
           if (generation !== myGeneration || turns !== mine) return;
           if(deps.engagement){react('tool');return;}
