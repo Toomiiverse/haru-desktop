@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createVoicePlayer, type Bands } from './companion/mouth';
 import type { EmotionName } from './types';
 import { DEFAULT_VIEW, type Eye, type View } from './portraitRig';
-import { createHairLayer, type HairLayer } from './portraitHair';
+import { createHairLayer, createPlateLayer, headShift, type HairLayer, type Head, type PlateLayer } from './portraitHair';
 import irisSprite from '../build/portrait/iris.png';
 import pupilSprite from '../build/portrait/pupil.png';
 import './portrait.css';
@@ -46,9 +46,24 @@ const irisPoints = (eye: Eye, shape: number[][]) => shape.map(([x, y]) => `${(ey
 // over". The main monitor's centre sits about 2000px to her right.
 const LOOK_RANGE = 1900;
 // Half-lid and pupil width per mood; everything else is open and round.
-const LIDS: Partial<Record<EmotionName, number>> = { sleepy: 0.55, smug: 0.38, annoyed: 0.28, bored: 0.3, happy: 0.12 };
-const DILATE: Partial<Record<EmotionName, number>> = { surprised: 2.2, curious: 1.6, affectionate: 1.5, annoyed: 0.7, determined: 0.7, sleepy: 0.9 };
+const LIDS: Partial<Record<EmotionName, number>> = { sleepy: 0.55, smug: 0.38, annoyed: 0.28, bored: 0.3, happy: 0.12, determined: 0.2, affectionate: 0.18, embarrassed: 0.15, worried: 0.08 };
+const DILATE: Partial<Record<EmotionName, number>> = { surprised: 2.2, curious: 1.6, affectionate: 1.5, worried: 1.3, embarrassed: 1.2, annoyed: 0.7, determined: 0.7, sleepy: 0.9 };
 const BLUSH: Partial<Record<EmotionName, number>> = { embarrassed: 1, affectionate: 0.7, happy: 0.3 };
+// The eye smile (her eyes shut into upward arcs): for SMILE_HOLD_MS when she turns happy or affectionate, and again
+// for SMILE_BEAT_MS on a stressed syllable while she stays so, at most once in SMILE_GAP_MS; she would be blind if it
+// lasted the whole mood. It closes about as fast as a blink and opens a little slower.
+const SMILING: EmotionName[] = ['happy', 'affectionate'];
+const SMILE_HOLD_MS = 1600, SMILE_BEAT_MS = 900, SMILE_GAP_MS = 6000, SMILE_CLOSE_MS = 60, SMILE_OPEN_MS = 140;
+// Her brow per mood, in view px: `up` raises the whole brow, `inner` drops its inner end (toward her nose) while the
+// outer end stays put; a negative inner raises it, the worried slant. A stressed syllable lifts it BROW_EMPHASIS
+// more, thinking BROW_THINK; it eases between them over about BROW_EASE_MS.
+// Only about a fifth of the brow shows between her locks, so the amounts are bold.
+const BROW: Partial<Record<EmotionName, { up: number; inner: number }>> = {
+  annoyed: { up: -6, inner: 26 }, determined: { up: -5, inner: 16 }, surprised: { up: 26, inner: -6 }, curious: { up: 12, inner: -5 },
+  worried: { up: 6, inner: -22 }, embarrassed: { up: 3, inner: -14 }, sleepy: { up: -6, inner: 0 }, bored: { up: -8, inner: 4 },
+  smug: { up: 4, inner: 8 }, happy: { up: 6, inner: -5 }, affectionate: { up: 4, inner: -8 },
+};
+const BROW_EMPHASIS = 6, BROW_THINK = { up: 5, inner: -6 }, BROW_EASE_MS = 220;
 
 // The head's swing: degrees about a pivot 30% of the screen above the top
 // edge, so the face moves ~1% of the screen; period from the recording.
@@ -57,12 +72,52 @@ const SWAY_DEG = 0.5, SWAY_S = 9.2;
 const OVERSCAN = 1.05;
 // How far the face sits from that pivot, in picture px: turns the swing into the hair's lag.
 const FACE_RADIUS = 2176;
+// Her head on top of the sway, on damped springs so it settles with a little give: idle, she shifts into a new
+// small pose (roll, drop, sideways) every HEAD_IDLE_S seconds; talking, she holds a slight tilt to one side while
+// explaining, nods a little on a stressed syllable (her compressed voice stresses most of them, so at most one nod
+// every NOD_GAP_MS), and turns a touch with her eyes when she glances aside. The roll pivots at her face (HEAD_PIVOT
+// of the frame's height below the sway's pivot), not at the sway's pivot above the screen.
+const HEAD_IDLE_S = [5, 11], HEAD_IDLE = { roll: 0.6, drop: 5, side: 8 };
+const HEAD_TALK_ROLL = 0.2, HEAD_GLANCE = { roll: 0.2, side: 5 }, HEAD_NOD = { drop: 12, roll: 0.3 }, NOD_GAP_MS = 1800;
+const HEAD_SPRING = { omega: 2.4, damping: 0.8 }, HEAD_PIVOT = 0.85;
+type Spring = { x: number; v: number };
+/** Moves a damped spring toward `target` over `dt` seconds. */
+function spring(p: Spring, target: number, dt: number) {
+  const { omega, damping } = HEAD_SPRING;
+  p.v += (omega * omega * (target - p.x) - 2 * damping * omega * p.v) * dt;
+  p.x += p.v * dt;
+}
 
 // The blink: the band drops fast and speeds up as it goes, rests shut a moment, and lifts slower, easing out at
 // the top, like a real blink; now and then a double, the second starting 0.2 s after the first reopens.
 const BLINK = { close: 120, hold: 70, open: 260 };
 const BLINK_MS = BLINK.close + BLINK.hold + BLINK.open;
 const DOUBLE_BLINK = 0.35, DOUBLE_GAP = 200;
+// While she talks her eyes follow it: once she has been talking a while (explaining) they settle into a narrower,
+// focused look, opening back up on a stressed syllable with the pupils widening; she tends to blink in the pause
+// between phrases, and now and then glances aside, up and away from you, as she starts a new thought.
+// A stressed syllable: the level jumps from under EMPHASIS_FROM to over EMPHASIS_TO within EMPHASIS_RISE_MS.
+const TALK_LID = 0.2, TALK_SETTLE_MS = 1500, EMPHASIS_MS = 450, EMPHASIS_DILATE = 0.3;
+const EMPHASIS_FROM = 0.8, EMPHASIS_TO = 0.97, EMPHASIS_RISE_MS = 220;
+const PHRASE_PAUSE_MS = 150, PHRASE_BLINK = 0.55, BLINK_SPACING_MS = 1200;
+const GLANCE = 0.3, GLANCE_MS = [350, 800];
+// Between conversations she behaves like someone in it. While her reply is being written she thinks: eyes up and
+// away from you, drifting in small saccades, lids a touch lower, head tilted toward where she looks and chin up a
+// little. At a full stop she often looks off the same way for the pause. Idle, she looks around now and then
+// before coming back to you. Look targets are gaze positions (-1..1 across the main monitor's direction).
+const THINK = { x: 0.5, y: -0.35, lid: 0.12, chin: -4, saccade: 0.08, saccadeMs: [700, 1500] };
+const STOP_THINK = 0.6, STOP_LOOK_EXTRA_MS = 250;
+const LOOK_AROUND_S = [7, 16], LOOK_AROUND_MS = [800, 2200], LOOK_AROUND = { x: 0.7, up: 0.35, down: 0.3 };
+// Her head turns (yaw) and nods (pitch) like a Live2D model's: the one drawing, warped as if painted on a rounded
+// head (see portraitHair.ts), so the style never changes. In radians. It turns a little toward you wherever you
+// are, and further toward wherever her eyes go away from you (a glance, looking around, thinking), the eyes
+// leading and the head following on its spring; idle poses and the explaining tilt add a little, and a stressed
+// syllable nods it. Past about 13 degrees the warp starts to crowd her far cheek, hence the limits.
+const YAW = { cursor: 0.06, look: 0.1, idle: 0.05, talk: 0.02, max: 0.22 };
+const PITCH = { cursor: 0.03, look: 0.06, idle: 0.03, think: -0.06, max: 0.14, nod: 0.15 };
+// The hair lags the turn: its tips trail by this share of the head's movement and catch up over HAIR_LAG_MS.
+// The locks are measured in the picture's own px (haru-closeup.webp is 1440 wide).
+const HAIR_SWING = 0.8, HAIR_LAG_MS = 350, PICTURE_PX = 1440;
 const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 /** How shut a blink that started `t` ms ago has the eye, 0..1. */
 function blinkShape(t: number) {
@@ -83,6 +138,15 @@ const MOUTH_CANVAS = { w: 269, h: 277 };
 const SPEAK = ['M_01', 'M_30', 'M_29', 'M_27', 'M_31', 'M_39'];
 const SPEAK_SIZE = [1, 0.48, 0.48, 0.5, 0.55, 0.55];
 const MOUTH = { closed: 0, slit: 1, mid: 2, wide: 3, round: 4, roundSmall: 5 } as const;
+// Between words her mouth rests in her mood: a closed fanged smile, a smirk, a grimace, gritted teeth, a flat line,
+// a small o, a soft smile, a wavy line, a pout, a cat mouth; neutral keeps the drawn line. Each with its size, as above.
+const REST: Partial<Record<EmotionName, [string, number]>> = {
+  happy: ['M_28', 0.5], smug: ['M_19', 0.5], annoyed: ['M_24', 0.5], determined: ['M_36', 0.5], bored: ['M_30', 0.5], sleepy: ['M_30', 0.5],
+  surprised: ['M_09', 0.8], affectionate: ['M_14', 0.55], embarrassed: ['M_11', 0.6], worried: ['M_18', 0.6], curious: ['M_35', 0.6],
+};
+// Shapes the talking set already has are shared with it (bored's flat line is the talking slit).
+const REST_SHAPES = [...new Map(Object.values(REST).filter(([name]) => !SPEAK.includes(name)).map(([name, size]) => [name, size]))];
+const SHAPES = [...SPEAK, ...REST_SHAPES.map(([name]) => name)], SHAPE_SIZE = [...SPEAK_SIZE, ...REST_SHAPES.map(([, size]) => size)];
 const MOUTH_ANCHOR = { x: 139, y: 81 };
 // Her synthesised voice is compressed, so its level sits near the top most of a line: the shape goes by the level
 // relative to how loud she has been over the last LOUD_S seconds (rising at once, never below LOUD_FLOOR). The
@@ -123,6 +187,7 @@ const MOUTH_HOLD_MS = 70, MOUTH_FADE_MS = 18;
 // The voice level opens the mouth quickly and lets it close more slowly (per-frame easing at 60 fps).
 const MOUTH_ATTACK = 0.5, MOUTH_RELEASE = 0.22;
 
+
 const clamp = (v: number, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 type Panel = { id: number; title: string; body: string; image: string; seconds: number };
 
@@ -138,22 +203,41 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
   const cursor = useRef({ x: 0, y: 0 });
   const mood = useRef<EmotionName>('neutral');
   const sleeping = useRef(false);
+  const thinkingSince = useRef(0);
   const svg = useRef<SVGSVGElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const hair = useRef<HairLayer | null>(null);
+  const plateCanvas = useRef<HTMLCanvasElement>(null);
+  const plate = useRef<PlateLayer | null>(null);
   // The plate replaces the picture only once the hair layer is drawing; until
-  // then (or without WebGL) the painted-on hair stays.
+  // then (or without WebGL) the painted-on hair stays. Her head turns only once
+  // the plate is drawn by its own (warping) layer too.
   const [hairReady, setHairReady] = useState(false);
+  const [plateReady, setPlateReady] = useState(false);
+  // The head ellipse as fractions of the picture, which is what the layers warp in.
+  const headUv = useMemo<Head | undefined>(() => {
+    if (!view.head) return undefined;
+    const [fx, fy, fw, fh] = view.frame, [cx, cy, rx, ry] = view.head;
+    return [(cx - fx) / fw, (cy - fy) / fh, rx / fw, ry / fh];
+  }, [view]);
   useEffect(() => {
     if (!view.hair || !canvas.current) return;
     let live = true;
-    void createHairLayer(canvas.current, { image: view.image, mask: view.hair.mask, locks: view.hair.locks, kink: view.hair.kink }).then(layer => {
+    void createHairLayer(canvas.current, { image: view.image, mask: view.hair.mask, locks: view.hair.locks, kink: view.hair.kink, head: headUv }).then(layer => {
       if (!live) { layer?.dispose(); return; }
       hair.current = layer; setHairReady(!!layer);
     });
-    return () => { live = false; hair.current?.dispose(); hair.current = null; setHairReady(false); };
-  }, [view]);
+    if (view.head && headUv && plateCanvas.current) void createPlateLayer(plateCanvas.current, view.hair.plate, headUv).then(layer => {
+      if (!live) { layer?.dispose(); return; }
+      plate.current = layer; setPlateReady(!!layer);
+    });
+    return () => {
+      live = false;
+      hair.current?.dispose(); hair.current = null; setHairReady(false);
+      plate.current?.dispose(); plate.current = null; setPlateReady(false);
+    };
+  }, [view, headUv]);
 
   useEffect(() => {
     const player = createVoicePlayer();
@@ -161,38 +245,113 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       window.haru?.voice.onClip(clip => player.play(clip)),
       window.haru?.voice.onStop(() => player.stop()),
       window.haru?.companion.onSay(setCaption),
+      window.haru?.companion.onThinking(on => { thinkingSince.current = on ? performance.now() : 0; }),
       window.haru?.companion.onCursor(({ x, y }) => { cursor.current = { x: clamp((x - window.innerWidth / 2) / LOOK_RANGE), y: clamp((y - window.innerHeight / 2) / LOOK_RANGE) }; }),
-      window.haru?.life.onEmotion(({ emotion }) => { mood.current = emotion.emotion; }),
+      window.haru?.life.onEmotion(({ emotion }) => {
+        if (SMILING.includes(emotion.emotion) && !SMILING.includes(mood.current)) smileUntil = performance.now() + SMILE_HOLD_MS;
+        mood.current = emotion.emotion;
+      }),
       window.haru?.life.onTick(({ vitals, action, night }) => { sleeping.current = action === 'doze' || (night && vitals.sleepiness > 0.85); }),
     ];
     const gaze = { x: 0, y: 0 };
     let lid = 0, restLid = 0, blinks: number[] = [], nextBlink = performance.now() + 3000, mouth = 0, dilate = 1;
     let mouthShown = 0, mouthAt = 0, last = performance.now(), loud = LOUD_FLOOR;
-    const mouthAlpha: number[] = SPEAK.map((_, k) => (k === 0 ? 1 : 0));
+    let talkingSince = 0, pausedSince = 0, pauseHandled = false, emphasis = 0, rel = 0, lowAt = 0, lastNod = 0;
+    // Where her eyes go instead of to you, and until when: an offset from you, or (absolute) a place of its own.
+    const glance = { x: 0, y: 0, until: 0, absolute: false };
+    let nextLook = performance.now() + 6000, nextSaccade = 0, lastPause: string | undefined;
+    const lookAt = (x: number, y: number, until: number) => Object.assign(glance, { x, y, until, absolute: true });
+    // Up and away from where you are: the side her thinking goes to.
+    const awaySide = () => (cursor.current.x > 0 ? -1 : 1);
+    const head = { roll: { x: 0, v: 0 }, drop: { x: 0, v: 0 }, side: { x: 0, v: 0 }, yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };
+    const idlePose = { roll: 0, drop: 0, side: 0, yaw: 0, pitch: 0, next: performance.now() + 4000 };
+    let talkSide = 1, hairRoll = 0, hairYaw = 0, smileUntil = 0, smile = 0;
+    const brow = { up: 0, inner: 0 };
+    const mouthAlpha: number[] = SHAPES.map((_, k) => (k === 0 ? 1 : 0));
     let raf = 0;
     const still = matchMedia('(prefers-reduced-motion: reduce)');
     const swing = (s: number) => Math.sin(2 * Math.PI * s / SWAY_S) + 0.25 * Math.sin(2 * Math.PI * s / 13.7 + 1);
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const now = performance.now(), dt = Math.min(100, now - last);
+      const now = performance.now(), dt = Math.min(100, now - last), motion = still.matches ? 0 : 1;
       last = now;
       const root = svg.current;
       if (!root) return;
+      const reading = player.read();
+      const voice = reading.open * reading.weight;
+      mouth += (voice - mouth) * (1 - (1 - (voice > mouth ? MOUTH_ATTACK : MOUTH_RELEASE)) ** (dt / 16.7));
+      loud = Math.max(mouth, loud * Math.exp(-dt / (LOUD_S * 1000)), LOUD_FLOOR);
+      rel = mouth / loud;
+      if (rel < EMPHASIS_FROM) lowAt = now;
+      // How she talks, for the eyes: how long she has been at it, the pauses between phrases, stressed syllables.
+      const talking = reading.weight > 0.5, shut = mouth < SHUT || rel < CLOSED;
+      if (!talking) talkingSince = pausedSince = 0;
+      else {
+        if (!talkingSince) { talkingSince = now; talkSide = Math.random() < 0.5 ? -1 : 1; }
+        if (shut) {
+          pausedSince ||= now;
+          if (!pauseHandled && now - pausedSince > PHRASE_PAUSE_MS) {
+            pauseHandled = true;
+            if (Math.random() < PHRASE_BLINK && now - (blinks[blinks.length - 1] ?? 0) > BLINK_SPACING_MS + BLINK_MS) {
+              blinks = [now];
+              nextBlink = now + BLINK_MS + 2500 + Math.random() * 3000;
+            }
+          }
+        } else {
+          if (pauseHandled && Math.random() < GLANCE) {
+            const away = cursor.current.x > 0 ? -1 : 1;
+            Object.assign(glance, { x: away * (0.3 + 0.2 * Math.random()), y: -(0.1 + 0.15 * Math.random()), absolute: false });
+            glance.until = now + GLANCE_MS[0] + Math.random() * (GLANCE_MS[1] - GLANCE_MS[0]);
+          }
+          pausedSince = 0; pauseHandled = false;
+        }
+      }
+      if (talking && rel > EMPHASIS_TO && lowAt && now - lowAt < EMPHASIS_RISE_MS) {
+        emphasis = 1; lowAt = 0;
+        if (SMILING.includes(mood.current) && now - (smileUntil - SMILE_BEAT_MS) > SMILE_GAP_MS) smileUntil = now + SMILE_BEAT_MS;
+        if (now - lastNod >= NOD_GAP_MS) {
+          lastNod = now;
+          head.drop.v += HEAD_NOD.drop * motion;
+          head.roll.v += HEAD_NOD.roll * talkSide * motion;
+          head.pitch.v += PITCH.nod * motion;
+        }
+      }
+      emphasis = Math.max(0, emphasis - dt / EMPHASIS_MS);
+      const talkLid = talkingSince ? TALK_LID * smooth((now - talkingSince) / TALK_SETTLE_MS) * (1 - emphasis) : 0;
+      // Thinking (her reply being written), the pause at a full stop, looking around while idle.
+      if (talking) thinkingSince.current = 0;
+      const thinking = thinkingSince.current > 0 && now - thinkingSince.current < 60_000;
+      if (thinking) {
+        if (now >= nextSaccade || glance.until < now) {
+          const side = glance.until > now && glance.absolute ? Math.sign(glance.x) || awaySide() : awaySide();
+          const jitter = () => (Math.random() * 2 - 1) * THINK.saccade;
+          lookAt(side * THINK.x + jitter(), THINK.y + jitter(), now + 60_000);
+          nextSaccade = now + THINK.saccadeMs[0] + Math.random() * (THINK.saccadeMs[1] - THINK.saccadeMs[0]);
+        }
+      } else if (glance.absolute && glance.until - now > 30_000) glance.until = now;
+      if (reading.pause === 'stop' && lastPause !== 'stop' && Math.random() < STOP_THINK)
+        lookAt(awaySide() * THINK.x * (0.7 + 0.3 * Math.random()), THINK.y * (0.6 + 0.4 * Math.random()), now + 380 + STOP_LOOK_EXTRA_MS);
+      lastPause = reading.pause;
+      if (!talking && !thinking && !sleeping.current && now >= nextLook && now >= glance.until) {
+        const up = Math.random() < 0.5;
+        lookAt((Math.random() * 2 - 1) * LOOK_AROUND.x, up ? -Math.random() * LOOK_AROUND.up : Math.random() * LOOK_AROUND.down,
+          now + LOOK_AROUND_MS[0] + Math.random() * (LOOK_AROUND_MS[1] - LOOK_AROUND_MS[0]));
+        nextLook = glance.until + 1000 * (LOOK_AROUND_S[0] + Math.random() * (LOOK_AROUND_S[1] - LOOK_AROUND_S[0]));
+      }
       // Eyes lead the cursor by a beat; the lag is what makes it a glance.
-      gaze.x += (cursor.current.x - gaze.x) * 0.08;
-      gaze.y += (cursor.current.y - gaze.y) * 0.08;
+      const glancing = now < glance.until;
+      const target = !glancing ? cursor.current : glance.absolute ? glance : { x: cursor.current.x + glance.x, y: cursor.current.y + glance.y };
+      gaze.x += (clamp(target.x) - gaze.x) * 0.08;
+      gaze.y += (clamp(target.y) - gaze.y) * 0.08;
       if (now >= nextBlink) {
         blinks = Math.random() < DOUBLE_BLINK ? [now, now + BLINK_MS + DOUBLE_GAP] : [now];
         nextBlink = blinks[blinks.length - 1] + BLINK_MS + 3000 + Math.random() * 4000;
       }
-      const rest = sleeping.current ? 1 : LIDS[mood.current] ?? 0;
+      const rest = sleeping.current ? 1 : Math.max(LIDS[mood.current] ?? 0, talkLid, thinking ? THINK.lid : 0);
       restLid += (rest - restLid) * 0.08;
       const blinking = Math.max(0, ...blinks.map(start => blinkShape(now - start)));
       lid = Math.max(restLid, blinking);
-      dilate += ((DILATE[mood.current] ?? 1) - dilate) * 0.05;
-      const reading = player.read();
-      const voice = reading.open * reading.weight;
-      mouth += (voice - mouth) * (1 - (1 - (voice > mouth ? MOUTH_ATTACK : MOUTH_RELEASE)) ** (dt / 16.7));
+      dilate += ((DILATE[mood.current] ?? 1) + EMPHASIS_DILATE * emphasis - dilate) * 0.05;
       const breath = Math.sin(now / 2200);
       const dx = (gaze.x * view.travel.x).toFixed(1), dy = (gaze.y * view.travel.y).toFixed(1);
       root.querySelectorAll<SVGGElement>('[data-gaze]').forEach(el => el.setAttribute('transform', `translate(${dx} ${dy})`));
@@ -200,14 +359,21 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       root.querySelectorAll<SVGGElement>('[data-pupil]').forEach(el => {
         el.setAttribute('transform', `translate(${el.dataset.pupil}) scale(${dilate.toFixed(3)} 1)`);
       });
-      // The pre-rendered blink: show the frame for this much shut (blending two would show the band twice).
-      root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => {
-        const shown = Number(el.dataset.shown ?? 0), next = Math.round(lid * (el.children.length - 1));
+      // The eye smile: while it is closing or shut its frames take over from the blink's (both start from the same
+      // open frame, so the swap does not show); a blink during it closes the arc the rest of the way.
+      const smileWant = now < smileUntil && !sleeping.current ? 1 : 0;
+      smile = motion ? smile + (smileWant - smile) * (1 - Math.exp(-dt / (smileWant > smile ? SMILE_CLOSE_MS : SMILE_OPEN_MS))) : smileWant;
+      const smiling = smile > 0.02;
+      // The pre-rendered blink (or smile): show the frame for this much shut (blending two would show the band twice).
+      const showFrame = (el: SVGGElement, amount: number) => {
+        const shown = Number(el.dataset.shown ?? 0), next = Math.round(amount * (el.children.length - 1));
         if (next === shown) return;
         el.children[shown].setAttribute('visibility', 'hidden');
         el.children[next].setAttribute('visibility', 'visible');
         el.dataset.shown = String(next);
-      });
+      };
+      root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => { el.setAttribute('visibility', smiling ? 'hidden' : 'visible'); showFrame(el, smiling ? 0 : lid); });
+      root.querySelectorAll<SVGGElement>('[data-smile]').forEach(el => { el.setAttribute('visibility', smiling ? 'visible' : 'hidden'); showFrame(el, smiling ? Math.max(smile, lid) : 0); });
       root.querySelectorAll<SVGGElement>('[data-lid]').forEach(el => {
         const eye = view.eyes[Number(el.dataset.lid)];
         const drop = eye.bottom - eye.top + 24;
@@ -215,8 +381,8 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       });
       // The mouth shape for her voice level right now.
       const shapes = root.querySelector('[data-mouth]')?.children;
-      loud = Math.max(mouth, loud * Math.exp(-dt / (LOUD_S * 1000)), LOUD_FLOOR);
-      const want = mouthFor(mouth, mouth / loud, reading.bands);
+      let want: number = mouthFor(mouth, rel, reading.bands);
+      if (want === MOUTH.closed && !sleeping.current && REST[mood.current]) want = SHAPES.indexOf(REST[mood.current]![0]);
       if (want !== mouthShown && now - mouthAt >= MOUTH_HOLD_MS) { mouthShown = want; mouthAt = now; }
       const fade = 1 - Math.exp(-dt / MOUTH_FADE_MS);
       if (shapes) mouthAlpha.forEach((a, k) => {
@@ -225,33 +391,75 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
         if (mouthAlpha[k] !== a) shapes[k].setAttribute('opacity', mouthAlpha[k].toFixed(2));
       });
       root.querySelectorAll<SVGElement>('[data-blush]').forEach(el => el.setAttribute('opacity', String(BLUSH[mood.current] ?? 0)));
-      const s = now / 1000, motion = still.matches ? 0 : 1;
+      // The brow: raised or lowered whole, its inner end turned about the outer.
+      const browEl = root.querySelector<SVGGElement>('[data-brow]');
+      if (browEl && view.brow) {
+        const want = BROW[mood.current] ?? { up: 0, inner: 0 }, k = 1 - Math.exp(-dt / BROW_EASE_MS);
+        brow.up += (want.up + BROW_EMPHASIS * emphasis + (thinking ? BROW_THINK.up : 0) - brow.up) * k;
+        brow.inner += (want.inner + (thinking ? BROW_THINK.inner : 0) - brow.inner) * k;
+        const [ox, oy] = view.brow.outer, length = Math.hypot(view.brow.inner[0] - ox, view.brow.inner[1] - oy);
+        browEl.setAttribute('transform', `translate(0 ${(-brow.up).toFixed(1)}) rotate(${(-Math.atan2(brow.inner, length) * 180 / Math.PI).toFixed(2)} ${ox} ${oy})`);
+      }
+      const s = now / 1000;
       const angle = SWAY_DEG * swing(s) * motion;
+      // Her head: a new idle pose now and then, the explaining tilt, turning with a glance.
+      if (now >= idlePose.next) {
+        const r = () => Math.random() * 2 - 1;
+        Object.assign(idlePose, { roll: HEAD_IDLE.roll * r(), drop: HEAD_IDLE.drop * r(), side: HEAD_IDLE.side * r(), yaw: YAW.idle * r(), pitch: PITCH.idle * r() });
+        idlePose.next = now + 1000 * (HEAD_IDLE_S[0] + Math.random() * (HEAD_IDLE_S[1] - HEAD_IDLE_S[0]));
+      }
+      const explaining = talkingSince ? smooth((now - talkingSince) / TALK_SETTLE_MS) : 0;
+      // The head turns a little with where her eyes go, by how far that is from you.
+      const turn = glancing ? clamp((clamp(target.x) - cursor.current.x) / 0.5) : 0;
+      spring(head.roll, motion * (idlePose.roll * (1 - explaining) + HEAD_TALK_ROLL * talkSide * explaining + HEAD_GLANCE.roll * turn), dt / 1000);
+      spring(head.drop, motion * (idlePose.drop + (thinking ? THINK.chin : 0)), dt / 1000);
+      spring(head.side, motion * (idlePose.side + HEAD_GLANCE.side * turn), dt / 1000);
+      hairRoll += (head.roll.x - hairRoll) * (1 - Math.exp(-dt / 500));
+      // Turning and nodding: toward you a little, toward where her eyes go away from you more.
+      const lim = (v: number, max: number) => Math.max(-max, Math.min(max, v));
+      spring(head.yaw, motion * lim(YAW.cursor * cursor.current.x + YAW.look * (clamp(target.x) - cursor.current.x)
+        + idlePose.yaw * (1 - explaining) + YAW.talk * talkSide * explaining, YAW.max), dt / 1000);
+      spring(head.pitch, motion * lim(PITCH.cursor * cursor.current.y + PITCH.look * (clamp(target.y) - cursor.current.y)
+        + idlePose.pitch + (thinking ? PITCH.think : 0), PITCH.max), dt / 1000);
+      hairYaw += (head.yaw.x - hairYaw) * (1 - Math.exp(-dt / HAIR_LAG_MS));
+      const turnBy: [number, number] = plateReady && view.head ? [Math.sin(head.yaw.x), Math.sin(head.pitch.x)] : [0, 0];
+      plate.current?.draw(turnBy);
+      // What is drawn over the picture (eyes, mouth, blush) moves with the face under it.
+      if (view.head) root.querySelectorAll<SVGElement>('[data-warp]').forEach(el => {
+        const [x, y] = el.dataset.warp!.split(' ').map(Number), [dx, dy] = headShift(view.head!, turnBy, x, y);
+        el.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)})`);
+      });
+      // The hair's tips trail the turn: the face's shift since the hair last caught up, in the picture's own px.
+      const trail = view.head ? HAIR_SWING * (Math.sin(head.yaw.x) - Math.sin(hairYaw)) * view.head[2] * PICTURE_PX / view.frame[2] : 0;
       // The hair trails the head: its tips hang nearly still while the face swings
       // beneath, then catch up. Gusts come and go on slow, unrelated clocks.
-      const lag = -0.8 * SWAY_DEG * swing(s - 0.7) * Math.PI / 180 * FACE_RADIUS;
+      const lag = -0.8 * (SWAY_DEG * swing(s - 0.7) + hairRoll) * Math.PI / 180 * FACE_RADIUS;
       const gust = Math.max(0, Math.sin(2 * Math.PI * s / 9) * Math.sin(2 * Math.PI * s / 14 + 0.7));
       // Each piece flutters on a fast clock of its own phase.
       if (hair.current && view.hair) hair.current.draw(view.hair.locks.map((lock, i) => {
-        const px = lag + 12 * gust + (5 + 7 * gust + 4 * mouth) * Math.sin(2 * Math.PI * s / 1.6 + i * 1.7);
+        const px = lag + trail + 12 * gust + (5 + 7 * gust + 4 * mouth) * Math.sin(2 * Math.PI * s / 1.6 + i * 1.7);
         return -motion * px / lock.reach;
-      }));
+      }), turnBy);
       if (frame.current) {
         // Scaling about the pivot (30% above the frame) pushes the picture down by
         // 1.5% and leaves a gap at the top; 4% up splits the overscan evenly.
-        frame.current.style.transform = `translateY(-4%) translateY(${(motion * (6 * Math.sin(2 * Math.PI * s / SWAY_S + 1.2) + breath * 2) + mouth * 2).toFixed(1)}px) rotate(${angle.toFixed(3)}deg) scale(${OVERSCAN})`;
+        const bob = motion * (6 * Math.sin(2 * Math.PI * s / SWAY_S + 1.2) + breath * 2) + head.drop.x;
+        const pivot = `${HEAD_PIVOT * 100}%`;
+        frame.current.style.transform = `translateY(-4%) translate(${head.side.x.toFixed(1)}px, ${bob.toFixed(1)}px) rotate(${angle.toFixed(3)}deg) translateY(${pivot}) rotate(${head.roll.x.toFixed(3)}deg) translateY(-${pivot}) scale(${OVERSCAN})`;
         frame.current.style.filter = sleeping.current ? 'brightness(0.55)' : '';
       }
     };
     raf = requestAnimationFrame(tick);
     return () => { cancelAnimationFrame(raf); off.forEach(fn => fn?.()); player.dispose(); };
-  }, [view]);
+  }, [view, plateReady]);
 
   const [fx, fy, fw, fh] = view.frame;
-  const picture = <image href={hairReady && view.hair ? view.hair.plate : view.image} x={fx} y={fy} width={fw} height={fh}/>;
+  // Drawn by the plate layer (under this SVG) once it is up; until then, here.
+  const picture = plateReady ? null : <image href={hairReady && view.hair ? view.hair.plate : view.image} x={fx} y={fy} width={fw} height={fh}/>;
   return (
     <div className="portrait">
       <div className="portrait-frame" ref={frame}>
+        {view.head && <canvas ref={plateCanvas} className="portrait-layer"/>}
         <svg ref={svg} viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice">
           <defs>
             {view.eyes.map((eye, i) => <clipPath key={i} id={`eye-${i}`}><polygon points={eye.open}/></clipPath>)}
@@ -262,8 +470,13 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
             <radialGradient id="blush"><stop offset="0" stopColor="#f6a3b0" stopOpacity="0.5"/><stop offset="1" stopColor="#f6a3b0" stopOpacity="0"/></radialGradient>
           </defs>
           {picture}
+          {view.brow && (
+            <g data-warp={`${(view.brow.inner[0] + view.brow.outer[0]) / 2} ${(view.brow.inner[1] + view.brow.outer[1]) / 2}`}>
+              <g data-brow=""><image href={view.brow.href} x={view.brow.x} y={view.brow.y} width={view.brow.w} height={view.brow.h} preserveAspectRatio="none"/></g>
+            </g>
+          )}
           {view.eyes.map((eye, i) => (
-            <g key={i}>
+            <g key={i} data-warp={`${eye.iris.cx} ${eye.iris.cy}`}>
             <g clipPath={`url(#eye-${i})`}>
               <polygon points={eye.open} fill={SCLERA}/>
               <g data-gaze="">
@@ -286,17 +499,19 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
             </g>
             {/* The lower lid line and lashes from the eye sheet; the upper band is in the blink frames. */}
             {eye.outline && <image href={eye.outline.href} x={eye.outline.x} y={eye.outline.y} width={eye.outline.w} height={eye.outline.h} preserveAspectRatio="none"/>}
-            {eye.blink && <g data-blink={i}>
-              {Array.from({ length: eye.blink.frames }, (_, k) => (
-                <svg key={k} x={eye.blink!.x} y={eye.blink!.y} width={eye.blink!.w} height={eye.blink!.h} viewBox={`0 ${k * eye.blink!.frameH} ${eye.blink!.frameW} ${eye.blink!.frameH}`} preserveAspectRatio="none" visibility={k === 0 ? 'visible' : 'hidden'}>
-                  <image href={eye.blink!.href} width={eye.blink!.frameW} height={eye.blink!.frameH * eye.blink!.frames}/>
-                </svg>
-              ))}
-            </g>}
+            {([['blink', eye.blink], ['smile', eye.smile]] as const).map(([kind, sheet]) => sheet && (
+              <g key={kind} {...{ [`data-${kind}`]: i }} visibility={kind === 'blink' ? 'visible' : 'hidden'}>
+                {Array.from({ length: sheet.frames }, (_, k) => (
+                  <svg key={k} x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} viewBox={`0 ${k * sheet.frameH} ${sheet.frameW} ${sheet.frameH}`} preserveAspectRatio="none" visibility={k === 0 ? 'visible' : 'hidden'}>
+                    <image href={sheet.href} width={sheet.frameW} height={sheet.frameH * sheet.frames}/>
+                  </svg>
+                ))}
+              </g>
+            ))}
             </g>
           ))}
-          <g data-mouth="">
-            {SPEAK.map((name, k) => {
+          <g data-mouth="" data-warp={`${view.mouth.x + MOUTH_ANCHOR.x * view.mouth.scale} ${view.mouth.y + MOUTH_ANCHOR.y * view.mouth.scale}`}>
+            {SHAPES.map((name, k) => {
               if (k === 0) return (
                 <g key={name} transform={`translate(${view.mouth.x} ${view.mouth.y}) scale(${view.mouth.scale})`} opacity={1}>
                   <filter id="neutral-lip" x="-20%" y="-200%" width="140%" height="500%"><feGaussianBlur stdDeviation="1.4"/></filter>
@@ -311,11 +526,11 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
                   {NEUTRAL_CORNERS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={1.6} fill="#9a9a9a" opacity={0.7} filter="url(#neutral-lip)"/>)}
                 </g>
               );
-              const s = view.mouth.scale * SPEAK_SIZE[k], d = view.mouth.scale - s;
+              const s = view.mouth.scale * SHAPE_SIZE[k], d = view.mouth.scale - s;
               return <image key={name} href={mouthHref(name)} x={view.mouth.x + MOUTH_ANCHOR.x * d} y={view.mouth.y + MOUTH_ANCHOR.y * d} width={MOUTH_CANVAS.w * s} height={MOUTH_CANVAS.h * s} opacity={0}/>;
             })}
           </g>
-          {view.blush.map((b, i) => <ellipse key={i} data-blush="" cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
+          {view.blush.map((b, i) => <ellipse key={i} data-blush="" data-warp={`${b.cx} ${b.cy}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
         </svg>
         {view.hair && <canvas ref={canvas} className="portrait-layer"/>}
         {view.shadow && (

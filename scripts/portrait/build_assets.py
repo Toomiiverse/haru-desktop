@@ -233,7 +233,13 @@ brow = np.stack([xs, np.polyval(np.polyfit(bx, by, 4), xs)], 1).astype(np.float3
 brow_w = np.maximum(np.polyval(np.polyfit(bx, bw, 4), xs) * 0.55, 1.5)
 brow_a = 0.9 * (0.8 + 0.2 * fade[np.clip(brow[:, 1].astype(int), 0, h - 1), brow[:, 0].astype(int)])
 bl = stroke(brow, brow_w, brow_a)
-plate = plate * (1 - bl[..., None]) + BROW_TONE * bl[..., None]
+# Not painted on the plate: written as its own sprite (closeup-brow.png, placed by closeup-eyes.json's 'brow', in view
+# px) so the window can raise, lower and tilt it with her moods, still behind the hair.
+(by0, bx0), (by1, bx1) = np.argwhere(bl > 0.01).min(0) - 8, np.argwhere(bl > 0.01).max(0) + 9
+Image.fromarray(np.dstack([np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), bl * 255])[by0:by1, bx0:bx1].astype(np.uint8)).save(OUT + 'closeup-brow.png', optimize=True)
+V = 922 / 1440
+brow_at = {'x': round(690 + bx0 * V, 2), 'y': round(by0 * V, 2), 'w': round((bx1 - bx0) * V, 2), 'h': round((by1 - by0) * V, 2),
+           'inner': [round(690 + float(brow[0, 0]) * V, 1), round(float(brow[0, 1]) * V, 1)], 'outer': [round(690 + float(brow[-1, 0]) * V, 1), round(float(brow[-1, 1]) * V, 1)]}
 print('brow from', brow[0].round(), 'to', brow[-1].round(), 'max width', brow_w.max().round(1))
 
 # --- The right eye from the sheet: fit the sheet's sclera onto her eye opening (affine, ECC), then carry the
@@ -293,6 +299,21 @@ ux_min = int(np.where(upper_a.any(0))[0].min())
 fit = np.polyval(np.polyfit(cols_o, bots - tops + 3, 3), np.arange(ux_min, w))
 drop = np.zeros(w, np.float32)
 drop[ux_min:] = np.clip(fit, 0, float((bots - tops).max()) + 3)   # remap needs float32 maps
+# The eye smile: shut, the band lies along an arc bowed upward (the happy closed eye) instead of the blink's flat
+# line: the straight line between the blink's shut corners, raised SMILE_BOW of the eye's width at the middle. The
+# band never rises above where it starts, and never falls further than the blink takes it.
+SMILE_BOW = 0.13
+xs_all = np.arange(w, dtype=np.float32)
+top_all = np.interp(xs_all, cols_o, tops)
+shut = top_all + drop
+x0_, x1_ = float(cols_o.min()), float(cols_o.max())
+u = np.clip((xs_all - x0_) / (x1_ - x0_), 0, 1)
+target = shut[int(x0_)] + (shut[int(x1_)] - shut[int(x0_)]) * u - SMILE_BOW * (x1_ - x0_) * np.sin(np.pi * u)
+smile_drop = np.clip(target - top_all, 0, drop)
+# Smoothed along the eye: the band is shifted column by column, and a corner in the curve (where the arc meets the
+# band's tail past the inner corner) or a steep change from one column to the next tears its edge.
+smile_drop = cv2.GaussianBlur(smile_drop.astype(np.float32)[None, :], (0, 0), sigmaX=30, sigmaY=0.01)[0]
+smile_drop = np.minimum(smile_drop, drop).astype(np.float32)
 print('strokes', n_s - 1, '| drop at inner corner / middle / edge', [round(float(drop[x])) for x in (cols_o.min(), (cols_o.min() + cols_o.max()) // 2, cols_o.max())])
 LID_SHADOW = np.array([58, 34, 54], np.float32)
 BLINK_FRAMES = 33
@@ -311,8 +332,10 @@ def save_lower(lower_a, name):
     return geom(x0, y0, x1, y1)
 
 
-def save_blink(upper_a, opening, drop, name):
-    """The band dropping, BLINK_FRAMES frames stacked in one image (open to shut); its place in the view."""
+def save_blink(upper_a, opening, drop, name, band_drop=None):
+    """The band dropping, BLINK_FRAMES frames stacked in one image (open to shut); its place in the view. With
+    `band_drop` the band comes down that far instead while the skin still closes the eye: the eye smile."""
+    band_drop = drop if band_drop is None else band_drop
     cols = np.where(opening.any(0))[0]
     tops = np.full(w, -1e6, np.float32); height = np.zeros(w, np.float32)
     for x in cols:
@@ -323,7 +346,7 @@ def save_blink(upper_a, opening, drop, name):
     fx1 = min(w, int(max(ux.max(), cols.max())) + 3)       # an eye may run off the picture's edge
     fh_, fw_ = fy1 - fy0, fx1 - fx0
     gx, gy = np.meshgrid(np.arange(fx0, fx1, dtype=np.float32), np.arange(fy0, fy1, dtype=np.float32))
-    dcol = drop[fx0:fx1][None, :]
+    dcol, bcol = drop[fx0:fx1][None, :], band_drop[fx0:fx1][None, :]
     # The lid's skin reaches 2 px past the opening all round and 4 px above it, so no anti-aliased edge of the
     # sclera, lid shade or iris peeks out around it (the lower line it overlaps is ~9 px thick).
     opening_up = cv2.dilate(opening.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))).astype(bool)
@@ -334,12 +357,12 @@ def save_blink(upper_a, opening, drop, name):
     sheet = np.zeros((fh_ * BLINK_FRAMES, fw_, 4), np.uint8)
     for k in range(BLINK_FRAMES):
         t = k / (BLINK_FRAMES - 1)
-        band = cv2.remap(upper_a, gx, gy - t * dcol, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        band = cv2.remap(upper_a, gx, gy - t * bcol, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         # Measured from the eye's true top: shut, the skin runs 3 px past the bottom even where the band stops short.
         skin_a = np.clip(tp + t * np.maximum(dcol, hg + 3) + 1 - gy, 0, 1) * open_soft * (t > 0)
         # The lid's shadow on the eye just under the band (dark in the recording as the band comes down): it also
         # keeps the slit pupil's tip from reading as a spike in the band's edge.
-        edge = tp + t * dcol
+        edge = tp + t * bcol
         shade_a = 0.55 * np.clip(1 - (gy - edge) / 34, 0, 1) ** 1.5 * (gy > edge - 3) * open_soft * min(1.0, t * 5)
         under = shade_a * (1 - skin_a)
         a1 = skin_a + under                                     # skin and shadow do not overlap
@@ -368,6 +391,7 @@ eyes = {}
 r_open, r_top, r_bot = outline_of(opening)
 eyes['right'] = {'open': r_open, 'top': r_top, 'bottom': r_bot,
                  'outline': save_lower(lower_a, 'closeup-eye-right.png'), 'blink': save_blink(upper_a, opening, drop, 'closeup-blink-right.png'),
+                 'smile': save_blink(upper_a, opening, drop, 'closeup-smile-right.png', smile_drop),
                  'iris': dict(zip(('cx', 'cy', 'r'), R_IRIS)), 'pupil': dict(zip(('cx', 'cy', 'rx', 'ry'), R_PUPIL)), 'shine': dict(zip(('cx', 'cy', 'r'), R_SHINE))}
 
 # The left eye: the right one mirrored, its inner corner set on the drawn left eye's inner corner (the only part of
@@ -380,16 +404,19 @@ M = np.array([[-1, 0, cx], [0, 1, dy]], np.float32)
 mirror = lambda img: cv2.warpAffine(img.astype(np.float32), M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 src_x = cx - np.arange(w)
 drop_l = np.where((src_x >= 0) & (src_x < w), drop[np.clip(src_x, 0, w - 1)], 0).astype(np.float32)
+smile_l = np.where((src_x >= 0) & (src_x < w), smile_drop[np.clip(src_x, 0, w - 1)], 0).astype(np.float32)
 opening_l = mirror(opening) > 0.5
 mx = lambda x: round(690 + (cx - (x - 690) * SC) / SC, 1)
 my = lambda y: round(y + dy / SC, 1)
 l_open, l_top, l_bot = outline_of(opening_l)
 eyes['left'] = {'open': l_open, 'top': l_top, 'bottom': l_bot,
                 'outline': save_lower(mirror(lower_a), 'closeup-eye-left.png'), 'blink': save_blink(mirror(upper_a), opening_l, drop_l, 'closeup-blink-left.png'),
+                'smile': save_blink(mirror(upper_a), opening_l, drop_l, 'closeup-smile-left.png', smile_l),
                 'iris': {'cx': mx(R_IRIS[0]), 'cy': my(R_IRIS[1]), 'r': R_IRIS[2]},
                 'pupil': {'cx': mx(R_PUPIL[0]), 'cy': my(R_PUPIL[1]), 'rx': R_PUPIL[2], 'ry': R_PUPIL[3]},
                 'shine': {'cx': mx(R_SHINE[0]), 'cy': my(R_SHINE[1]), 'r': R_SHINE[2]}}
 print('left eye: mirror about x', cx, 'shift', round(dy, 1), '| inner corner', (xl, round(yl)), '| iris', eyes['left']['iris'])
+eyes['brow'] = brow_at
 json.dump(eyes, open(OUT + 'closeup-eyes.json', 'w'), indent=1)
 print('lash colour', LASH_RGB.round())
 

@@ -15,8 +15,12 @@ import closeupEyeRight from '../build/portrait/closeup-eye-right.png';
 import closeupBlinkRight from '../build/portrait/closeup-blink-right.png';
 import closeupEyeLeft from '../build/portrait/closeup-eye-left.png';
 import closeupBlinkLeft from '../build/portrait/closeup-blink-left.png';
+import closeupSmileRight from '../build/portrait/closeup-smile-right.png';
+import closeupSmileLeft from '../build/portrait/closeup-smile-left.png';
+import closeupBrow from '../build/portrait/closeup-brow.png';
 // Written by scripts/portrait/build_assets.py: the eye openings and where the right eye's outline sprite sits.
 import closeupEyes from '../build/portrait/closeup-eyes.json';
+
 import type { Lock } from './portraitHair';
 import bustImage from '../build/portrait/haru-portrait.webp';
 
@@ -36,6 +40,8 @@ export type Eye = {
    * image, open to shut, drawn at x, y, w, h. Without it the eye closes with a skin lid.
    */
   blink?: { href: string; x: number; y: number; w: number; h: number; frames: number; frameW: number; frameH: number };
+  /** The eye smile, laid out like `blink`: the band comes down into an arc bowed upward instead of a flat line. */
+  smile?: { href: string; x: number; y: number; w: number; h: number; frames: number; frameW: number; frameH: number };
 };
 /**
  * The moving hair, all at the picture's own size: `plate` is the picture with
@@ -65,13 +71,23 @@ export type View = {
    */
   mouth: { x: number; y: number; scale: number };
   blush: { cx: number; cy: number; rx: number; ry: number }[];
+  /**
+   * Her head as an ellipse in view px (centre x, y, radii x, y), for turning and nodding it: the picture is
+   * warped as if painted on it (see portraitHair.ts). Absent: the head only sways and tilts.
+   */
+  head?: [number, number, number, number];
   /** How far the pupil may slide before it leaves the iris. */
   travel: { x: number; y: number };
+  /**
+   * Her brow as its own sprite, drawn at x, y, w, h (view px) behind the hair, so it can move with her moods;
+   * `inner` and `outer` are its ends (the inner nearer her nose). Absent: the brow stays painted on the picture.
+   */
+  brow?: { href: string; x: number; y: number; w: number; h: number; inner: [number, number]; outer: [number, number] };
 };
 
 /** An eye written by scripts/portrait/build_assets.py, with its two sprites. */
-const eyeFrom = (eye: typeof closeupEyes.right, outline: string, blink: string): Eye =>
-  ({ ...eye, outline: { href: outline, ...eye.outline }, blink: { href: blink, ...eye.blink } });
+const eyeFrom = (eye: typeof closeupEyes.right, outline: string, blink: string, smile: string): Eye =>
+  ({ ...eye, outline: { href: outline, ...eye.outline }, blink: { href: blink, ...eye.blink }, smile: { href: smile, ...eye.smile } });
 
 export const VIEWS: Record<'closeup' | 'bust', View> = {
   closeup: {
@@ -95,15 +111,19 @@ export const VIEWS: Record<'closeup' | 'bust', View> = {
     shadow: '600,-200 1700,-200 1700,414.6 600,834.8',
     eyes: [
       // Her right eye: the eye sheet's sclera and outline, fitted onto the drawn eye (which the plate paints out).
-      eyeFrom(closeupEyes.right, closeupEyeRight, closeupBlinkRight),
+      eyeFrom(closeupEyes.right, closeupEyeRight, closeupBlinkRight, closeupSmileRight),
       // Her left eye, mostly past the window's edge: the right one mirrored onto its inner corner.
-      eyeFrom(closeupEyes.left, closeupEyeLeft, closeupBlinkLeft),
+      eyeFrom(closeupEyes.left, closeupEyeLeft, closeupBlinkLeft, closeupSmileLeft),
     ],
     // The closed shape's line (canvas 139, 81) centred on her drawn mouth (view 1077, 1175), which the plate
     // paints out; at 2.5x the open shapes stay well clear of her chin.
     mouth: { x: 1077 - 139 * 2.5, y: 1175 - 81 * 2.5, scale: 2.5 },
     blush: [{ cx: 1380, cy: 880, rx: 130, ry: 70 }, { cx: 800, cy: 960, rx: 130, ry: 70 }],
+    // Centred between her eyes and over her nose; it reaches her jaw below and past her temples to the sides.
+    head: [1040, 760, 640, 760],
     travel: { x: 30, y: 16 },
+    // Her right brow, fitted by build_assets.py as one tapered stroke and left off the plate.
+    brow: { href: closeupBrow, ...(closeupEyes.brow as { x: number; y: number; w: number; h: number; inner: [number, number]; outer: [number, number] }) },
   },
   bust: {
     image: bustImage,
