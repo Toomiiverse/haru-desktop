@@ -116,8 +116,9 @@ const LOOK_AROUND_S = [7, 16], LOOK_AROUND_MS = [800, 2200], LOOK_AROUND = { x: 
 const YAW = { cursor: 0.06, look: 0.1, idle: 0.05, talk: 0.02, max: 0.22 };
 const PITCH = { cursor: 0.03, look: 0.06, idle: 0.03, think: -0.06, max: 0.14, nod: 0.15 };
 // The hair lags the turn: its tips trail by this share of the head's movement and catch up over HAIR_LAG_MS.
-// The locks are measured in the picture's own px (haru-closeup.webp is 1440 wide).
-const HAIR_SWING = 0.8, HAIR_LAG_MS = 350, PICTURE_PX = 1440;
+// The locks are measured in the picture's own px: every view cut from the landscape drawing has 1440 of them per 922
+// view px (haru-closeup.webp is 1440 wide over its 922).
+const HAIR_SWING = 0.8, HAIR_LAG_MS = 350, PICTURE_SCALE = 1440 / 922;
 const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 /** How shut a blink that started `t` ms ago has the eye, 0..1. */
 function blinkShape(t: number) {
@@ -208,6 +209,8 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
   const frame = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const hair = useRef<HairLayer | null>(null);
+  const frontCanvas = useRef<HTMLCanvasElement>(null);
+  const front = useRef<HairLayer | null>(null);
   const plateCanvas = useRef<HTMLCanvasElement>(null);
   const plate = useRef<PlateLayer | null>(null);
   // The plate replaces the picture only once the hair layer is drawing; until
@@ -228,6 +231,11 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       if (!live) { layer?.dispose(); return; }
       hair.current = layer; setHairReady(!!layer);
     });
+    // The locks in front of her headphones: the same hair layer again, masked to them, over the headphones.
+    if (view.phones && frontCanvas.current) void createHairLayer(frontCanvas.current, { image: view.image, mask: view.phones.front, locks: view.hair.locks, kink: view.hair.kink, head: headUv }).then(layer => {
+      if (!live) { layer?.dispose(); return; }
+      front.current = layer;
+    });
     if (view.head && headUv && plateCanvas.current) void createPlateLayer(plateCanvas.current, view.hair.plate, headUv).then(layer => {
       if (!live) { layer?.dispose(); return; }
       plate.current = layer; setPlateReady(!!layer);
@@ -235,6 +243,7 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
     return () => {
       live = false;
       hair.current?.dispose(); hair.current = null; setHairReady(false);
+      front.current?.dispose(); front.current = null;
       plate.current?.dispose(); plate.current = null; setPlateReady(false);
     };
   }, [view, headUv]);
@@ -368,12 +377,14 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       const showFrame = (el: SVGGElement, amount: number) => {
         const shown = Number(el.dataset.shown ?? 0), next = Math.round(amount * (el.children.length - 1));
         if (next === shown) return;
-        el.children[shown].setAttribute('visibility', 'hidden');
-        el.children[next].setAttribute('visibility', 'visible');
+        (el.children[shown] as SVGElement).style.display = 'none';
+        (el.children[next] as SVGElement).style.display = '';
         el.dataset.shown = String(next);
       };
-      root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => { el.setAttribute('visibility', smiling ? 'hidden' : 'visible'); showFrame(el, smiling ? 0 : lid); });
-      root.querySelectorAll<SVGGElement>('[data-smile]').forEach(el => { el.setAttribute('visibility', smiling ? 'visible' : 'hidden'); showFrame(el, smiling ? Math.max(smile, lid) : 0); });
+      // Hidden with display, not visibility: a child's own visibility="visible" shows through a hidden parent, and
+      // the smile sheet's open frame stayed drawn over every blink. Inline, because portrait.css sets display on svg.
+      root.querySelectorAll<SVGGElement>('[data-blink]').forEach(el => { el.style.display = smiling ? 'none' : ''; showFrame(el, smiling ? 0 : lid); });
+      root.querySelectorAll<SVGGElement>('[data-smile]').forEach(el => { el.style.display = smiling ? '' : 'none'; showFrame(el, smiling ? Math.max(smile, lid) : 0); });
       root.querySelectorAll<SVGGElement>('[data-lid]').forEach(el => {
         const eye = view.eyes[Number(el.dataset.lid)];
         const drop = eye.bottom - eye.top + 24;
@@ -430,16 +441,17 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
         el.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)})`);
       });
       // The hair's tips trail the turn: the face's shift since the hair last caught up, in the picture's own px.
-      const trail = view.head ? HAIR_SWING * (Math.sin(head.yaw.x) - Math.sin(hairYaw)) * view.head[2] * PICTURE_PX / view.frame[2] : 0;
+      const trail = view.head ? HAIR_SWING * (Math.sin(head.yaw.x) - Math.sin(hairYaw)) * view.head[2] * PICTURE_SCALE : 0;
       // The hair trails the head: its tips hang nearly still while the face swings
       // beneath, then catch up. Gusts come and go on slow, unrelated clocks.
       const lag = -0.8 * (SWAY_DEG * swing(s - 0.7) + hairRoll) * Math.PI / 180 * FACE_RADIUS;
       const gust = Math.max(0, Math.sin(2 * Math.PI * s / 9) * Math.sin(2 * Math.PI * s / 14 + 0.7));
       // Each piece flutters on a fast clock of its own phase.
-      if (hair.current && view.hair) hair.current.draw(view.hair.locks.map((lock, i) => {
+      const angles = view.hair?.locks.map((lock, i) => {
         const px = lag + trail + 12 * gust + (5 + 7 * gust + 4 * mouth) * Math.sin(2 * Math.PI * s / 1.6 + i * 1.7);
         return -motion * px / lock.reach;
-      }), turnBy);
+      });
+      if (angles) { hair.current?.draw(angles, turnBy); front.current?.draw(angles, turnBy); }
       if (frame.current) {
         // Scaling about the pivot (30% above the frame) pushes the picture down by
         // 1.5% and leaves a gap at the top; 4% up splits the overscan evenly.
@@ -500,9 +512,9 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
             {/* The lower lid line and lashes from the eye sheet; the upper band is in the blink frames. */}
             {eye.outline && <image href={eye.outline.href} x={eye.outline.x} y={eye.outline.y} width={eye.outline.w} height={eye.outline.h} preserveAspectRatio="none"/>}
             {([['blink', eye.blink], ['smile', eye.smile]] as const).map(([kind, sheet]) => sheet && (
-              <g key={kind} {...{ [`data-${kind}`]: i }} visibility={kind === 'blink' ? 'visible' : 'hidden'}>
+              <g key={kind} {...{ [`data-${kind}`]: i }} style={{ display: kind === 'blink' ? undefined : 'none' }}>
                 {Array.from({ length: sheet.frames }, (_, k) => (
-                  <svg key={k} x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} viewBox={`0 ${k * sheet.frameH} ${sheet.frameW} ${sheet.frameH}`} preserveAspectRatio="none" visibility={k === 0 ? 'visible' : 'hidden'}>
+                  <svg key={k} x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} viewBox={`0 ${k * sheet.frameH} ${sheet.frameW} ${sheet.frameH}`} preserveAspectRatio="none" style={{ display: k === 0 ? undefined : 'none' }}>
                     <image href={sheet.href} width={sheet.frameW} height={sheet.frameH * sheet.frames}/>
                   </svg>
                 ))}
@@ -533,8 +545,18 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
           {view.blush.map((b, i) => <ellipse key={i} data-blush="" data-warp={`${b.cx} ${b.cy}`} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill="url(#blush)" opacity={0}/>)}
         </svg>
         {view.hair && <canvas ref={canvas} className="portrait-layer"/>}
+        {view.phones && (
+          <>
+            <svg className="portrait-layer" viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice">
+              <image href={view.phones.href} x={view.phones.x} y={view.phones.y} width={view.phones.w} height={view.phones.h} preserveAspectRatio="none"/>
+            </svg>
+            <canvas ref={frontCanvas} className="portrait-layer"/>
+          </>
+        )}
         {view.shadow && (
-          <svg className="portrait-layer portrait-shadow" viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice">
+          // Only where the picture is: past a see-through edge there is nothing of hers to shade.
+          <svg className="portrait-layer portrait-shadow" viewBox={view.viewBox.join(' ')} preserveAspectRatio="xMidYMid slice"
+            style={{ maskImage: `url(${view.image})`, maskSize: '100% 100%', WebkitMaskImage: `url(${view.image})`, WebkitMaskSize: '100% 100%' }}>
             <defs><filter id="shadow-edge" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter></defs>
             <polygon points={view.shadow} fill={SHADE} filter="url(#shadow-edge)"/>
           </svg>

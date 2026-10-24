@@ -20,6 +20,22 @@ import closeupSmileLeft from '../build/portrait/closeup-smile-left.png';
 import closeupBrow from '../build/portrait/closeup-brow.png';
 // Written by scripts/portrait/build_assets.py: the eye openings and where the right eye's outline sprite sits.
 import closeupEyes from '../build/portrait/closeup-eyes.json';
+// The side view: the same drawing from x 818.7 to its right edge, built by scripts/portrait/side_inputs.py + build_assets.py.
+import sideImage from '../build/portrait/haru-side.webp';
+import sidePlate from '../build/portrait/side-plate.webp';
+import sideHair from '../build/portrait/side-hair.png';
+import sideEyeRight from '../build/portrait/side-eye-right.png';
+import sideBlinkRight from '../build/portrait/side-blink-right.png';
+import sideSmileRight from '../build/portrait/side-smile-right.png';
+import sideEyeLeft from '../build/portrait/side-eye-left.png';
+import sideBlinkLeft from '../build/portrait/side-blink-left.png';
+import sideSmileLeft from '../build/portrait/side-smile-left.png';
+import sideBrow from '../build/portrait/side-brow.png';
+import sideEyes from '../build/portrait/side-eyes.json';
+// Written by scripts/portrait/build_phones.py: her headphones from the user's sheet, and the locks in front of them.
+import sidePhones from '../build/portrait/side-phones.png';
+import sideFront from '../build/portrait/side-front.png';
+import sidePhonesAt from '../build/portrait/side-phones.json';
 
 import type { Lock } from './portraitHair';
 import bustImage from '../build/portrait/haru-portrait.webp';
@@ -83,13 +99,18 @@ export type View = {
    * `inner` and `outer` are its ends (the inner nearer her nose). Absent: the brow stays painted on the picture.
    */
   brow?: { href: string; x: number; y: number; w: number; h: number; inner: [number, number]; outer: [number, number] };
+  /**
+   * Headphones, drawn at x, y, w, h (view px) over her hair, with `front` (a hair mask like Hair.mask, red only) the
+   * locks that hang in front of them, drawn again on top and moving with the rest.
+   */
+  phones?: { href: string; x: number; y: number; w: number; h: number; front: string };
 };
 
 /** An eye written by scripts/portrait/build_assets.py, with its two sprites. */
 const eyeFrom = (eye: typeof closeupEyes.right, outline: string, blink: string, smile: string): Eye =>
   ({ ...eye, outline: { href: outline, ...eye.outline }, blink: { href: blink, ...eye.blink }, smile: { href: smile, ...eye.smile } });
 
-export const VIEWS: Record<'closeup' | 'bust', View> = {
+export const VIEWS: Record<'closeup' | 'side' | 'bust', View> = {
   closeup: {
     image: closeupImage,
     // Cut from haru-closeup.webp (1440x2560). Below the jaw — neck, collar, back
@@ -124,6 +145,33 @@ export const VIEWS: Record<'closeup' | 'bust', View> = {
     travel: { x: 30, y: 16 },
     // Her right brow, fitted by build_assets.py as one tapered stroke and left off the plate.
     brow: { href: closeupBrow, ...(closeupEyes.brow as { x: number; y: number; w: number; h: number; inner: [number, number]; outer: [number, number] }) },
+  },
+  // Half her face, nose to the side of her head over her left ear, for Spin: from x 818.7 its first 1181.3 px are the
+  // card's 880:1222 at full height, and past the drawing's edge (x 2000) her hair goes on (the back lock from her hair
+  // sheet) to a natural outline, the picture see-through beyond it, for when the card widens. Same drawing and scale as
+  // the close-up, so its eyes, mouth, brow and head are the close-up's; only the hair differs. Her hair hangs past her
+  // jaw here, in front of the neck, so all of it is in focus and moves as one piece (its fringe and side locks are one
+  // mass from the crown, and any cut through it would tear).
+  side: {
+    image: sideImage,
+    hair: {
+      plate: sidePlate, mask: sideHair, kink: 0,
+      locks: [{ pivot: [700, -1500], left: [-10, 0], right: [2246, 0], top: 0, bottom: 2561, reach: 2500 }],
+    },
+    viewBox: [818.7, 0, 1437.4, 1640], frame: [818.7, 0, 1437.4, 1640],
+    // The close-up's shade, its edge carried on to the drawing's right edge.
+    shadow: '600,-200 2300,-200 2300,184.4 600,834.8',
+    eyes: [
+      eyeFrom(sideEyes.right, sideEyeRight, sideBlinkRight, sideSmileRight),
+      eyeFrom(sideEyes.left, sideEyeLeft, sideBlinkLeft, sideSmileLeft),
+    ],
+    mouth: { x: 1077 - 139 * 2.5, y: 1175 - 81 * 2.5, scale: 2.5 },
+    blush: [{ cx: 1380, cy: 880, rx: 130, ry: 70 }],
+    head: [1040, 760, 640, 760],
+    travel: { x: 30, y: 16 },
+    brow: { href: sideBrow, ...(sideEyes.brow as { x: number; y: number; w: number; h: number; inner: [number, number]; outer: [number, number] }) },
+    // On the side of her head over her ear, behind the locks that frame her face, the arm rising out of the top.
+    phones: { href: sidePhones, ...sidePhonesAt, front: sideFront },
   },
   bust: {
     image: bustImage,

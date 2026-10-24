@@ -4,18 +4,29 @@ Run from the repo root: python -I scripts/portrait/build_assets.py scripts/portr
 Inputs: the untouched upscaled close-up, its painted-out plate, the hair mask, the brow shape and the two eye
 openings (all 1440x2560), plus build/portrait/reference/eye-parts.jpg (the eye sheet). Writes
 build/portrait/haru-closeup.webp, closeup-plate.webp, closeup-hair.png, closeup-eye-right.png and closeup-eyes.json.
+An inputs folder with a view.json ({"name", "crop", "sharp", "tips"}) builds another view of the same drawing on the same pixel grid
+(x 0 = drawing x 690, 1440 px per 922): its files are named after it, its pictures cut from x `crop`, and the shared
+mouth sprites are left alone; `sharp` keeps all her hair in focus (a window where it hangs past her jaw in front of
+the neck, rather than behind it), `tips` is the hair's pre-shade tone from y 1100 down. scripts/portrait/side_inputs.py makes such a folder for the side view.
 
 Values are BEFORE the screen's diagonal shade (a multiply of SHADE drawn live by the window), chosen so that
 after it the hair reads like the reference: ~95 at the crown, ~120 at the tips, shaded forehead ~140, lit face
 ~210. Lines are soft and drawn once: the jaw is one stroke on a smoothed face edge, the brow one fitted stroke
 behind the hair, other face lines thinned, blurred and fading along their length."""
-import sys, json, numpy as np, cv2
+import sys, os, json, numpy as np, cv2
 from PIL import Image
 H = sys.argv[1]
+VIEW = json.load(open(f'{H}/view.json')) if os.path.exists(f'{H}/view.json') else {'name': 'closeup', 'crop': 0}
+N, CROP = VIEW['name'], VIEW['crop']
+SHARP, TIPS = VIEW.get('sharp', False), VIEW.get('tips', 188)
+X0 = 690                               # the canvas's x 0 in view (drawing) px
 OUT = 'build/portrait/'
 SHADE = 0.67           # must match SHADE in PortraitWindow (#ababab)
 LIT_SKIN = 210.0
-JAW_TONE, BROW_TONE = 150.0, 150.0
+JAW_TONE = 150.0
+# The brow is darker than her hair (~158 here, ~104 under the shade), so it reads as a brow rather than a strand; it
+# tapers out between BROW_TAPER px from a lock's edge (gone at the first, full at the second).
+BROW_TONE, BROW_TAPER = 100.0, (1.0, 26.0)
 base0 = np.asarray(Image.open(f'{H}/base_orig.webp').convert('RGB')).astype(np.float32)
 plate0 = np.asarray(Image.open(f'{H}/plate-region/plate.png').convert('RGB')).astype(np.float32)
 mask = np.asarray(Image.open(f'{H}/seg-final/hair_mask.png').convert('L')).astype(np.float32) / 255
@@ -23,7 +34,7 @@ h, w = mask.shape
 ys = np.arange(h, dtype=np.float32)[:, None] * np.ones((1, w), np.float32)
 ss = lambda a, b, x: np.clip((x - a) / (b - a), 0, 1) ** 2 * (3 - 2 * np.clip((x - a) / (b - a), 0, 1))
 L0 = cv2.cvtColor(base0.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-EYES = [(820, 760, 1440, 1200), (0, 1000, 260, 1400)]
+EYES = [(820, 760, 1640, 1200), (0, 1000, 260, 1400)]   # (the right one runs past the close-up's edge in wider views)
 eyes = np.zeros((h, w), bool)
 for x0, y0, x1, y1 in EYES: eyes[y0:y1, x0:x1] = True
 rng = np.random.default_rng(7)
@@ -115,8 +126,8 @@ bg_hard = (below > 0.5).astype(np.float32)
 
 # --- Hair: a deep grey gradient (pre-shade 142 at the crown to 188 at the tips), the streak lighter,
 #     lock lines soft and only slightly darker; no lines in the brow zone (the brow lives behind).
-G = np.interp(ys, [0, 1100], [142, 188])
-G = G * (1 - bg_hard) + 82 * bg_hard
+G = np.interp(ys, [0, 1100], [142, TIPS])
+if not SHARP: G = G * (1 - bg_hard) + 82 * bg_hard
 # Lock lines after the reference: thin and blended. The drawn outlines are 6-8 px wide after the upscale;
 # keep their 2-3 px core (fine tips at half strength), blur lightly, darken the hair only ~10% there.
 core = cv2.erode(ink_bridged, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
@@ -142,7 +153,7 @@ plate = plate * (1 - edge[..., None]) + np.repeat(skinL[..., None], 3, 2) * edge
 
 # The right eye is redrawn from the eye sheet (outline, lashes and opening fitted onto it), so the drawn one
 # goes: its ink, white and iris become skin. A box around it keeps the rest of the face as drawn.
-REYE = (760, 690, 1440, 1220)
+REYE = (760, 690, 1640, 1220)
 Lp0 = cv2.cvtColor(plate0.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
 drawn_eye = (Lp0 < 150) | (Lp0 > 212) | (hsv[..., 1] > 40)
 drawn_eye |= np.asarray(Image.open(f'{H}/eye_right_fill.png')) > 0
@@ -211,7 +222,7 @@ plate = plate + (9 * (1 - ss(0, 110, jaw_dist)) * (above_soft > 0.5))[..., None]
 # Below the jaw: still and out of focus, blurred only from what is below it.
 blurred = cv2.GaussianBlur(base * bg_hard[..., None], (0, 0), 14) / np.maximum(cv2.GaussianBlur(bg_hard, (0, 0), 14), 1e-3)[..., None]
 plate = plate * (1 - below[..., None]) + blurred * below[..., None]
-hair_mask = mask * above_soft
+hair_mask = mask if SHARP else mask * above_soft
 # The head's shadow on the neck: darkest right under the jaw (~170 in the reference), gone ~190 px below.
 plate = plate * (1 - (0.12 * (1 - ss(0, 190, jaw_dist)) * below)[..., None])
 
@@ -223,24 +234,36 @@ plate = plate * (1 - jl[..., None]) + JAW_TONE * jl[..., None]
 
 # The brow: its drawn shape (brow_band) refitted as one smooth curve at ~55% of its width, tapered at both
 # ends, drawn on the skin behind the hair so it shows between the locks as the reference's brows do.
-bx, by, bw = [], [], []
-for x in range(w):
-    col = np.where(brow_band[:, x])[0]
-    if len(col): bx.append(x); by.append((col.min() + col.max()) / 2); bw.append(col.max() - col.min() + 1)
-bx, by, bw = (np.array(v, np.float32) for v in (bx, by, bw))
-xs = np.arange(bx.min(), bx.max() + 1, 1.0, dtype=np.float32)
-brow = np.stack([xs, np.polyval(np.polyfit(bx, by, 4), xs)], 1).astype(np.float32)
-brow_w = np.maximum(np.polyval(np.polyfit(bx, bw, 4), xs) * 0.55, 1.5)
-brow_a = 0.9 * (0.8 + 0.2 * fade[np.clip(brow[:, 1].astype(int), 0, h - 1), brow[:, 0].astype(int)])
-bl = stroke(brow, brow_w, brow_a)
+def brow_stroke(band):
+    """A brow band refitted as one tapered stroke: its centre curve and the stroke's alpha."""
+    bx, by, bw = [], [], []
+    for x in range(w):
+        col = np.where(band[:, x])[0]
+        if len(col): bx.append(x); by.append((col.min() + col.max()) / 2); bw.append(col.max() - col.min() + 1)
+    bx, by, bw = (np.array(v, np.float32) for v in (bx, by, bw))
+    xs = np.arange(bx.min(), bx.max() + 1, 1.0, dtype=np.float32)
+    brow = np.stack([xs, np.polyval(np.polyfit(bx, by, 4), xs)], 1).astype(np.float32)
+    brow_w = np.maximum(np.polyval(np.polyfit(bx, bw, 4), xs) * 0.55, 1.5)
+    brow_a = 0.9 * (0.8 + 0.2 * fade[np.clip(brow[:, 1].astype(int), 0, h - 1), brow[:, 0].astype(int)])
+    # Only the pieces between her locks show, and running at full width and strength right up to a lock's edge they read as
+    # a bar cut off by the hair (or joining two locks). Each piece thins and fades over the last BROW_TAPER px before the
+    # hair (per pixel, so the fade has no steps), so the brow passes behind the locks; the hair's edge is where it rests
+    # (the window moves the brow a little).
+    on_skin = cv2.distanceTransform((mask <= 0.5).astype(np.uint8), cv2.DIST_L2, 5)
+    bi = np.clip(np.round(brow).astype(int), 0, [w - 1, h - 1])
+    taper = ss(BROW_TAPER[0], BROW_TAPER[1], on_skin[bi[:, 1], bi[:, 0]])
+    brow_w = np.maximum(brow_w * (0.45 + 0.55 * taper), 1.0)
+    bl = stroke(brow, brow_w, brow_a) * ss(BROW_TAPER[0], BROW_TAPER[1], on_skin)
+    return brow, bl
+brow, bl = brow_stroke(brow_band)
 # Not painted on the plate: written as its own sprite (closeup-brow.png, placed by closeup-eyes.json's 'brow', in view
 # px) so the window can raise, lower and tilt it with her moods, still behind the hair.
 (by0, bx0), (by1, bx1) = np.argwhere(bl > 0.01).min(0) - 8, np.argwhere(bl > 0.01).max(0) + 9
-Image.fromarray(np.dstack([np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), bl * 255])[by0:by1, bx0:bx1].astype(np.uint8)).save(OUT + 'closeup-brow.png', optimize=True)
+Image.fromarray(np.dstack([np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), np.full_like(bl, BROW_TONE), bl * 255])[by0:by1, bx0:bx1].astype(np.uint8)).save(OUT + f'{N}-brow.png', optimize=True)
 V = 922 / 1440
-brow_at = {'x': round(690 + bx0 * V, 2), 'y': round(by0 * V, 2), 'w': round((bx1 - bx0) * V, 2), 'h': round((by1 - by0) * V, 2),
-           'inner': [round(690 + float(brow[0, 0]) * V, 1), round(float(brow[0, 1]) * V, 1)], 'outer': [round(690 + float(brow[-1, 0]) * V, 1), round(float(brow[-1, 1]) * V, 1)]}
-print('brow from', brow[0].round(), 'to', brow[-1].round(), 'max width', brow_w.max().round(1))
+brow_at = {'x': round(X0 + bx0 * V, 2), 'y': round(by0 * V, 2), 'w': round((bx1 - bx0) * V, 2), 'h': round((by1 - by0) * V, 2),
+           'inner': [round(X0 + float(brow[0, 0]) * V, 1), round(float(brow[0, 1]) * V, 1)], 'outer': [round(X0 + float(brow[-1, 0]) * V, 1), round(float(brow[-1, 1]) * V, 1)]}
+print('brow from', brow[0].round(), 'to', brow[-1].round())
 
 # --- The right eye from the sheet: fit the sheet's sclera onto her eye opening (affine, ECC), then carry the
 #     sheet's outline and lashes across with the same transform, in her own lash colour.
@@ -318,7 +341,7 @@ print('strokes', n_s - 1, '| drop at inner corner / middle / edge', [round(float
 LID_SHADOW = np.array([58, 34, 54], np.float32)
 BLINK_FRAMES = 33
 SC = 1440 / 922
-geom = lambda x0, y0, x1, y1: {'x': round(690 + float(x0) / SC, 2), 'y': round(float(y0) / SC, 2), 'w': round(float(x1 - x0) / SC, 2), 'h': round(float(y1 - y0) / SC, 2)}
+geom = lambda x0, y0, x1, y1: {'x': round(X0 + float(x0) / SC, 2), 'y': round(float(y0) / SC, 2), 'w': round(float(x1 - x0) / SC, 2), 'h': round(float(y1 - y0) / SC, 2)}
 
 
 def save_lower(lower_a, name):
@@ -381,7 +404,7 @@ def outline_of(m):
     pad = np.vstack([c[-12:], c, c[:12]])
     c = np.stack([cv2.GaussianBlur(pad[:, i:i + 1].T, (0, 0), 2.0, borderType=cv2.BORDER_REPLICATE)[0] for i in (0, 1)], 1)[12:-12]
     c = cv2.approxPolyDP(c.reshape(-1, 1, 2), 0.3, True)[:, 0, :]
-    return ' '.join(f'{690 + x / SC:.1f},{y / SC:.1f}' for x, y in c), round(float(c[:, 1].min()) / SC, 1), round(float(c[:, 1].max()) / SC, 1)
+    return ' '.join(f'{X0 + x / SC:.1f},{y / SC:.1f}' for x, y in c), round(float(c[:, 1].min()) / SC, 1), round(float(c[:, 1].max()) / SC, 1)
 
 
 # The right eye's iris, pupil and main reflection, in view (source) px: the iris rests on the lower lid and the
@@ -390,8 +413,8 @@ R_IRIS, R_PUPIL, R_SHINE = (1404, 651, 109), (1398, 664, 15, 52), (1347, 627, 20
 eyes = {}
 r_open, r_top, r_bot = outline_of(opening)
 eyes['right'] = {'open': r_open, 'top': r_top, 'bottom': r_bot,
-                 'outline': save_lower(lower_a, 'closeup-eye-right.png'), 'blink': save_blink(upper_a, opening, drop, 'closeup-blink-right.png'),
-                 'smile': save_blink(upper_a, opening, drop, 'closeup-smile-right.png', smile_drop),
+                 'outline': save_lower(lower_a, f'{N}-eye-right.png'), 'blink': save_blink(upper_a, opening, drop, f'{N}-blink-right.png'),
+                 'smile': save_blink(upper_a, opening, drop, f'{N}-smile-right.png', smile_drop),
                  'iris': dict(zip(('cx', 'cy', 'r'), R_IRIS)), 'pupil': dict(zip(('cx', 'cy', 'rx', 'ry'), R_PUPIL)), 'shine': dict(zip(('cx', 'cy', 'r'), R_SHINE))}
 
 # The left eye: the right one mirrored, its inner corner set on the drawn left eye's inner corner (the only part of
@@ -406,18 +429,18 @@ src_x = cx - np.arange(w)
 drop_l = np.where((src_x >= 0) & (src_x < w), drop[np.clip(src_x, 0, w - 1)], 0).astype(np.float32)
 smile_l = np.where((src_x >= 0) & (src_x < w), smile_drop[np.clip(src_x, 0, w - 1)], 0).astype(np.float32)
 opening_l = mirror(opening) > 0.5
-mx = lambda x: round(690 + (cx - (x - 690) * SC) / SC, 1)
+mx = lambda x: round(X0 + (cx - (x - X0) * SC) / SC, 1)
 my = lambda y: round(y + dy / SC, 1)
 l_open, l_top, l_bot = outline_of(opening_l)
 eyes['left'] = {'open': l_open, 'top': l_top, 'bottom': l_bot,
-                'outline': save_lower(mirror(lower_a), 'closeup-eye-left.png'), 'blink': save_blink(mirror(upper_a), opening_l, drop_l, 'closeup-blink-left.png'),
-                'smile': save_blink(mirror(upper_a), opening_l, drop_l, 'closeup-smile-left.png', smile_l),
+                'outline': save_lower(mirror(lower_a), f'{N}-eye-left.png'), 'blink': save_blink(mirror(upper_a), opening_l, drop_l, f'{N}-blink-left.png'),
+                'smile': save_blink(mirror(upper_a), opening_l, drop_l, f'{N}-smile-left.png', smile_l),
                 'iris': {'cx': mx(R_IRIS[0]), 'cy': my(R_IRIS[1]), 'r': R_IRIS[2]},
                 'pupil': {'cx': mx(R_PUPIL[0]), 'cy': my(R_PUPIL[1]), 'rx': R_PUPIL[2], 'ry': R_PUPIL[3]},
                 'shine': {'cx': mx(R_SHINE[0]), 'cy': my(R_SHINE[1]), 'r': R_SHINE[2]}}
 print('left eye: mirror about x', cx, 'shift', round(dy, 1), '| inner corner', (xl, round(yl)), '| iris', eyes['left']['iris'])
 eyes['brow'] = brow_at
-json.dump(eyes, open(OUT + 'closeup-eyes.json', 'w'), indent=1)
+json.dump(eyes, open(OUT + f'{N}-eyes.json', 'w'), indent=1)
 print('lash colour', LASH_RGB.round())
 
 # --- Write.
@@ -425,13 +448,21 @@ print('lash colour', LASH_RGB.round())
 # steps once every ~100 px, each step a straight line across the face. +-1 level of noise breaks the steps up;
 # the plate is saved lossless so compression cannot put them back.
 dither = lambda img: np.clip(img + (rng.random(img.shape[:2]) - rng.random(img.shape[:2]))[..., None], 0, 255).astype(np.uint8)
+# A view whose hair runs on past the drawing's right edge (alpha.png, its picture's outline; `edge`, the drawing's last
+# column) is see-through outside that outline, and under its hair out there the plate is that hair itself: nothing
+# else is drawn there to show when the locks swing.
+alpha = np.asarray(Image.open(f'{H}/alpha.png'))[..., None].astype(np.float32) / 255 if os.path.exists(f'{H}/alpha.png') else None
+if alpha is not None:
+    plate = np.where((np.arange(w) >= VIEW['edge'])[None, :, None], base, plate)
+    hair_mask = hair_mask * alpha[..., 0]
+with_alpha = lambda img: img if alpha is None else np.dstack([img, (alpha * 255).round().astype(np.uint8)])
 base_out = dither(base)
 plate_out = dither(plate)
 r = cv2.GaussianBlur((hair_mask * 255).astype(np.uint8), (0, 0), 1.2)
 g = cv2.GaussianBlur(cv2.erode((hair_mask > 0.5).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))), (0, 0), 1.0)
-Image.fromarray(base_out).save(OUT + 'haru-closeup.webp', quality=94, method=6)
-Image.fromarray(plate_out).save(OUT + 'closeup-plate.webp', lossless=True, quality=100, method=6)
-Image.fromarray(np.dstack([r, g, np.zeros_like(r)])).save(OUT + 'closeup-hair.png', optimize=True)
+Image.fromarray(with_alpha(base_out)[:, CROP:]).save(OUT + f'haru-{N}.webp', quality=94, method=6)
+Image.fromarray(with_alpha(plate_out)[:, CROP:]).save(OUT + f'{N}-plate.webp', lossless=True, quality=100, method=6)
+Image.fromarray(np.dstack([r, g, np.zeros_like(r)])[:, CROP:]).save(OUT + f'{N}-hair.png', optimize=True)
 
 # --- The mouth sheet (build/portrait/mouths, traced SVGs on one 269x277 canvas, viewBox 538x554) as clean grey
 #     sprites: each traced path's outline is smoothed (the trace's wobble and stair-steps go), the paths are painted in
@@ -513,7 +544,7 @@ def raster_mouth(svg_path):
 
 
 t0 = time.time()
-for svg in sorted(glob.glob('build/portrait/mouths/M_*.svg')):
+for svg in sorted(glob.glob('build/portrait/mouths/M_*.svg')) if N == 'closeup' else []:   # shared by every view
     name = os.path.basename(svg)[:-4]
     Image.fromarray(raster_mouth(svg)).save(OUT + f'mouth-sprites/{name}.png', optimize=True)
 print('mouth sprites', len(glob.glob(OUT + 'mouth-sprites/*.png')), 'in', round(time.time() - t0, 1), 's')
