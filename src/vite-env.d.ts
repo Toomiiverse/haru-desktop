@@ -4,6 +4,8 @@ interface Window {
   PIXI?: unknown;
   Live2DCubismCore?: unknown;
   haru?: {
+    mail: import('../electron/mail').MailAPI;
+    imageEditor: import('./wardrobe').WardrobeAPI;
     settings: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
     startup: { get(): Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>; setAutoStart(enabled: boolean): Promise<boolean>; createShortcut(): Promise<string> };
     updates: { get(): Promise<import('./types').UpdateReport>; onState(callback: (report: import('./types').UpdateReport) => void): () => void };
@@ -44,17 +46,6 @@ interface Window {
     gaming: { get(): Promise<import('./types').GamingConfig>; set(config: import('./types').GamingConfig): Promise<import('./types').GamingConfig> };
     web: { status(): Promise<import('./types').WebStatus>; setPassword(username: string, password: string): Promise<boolean>; setEnabled(enabled: boolean): Promise<boolean>; forgetDevice(id: string): Promise<import('./types').WebDevice[]> };
     ui: { page(page: string): Promise<void> };
-    journal: {
-      list(): Promise<import('./types').JournalEntry[]>;
-      save(entry: Partial<import('./types').JournalEntry> & { text: string }): Promise<import('./types').JournalEntry[]>;
-      remove(id: string): Promise<import('./types').JournalEntry[]>;
-      getConfig(): Promise<import('./types').JournalConfig>;
-      setConfig(config: import('./types').JournalConfig): Promise<import('./types').JournalConfig>;
-      stats(range: import('./types').JournalRange): Promise<import('./types').JournalStats>;
-      note(): Promise<import('./types').HaruNote>;
-      trend(): Promise<import('./types').JournalTrend>;
-      onChange(callback: (entries: import('./types').JournalEntry[]) => void): () => void;
-    };
     anilist: {
       get(): Promise<import('./types').AniListConfig>;
       set(config: import('./types').AniListConfig): Promise<import('./types').AniListConfig>;
@@ -82,7 +73,7 @@ interface Window {
       test(): Promise<number>;
     };
     chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onRatedFromPhone(callback: (turn: { id: string; reaction?: import('./types').Reaction; note?: string }) => void): () => void; onSaidFromPhone(callback: (turn: { reply: string; said: string }) => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: import('./types').Attachment[] }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void>; getAsides(): Promise<import('./types').Aside[]>; clearAsides(): Promise<import('./types').Aside[]>; getHeldBack(): Promise<import('./types').HeldBack[]>; onHeldBack(callback: (held: import('./types').HeldBack[]) => void): () => void; onAside(callback: (aside: import('./types').Aside) => void): () => void; onAsidesCleared(callback: () => void): () => void };
-    ai: { send(messages: { role: string; content: string; at?: string; attachments?: import('./types').Attachment[] }[], config: import('./types').ProviderConfig): Promise<import('./types').ChatResult>; test(endpoint: string, provider?: string): Promise<string[]>; defaultEndpoint(provider: string): Promise<string>; verify(endpoint: string, provider: string, model: string): Promise<{ models: string[]; note: string }>; getEscalate(): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setEscalate(setting: { enabled: boolean; minWords: number }, provider: import('./types').ProviderConfig | null): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setKey(apiKey: string): Promise<boolean>; hasKey(): Promise<boolean>; setSelfHostedKey(apiKey: string): Promise<boolean>; hasSelfHostedKey(): Promise<boolean>; retort(disliked: string, config: import('./types').ProviderConfig): Promise<string>; gloat(praised: string, config: import('./types').ProviderConfig): Promise<string> };
+    ai: { send(messages: { role: string; content: string; at?: string; attachments?: import('./types').Attachment[] }[], config: import('./types').ProviderConfig): Promise<import('./types').ChatResult>; onServerChunk(callback: (text: string) => void): () => void; test(endpoint: string, provider?: string): Promise<string[]>; defaultEndpoint(provider: string): Promise<string>; verify(endpoint: string, provider: string, model: string): Promise<{ models: string[]; note: string }>; getEscalate(): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setEscalate(setting: { enabled: boolean; minWords: number }, provider: import('./types').ProviderConfig | null): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setKey(apiKey: string): Promise<boolean>; hasKey(): Promise<boolean>; setSelfHostedKey(apiKey: string): Promise<boolean>; hasSelfHostedKey(): Promise<boolean>; retort(disliked: string, config: import('./types').ProviderConfig): Promise<string>; gloat(praised: string, config: import('./types').ProviderConfig): Promise<string> };
     mood: { get(): Promise<import('./types').Mood>; react(reaction: import('./types').Reaction, id?: string): Promise<import('./types').Mood> };
     profile: { get(): Promise<import('./types').Profile>; set(profile: import('./types').Profile): Promise<import('./types').Profile> };
     memory: {
@@ -115,6 +106,13 @@ interface Window {
       disconnect(): Promise<import('./types').GoogleStatus>;
       sync(): Promise<import('./types').GoogleStatus>;
       onChange(callback: (status: import('./types').GoogleStatus) => void): () => void;
+    };
+    call: {
+      start(): Promise<void>;
+      stop(): Promise<void>;
+      frame(pcm: Uint8Array): void;
+      onState(callback: (state: { state: 'connecting' | 'live' | 'ended'; reason?: string }) => void): () => void;
+      onSaid(callback: (line: { who: 'you' | 'her'; text: string }) => void): () => void;
     };
     voice: {
       get(): Promise<import('./types').VoiceConfig>;
@@ -152,11 +150,18 @@ interface Window {
       resizeBy(factor: number): Promise<void>;
       showMenu(): Promise<void>;
       poke(kind: 'poke' | 'right-click'): Promise<void>;
+      /** A face read off your half-typed message; main echoes it to every window as a beat. */
+      feel(beat: import('./types').Beat): Promise<void>;
       open(): Promise<string>;
       close(): Promise<void>;
       ask(text: string): Promise<{ reply: string; ignored: boolean; choices: string[] }>;
       onWalking(callback: (state: { moving: boolean; facing: number }) => void): () => void;
       onSay(callback: (line: string | null) => void): () => void;
+      onThinking(callback: (thinking: boolean) => void): () => void;
+      onTerminal(callback: (line: string) => void): () => void;
+      onCoding(callback: (state: { on: boolean; label: string }) => void): () => void;
+      onCode?(callback: (hunk: { file: string; lines: string[] }) => void): () => void;
+      onMusic?(callback: (event: { type: string } & Record<string, unknown>) => void): () => void;
       onPanel(callback: (panel: { id: number; title: string; body: string; image: string; seconds: number }) => void): () => void;
       onWatching(callback: (gaze: { x: number; y: number } | null) => void): () => void;
       onCursor(callback: (point: { x: number; y: number }) => void): () => void;

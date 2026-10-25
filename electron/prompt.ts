@@ -29,7 +29,6 @@ import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
 import { summariseFollowing, type Following } from './following';
 import { CONTINUITY, EXPRESSIVE, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction } from './room';
-import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } from './journal';
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
 import { LAYER, compileBehaviour, type Candidate, type Compiled } from './compile';
@@ -192,8 +191,6 @@ export type PromptState = {
    */
   profile: string;
   aniList: string;
-  journalConfig: JournalConfig;
-  journal: JournalEntry[];
   checkInsToday: CheckIn[];
   screen: { label?: string; haunt?: Haunt; scene?: string; memory?: string };
   asides: Aside[];
@@ -347,7 +344,6 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // agenda is: asked what they are in the middle of, a model that would have
     // to choose to check simply answers instead.
     { stable: false, text: state.aniList },
-    { stable: false, text: journalPrompt(state.journalConfig, state.journal, today) },
     // What they jotted down on their phone while the day was happening. This is
     // the whole reason for taking them: back at the desk she can ask about the
     // eleven o'clock spike rather than "how was your day", which is the
@@ -463,7 +459,6 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // actually started repeating herself.
     { stable: false, text: notTwiceInstruction(state.herRecentReplies) },
     { stable: false, text: emojiRut(state.herRecentReplies) },
-    { stable: false, text: journalStance(state.journal, today) },
     // Last of the tone lines: what they just said outranks anything she knew
     // beforehand, including her own mood.
     { stable: false, text: roomInstruction(readsAsRough(latestMessage)) },

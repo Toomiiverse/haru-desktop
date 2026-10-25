@@ -12,7 +12,8 @@ export type CallConfig = {
   endAfterMs: number;
 };
 
-export const DEFAULT_CALL: CallConfig = { engine: 'hume', endAfterMs: 550 };
+// Local by default: Hume's EVI is retired, and a call left on it was refused.
+export const DEFAULT_CALL: CallConfig = { engine: 'local', endAfterMs: 550 };
 
 export function readCallConfig(saved: unknown): CallConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_CALL;

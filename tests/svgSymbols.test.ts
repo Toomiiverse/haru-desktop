@@ -68,19 +68,38 @@ function drive() {
     getAttribute(k: string) { return this.attrs[k]; }, setAttribute(k: string, v: string) { this.attrs[k] = v; }, removeAttribute(k: string) { delete this.attrs[k]; },
     animate(frames: Keyframe[], options: any) { const a = { frames, options, cancelled: false, cancel() { this.cancelled = true; } }; animations.push(a); return a; },
   });
-  const layer = { innerHTML: '', replaceChildren() { this.innerHTML = ''; }, querySelectorAll() { return Array.from({ length: (this.innerHTML.match(/data-symbol-part/g) || []).length }, element); } };
+  const makeLayer = () => ({ innerHTML: '', replaceChildren() { this.innerHTML = ''; }, querySelectorAll() { return Array.from({ length: (this.innerHTML.match(/data-symbol-part/g) || []).length }, element); } });
+  const layer = makeLayer(), floatingLayer = makeLayer();
   const timers = new Map<number, () => void>(); let serial = 0;
   const box = element(), tuft = element();
   const context: any = { REACTION_SYMBOLS, HAIR_SYMBOLS, hairSymbolFrames, symbolFrames,
-    symbolTimer: null, symbolAnimations: new Set(), symbolLayer: layer, box,
+    symbolTimer: null, symbolAnimations: new Set(), symbolLayer: layer, floatingSymbolLayer: floatingLayer, box,
     nextEarTwitch: 0, clock: () => 1000,
     faces: [{ querySelector: () => tuft }], front: 0, document: { createElementNS: element },
     motionPreference: { matches: false }, callbacks: { current: { onError: (s: string) => errors.push(s) } },
     setTimeout: (f: () => void) => { timers.set(++serial, f); return serial; }, clearTimeout: (id: number) => timers.delete(id),
   };
   vm.runInNewContext(stripTypeScriptTypes(code) + '\nglobalThis.controls = { showSymbol, clearSymbol };', context);
-  return { controls: context.controls, context, layer, box, animations, timers, tuft, errors };
+  return { controls: context.controls, context, layer, floatingLayer, box, animations, timers, tuft, errors };
 }
+
+test('floating cues animate outside the face while eye and blush effects remain attached', () => {
+  const d = drive();
+  d.controls.showSymbol('sweatdrop');
+  assert.ok(d.floatingLayer.innerHTML); assert.equal(d.layer.innerHTML, '');
+  const prior = [...d.animations];
+  d.controls.showSymbol('blush');
+  assert.ok(d.layer.innerHTML); assert.equal(d.floatingLayer.innerHTML, '');
+  assert.ok(prior.every(a => a.cancelled));
+  d.controls.showSymbol('sparkle-eyes');
+  assert.equal((String(d.layer.innerHTML).match(/data-symbol-part/g) || []).length, 2);
+  assert.equal((String(d.floatingLayer.innerHTML).match(/data-symbol-part/g) || []).length, 1);
+  d.controls.clearSymbol(); assert.equal(d.layer.innerHTML, '');
+  for (const [name, kind] of [['curious', 'ray'], ['surprised', 'ray'], ['thinking', 'dot']]) {
+    const svg = readFileSync('build/emotions/' + name + '.svg', 'utf8');
+    assert.equal((svg.match(new RegExp('data-reaction-mark="' + kind + '"', 'g')) || []).length, 3);
+  }
+});
 
 test('replacing and clearing symbols cancels old animations and restores normal eyes', () => {
   const d = drive(); d.controls.showSymbol('dizzy'); assert.equal(d.box.attrs['data-symbol-eyes'], 'true');
@@ -97,7 +116,7 @@ test('replacing and clearing symbols cancels old animations and restores normal 
 test('reduced motion uses a temporary still mark instead of a hair morph', () => {
   const d = drive(); d.context.motionPreference.matches = true;
   d.controls.showSymbol('hair-question'); assert.equal(d.box.attrs['data-symbol'], 'question');
-  assert.equal(d.animations.length, 0); assert.ok(d.layer.innerHTML);
+  assert.equal(d.animations.length, 0); assert.ok(d.floatingLayer.innerHTML);
   [...d.timers.values()][0](); assert.equal(d.layer.innerHTML, ''); assert.equal(d.timers.size, 0);
 });
 

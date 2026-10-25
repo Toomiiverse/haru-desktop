@@ -24,7 +24,6 @@ import { pathToFileURL } from 'node:url';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
-import { readJournalConfig, SCALE_MAX, type JournalEntry } from './journal';
 import { formatMedia, formatMissing, lookUp, readAniListConfig, type MediaKind } from './anilist';
 import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
@@ -631,12 +630,6 @@ export const READ_PAGE_TOOL: ChatTool = {
  * shop listing.
  */
 /**
- * Recording what they told her, when the journal came up in conversation. The
- * description leans hard on using their own words: the point of a journal is
- * what they said, and a model left to summarise turns "work was a nightmare and
- * I barely slept" into "had a difficult day", which is not their entry any more.
- */
-/**
  * The words in a video, when they hand her a link or one turns up in a search.
  *
  * Described as reading rather than watching, in the tool as well as in what
@@ -667,12 +660,12 @@ export const SCREEN_TOOL: ChatTool = {
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: "What they said about their day and how they are feeling, in their words, tidied only where speech-to-text mangled it. Write it as they said it — first person." },
-        mood: { type: 'number', description: `How good they feel, 0–${SCALE_MAX}, only if they gave a number or said something plain enough to place on it. Leave it out rather than guessing.` },
-        anxiety: { type: 'number', description: `How anxious they feel, 0–${SCALE_MAX}, where 0 is calm. Only if they said. Leave it out rather than guessing.` },
-        energy: { type: 'number', description: `How much energy they have, 0–${SCALE_MAX}. Only if they said.` },
+        title: { type: 'string', description: 'A few words across the top of the panel.' },
+        body: { type: 'string', description: 'The note itself, a sentence or a short paragraph. Optional when there is a picture.' },
+        image: { type: 'string', description: 'A picture to show: a full path on this machine or an https URL. Optional.' },
+        seconds: { type: 'number', description: 'How long it stays up. Default 45; up to 600.' },
       },
-      required: ['text'],
+      required: ['title'],
     },
   },
 };
@@ -971,7 +964,6 @@ type KeptLike = { id: string; title: string; date: string; time?: string; kind: 
 export type ToolAvailability = {
   /** Whether there is a box on screen to draw the replies in. */
   choices: boolean;
-  journal: boolean;
   anilist: boolean;
   /** True while she is answering someone on the web, where the desk tools are off the table. */
   web: boolean;
@@ -1116,10 +1108,6 @@ export type ToolDeps = {
   };
   getCheckIns(): CheckInStore;
   setCheckIns(entries: CheckInStore): void;
-  getJournal(): JournalEntry[];
-  writeJournal(text: string, ratings: { mood?: number; anxiety?: number; energy?: number; sleep?: number }, prompted: boolean): JournalEntry | undefined;
-  /** Records that today's entry is written, so she stops asking for it. */
-  noteJournalAsked(date: string): void;
   getKept(): KeptLike[];
   addKeptItem(item: { title: string; date: string; time?: string; kind: 'task' | 'event' }): KeptLike;
   toggleKept(id: string, force?: boolean): void;
@@ -1214,7 +1202,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   // Destructured under the names the body already used, so what moved here is
   // the same code and not a rewrite of it.
   const {
-    CHAT_TIMEZONE, net, store, getCheckIns, setCheckIns, getJournal, writeJournal, noteJournalAsked,
+    CHAT_TIMEZONE, net, store, getCheckIns, setCheckIns,
     getKept, addKeptItem, toggleKept, removeKept, updateKept, getMemories, setMemories, addMemory,
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
@@ -1237,27 +1225,6 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setCheckIns(addCheckIn(getCheckIns(), note.slice(0, 1000), rating, new Date(), localDateKey(now)));
     console.log(`[checkin] noted from conversation${rating ? ` (anxiety ${rating}/10)` : ''}`);
     return JSON.stringify({ saved: true, note: note.slice(0, 120), anxiety: rating ?? null, today: checkInsOn(getCheckIns(), localDateKey(now)).length });
-  }
-  if (name === 'save_journal_entry') {
-    const text = typeof args.text === 'string' ? args.text.trim() : '';
-    if (!text) return JSON.stringify({ error: 'There is nothing to write down yet. Ask them how the day went first.' });
-    if (!readJournalConfig(store.get('journal.config')).enabled) return JSON.stringify({ error: 'The journal is switched off.' });
-    const entry = writeJournal(text, {
-      mood: typeof args.mood === 'number' ? args.mood : undefined,
-      anxiety: typeof args.anxiety === 'number' ? args.anxiety : undefined,
-      energy: typeof args.energy === 'number' ? args.energy : undefined,
-    }, true);
-    // Length and which ratings landed, never the text. A journal that shows up in
-    // a log file is not a private one.
-    console.log(`[journal] wrote ${entry?.date}: ${text.length} chars, mood ${entry?.mood ?? '-'}, anxiety ${entry?.anxiety ?? '-'}`);
-    if (entry?.date) noteJournalAsked(entry.date);
-    return JSON.stringify({
-      saved: true,
-      date: entry?.date,
-      mood: entry?.mood ?? null,
-      anxiety: entry?.anxiety ?? null,
-      note: 'Written down. Say something brief and human about it — react to what they actually told you. Do not read the entry back, do not summarise it as a list, and do not offer advice or diagnose anything.',
-    });
   }
   if (name === 'look_up_anime') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';

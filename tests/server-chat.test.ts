@@ -21,11 +21,13 @@ test('native uploads arrive before chat and only server file references travel w
       return Response.json({ attachment: remote });
     }
     assert.deepEqual(JSON.parse(String(init!.body)), { text: 'Help with topic one', attachments: [remote] });
-    return Response.json({ reply: 'Here is topic one.' });
+    return new Response(`data: ${JSON.stringify({ done: true, reply: 'Here is topic one.' })}
+
+`);
   };
   const answer = await sendServerChat(request, 'Help with topic one', [{ attachment: local, bytes: new Uint8Array([1, 2, 3]) }]);
   assert.equal(answer.content, 'Here is topic one.');
-  assert.deepEqual(calls, ['/api/attach?name=Topic%201.pdf', '/api/chat']);
+  assert.deepEqual(calls, ['/api/attach?name=Topic%201.pdf', '/api/chat/stream?thread=desk']);
 });
 
 test('failed uploads never send an empty chat; completed staging is cleaned up', async () => {

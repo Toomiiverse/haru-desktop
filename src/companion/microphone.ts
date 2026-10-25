@@ -195,6 +195,54 @@ export async function startListening(onUtterance: (clip: Recording) => void): Pr
 }
 
 /**
+ * Opens the microphone for a call and hands back every frame, as 16 kHz mono
+ * PCM16 — what the server's call engine listens to. No detection here: the
+ * server decides where an utterance begins and ends, and whether it was hers.
+ */
+export async function startStreaming(onFrame: (pcm: Uint8Array) => void): Promise<{ stop(): void; level(): number }> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  const context = new AudioContext();
+  const source = context.createMediaStreamSource(stream);
+  // 2048 at 48 kHz is ~43 ms a frame: small enough that the end of a sentence is heard promptly.
+  const processor = context.createScriptProcessor(2048, 1, 1);
+  let live = 0;
+  let closed = false;
+  processor.onaudioprocess = event => {
+    if (closed) return;
+    const input = event.inputBuffer.getChannelData(0);
+    let sum = 0;
+    for (const sample of input) sum += sample * sample;
+    live = live * 0.7 + Math.sqrt(sum / input.length) * 0.3;
+    const reduced = downsample(input, context.sampleRate, TARGET_RATE);
+    const pcm = new Int16Array(reduced.length);
+    for (let i = 0; i < reduced.length; i++) {
+      const clamped = Math.max(-1, Math.min(1, reduced[i]));
+      pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    }
+    onFrame(new Uint8Array(pcm.buffer));
+  };
+  source.connect(processor);
+  const mute = context.createGain();
+  mute.gain.value = 0;
+  processor.connect(mute);
+  mute.connect(context.destination);
+  return {
+    level: () => Math.min(1, live * 12),
+    stop() {
+      if (closed) return;
+      closed = true;
+      processor.disconnect();
+      source.disconnect();
+      mute.disconnect();
+      for (const track of stream.getTracks()) track.stop();
+      void context.close();
+    },
+  };
+}
+
+/**
  * Opens the microphone and starts recording. Rejects if permission is refused or
  * there is no input device, which is worth surfacing rather than leaving a
  * button that silently does nothing.

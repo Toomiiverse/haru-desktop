@@ -369,7 +369,7 @@ test('the call config reads forward, and the fillers rotate', () => {
   assert.deepEqual(readCallConfig(undefined), DEFAULT_CALL);
   assert.equal(readCallConfig({ engine: 'local', endAfterMs: 400 }).engine, 'local');
   assert.equal(readCallConfig({ engine: 'local', endAfterMs: 400 }).endAfterMs, 400);
-  assert.equal(readCallConfig({ engine: 'nope', endAfterMs: 5 }).engine, 'hume');
+  assert.equal(readCallConfig({ engine: 'nope', endAfterMs: 5 }).engine, 'local');
   assert.equal(readCallConfig({ endAfterMs: 5 }).endAfterMs, 200, 'clamped');
   assert.equal(pickFiller(0), FILLERS[0]);
   assert.equal(pickFiller(0.999), FILLERS[FILLERS.length - 1]);

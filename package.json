@@ -16,6 +16,7 @@
     "build:face": "tsc --ignoreConfig src/companion/face.ts --module es2022 --target es2022 --strict --outDir spike/vrm/gen"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.0",
     "@pixi/unsafe-eval": "^6.5.10",
     "adm-zip": "0.5.16",
     "electron-store": "11.0.2",

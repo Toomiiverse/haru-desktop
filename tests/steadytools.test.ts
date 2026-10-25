@@ -6,7 +6,7 @@ import { chatTools, steadyTable, type ToolAvailability } from '../electron/tools
 
 // Asserted rather than declared: not every tree this runs in has the same fields.
 const AVAILABLE = {
-  choices: false, journal: true, anilist: false, web: true,
+  choices: false, anilist: false, web: true, screen: false,
   search: { enabled: true, readPages: true, transcripts: false },
   knowledge: true, browser: false, claude: true, system: { enabled: true, level: 2 },
   hands: true, desktop: { launch: false, power: false }, knockedAwake: false, minecraft: false,

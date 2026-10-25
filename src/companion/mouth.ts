@@ -17,7 +17,9 @@ import type { SpeechClip } from '../types';
  * oo/oh) and high (3.5-9 kHz, s/sh/f/t hiss). Absent where there is no audio to measure.
  */
 export type Bands = { low: number; mid: number; high: number };
-export type MouthReading = { open: number; weight: number; bands?: Bands };
+export type MouthReading = { open: number; weight: number; bands?: Bands; pause?: Pause };
+/** A pause she is holding at punctuation: a comma's breath or a full stop's. */
+export type Pause = 'comma' | 'stop';
 
 // Speech sits well below full scale, so the usable range is narrow. Below the
 // floor is the gap between words and should read as a closed mouth; above the
@@ -34,6 +36,50 @@ const FFT_SIZE = 1024;
 // How quickly the band balance follows the voice (per frame): enough to see a vowel change, not a single noisy frame.
 const BANDS_FOLLOW = 0.4;
 const BAND_HZ = { low: [150, 900], mid: [900, 2600], high: [3500, 9000] } as const;
+
+// Pauses at punctuation, so her mouth stops where a person's would. The synthesiser runs the words of a sentence
+// together and plays sentences back to back; a comma inside a clip is found by where it falls in the text, then
+// the quietest stretch of audio near there (a natural dip, if there is one) is where the clip is split.
+const PAUSE_MS: Record<Pause, number> = { comma: 200, stop: 380 };
+const PAUSE_MARKS: [RegExp, Pause][] = [[/[.!?…]/, 'stop'], [/[,;:—–]/, 'comma']];
+// Seconds either side of a comma's estimated time to look for the dip; the dip must be this quiet against the clip.
+// 0.1 (-20dB) is real silence. At 0.35 (-9dB) cuts landed inside words ("Well," at -11dB) and the pause chopped them.
+const CUT_SEARCH_S = 0.35, CUT_QUIET = 0.1, CUT_MIN_GAP_S = 0.3;
+
+type Piece = { from: number; to: number; pause?: Pause };
+
+/** Splits a clip at the punctuation in its text, where the audio dips, into pieces with the pause after each. */
+export function piecesFor(samples: Float32Array, sampleRate: number, text: string): Piece[] {
+  const duration = samples.length / sampleRate, hop = Math.round(sampleRate * 0.02);
+  const rms: number[] = [];
+  for (let i = 0; i + hop <= samples.length; i += hop) {
+    let sum = 0;
+    for (let j = i; j < i + hop; j++) sum += samples[j] * samples[j];
+    rms.push(Math.sqrt(sum / hop));
+  }
+  const level = Math.sqrt(rms.reduce((a, r) => a + r * r, 0) / Math.max(1, rms.length));
+  const trimmed = text.trim(), letters = trimmed.length;
+  const kindOf = (ch: string) => PAUSE_MARKS.find(([re]) => re.test(ch))?.[1];
+  const pieces: Piece[] = [];
+  let from = 0;
+  for (let i = 0; i < letters - 1; i++) {
+    const kind = kindOf(trimmed[i]);
+    // A mark followed by another mark or not by a space ("2.5", "...") is not a pause of its own.
+    if (!kind || !/\s/.test(trimmed[i + 1])) continue;
+    const at = (i + 1) / letters * duration;
+    const lo = Math.max(from + CUT_MIN_GAP_S, at - CUT_SEARCH_S), hi = Math.min(duration - CUT_MIN_GAP_S, at + CUT_SEARCH_S);
+    let best = -1;
+    for (let k = Math.ceil(lo / 0.02); k * 0.02 <= hi && k < rms.length - 1; k++) {
+      const quiet = (rms[k - 1] + rms[k] + rms[k + 1]) / 3;
+      if (best < 0 || quiet < (rms[best - 1] + rms[best] + rms[best + 1]) / 3) best = k;
+    }
+    if (best < 1 || (rms[best - 1] + rms[best] + rms[best + 1]) / 3 > CUT_QUIET * level) continue;
+    pieces.push({ from, to: best * 0.02, pause: kind });
+    from = best * 0.02;
+  }
+  pieces.push({ from, to: duration, pause: kindOf(trimmed[letters - 1] ?? '') });
+  return pieces;
+}
 
 // Synthesised speech comes back quiet — measured at about -17dB peak against
 // music and game audio that routinely runs close to full scale — so at matched
@@ -76,6 +122,8 @@ const MAX_INSISTENCE = 1.9;
  * sits, so this mostly nudges outliers into line rather than moving everything.
  */
 const TARGET_RMS = 0.0316;
+// ponytail: fixed trim for streamed Breeze audio (measured -24.4dBFS RMS → TARGET_RMS). Per-line levelling needs the whole line; measure the first part if another engine streams.
+const STREAM_TRIM = 0.52;
 /**
  * How far a single clip may be moved. A chunk that is nearly silent — a breath,
  * a trailing "…mm" — has a tiny RMS and would otherwise be hauled up to full
@@ -156,6 +204,9 @@ export function createVoicePlayer(): VoicePlayer {
   let systemVoice = '';
   let queue: SpeechClip[] = [];
   let current: AudioBufferSourceNode | null = null;
+  // The pause being held between two pieces of a clip, or after one, and its timer.
+  let pause: Pause | undefined;
+  let pauseTimer: ReturnType<typeof setTimeout> | undefined;
   let busy = false;
   // The turn of the most recent clip accepted. Anything older is a leftover from
   // a reply she has already been interrupted out of.
@@ -167,6 +218,11 @@ export function createVoicePlayer(): VoicePlayer {
   // True while a Windows voice is talking — that path has no audio to measure,
   // so the mouth has to be driven differently.
   let synthesising = false;
+  // A streamed line (playPart): its parts already queued on the audio clock,
+  // when the last of them ends, and whether more of the line is still coming.
+  const scheduled = new Set<AudioBufferSourceNode>();
+  let streamEnd = 0;
+  let streaming = false;
 
   let level = 0;
   let weight = 0;
@@ -274,8 +330,49 @@ export function createVoicePlayer(): VoicePlayer {
     const clip = queue.shift();
     if (!clip) { busy = false; return; }
     busy = true;
-    if (clip.audio?.byteLength) void playAudio(clip);
+    if (clip.pcm?.byteLength) void playPart(clip);
+    else if (clip.audio?.byteLength) void playAudio(clip);
     else speakWithSystemVoice(clip.text);
+  }
+
+  /**
+   * One part of a line streamed from the server, scheduled to start exactly
+   * where the part before it ends — so she is talking while the rest of the
+   * line is still being made. No pieces and no per-clip levelling: both need
+   * the whole line, which is the wait this exists to skip.
+   */
+  async function playPart(clip: SpeechClip) {
+    const era = generation;
+    const ctx = audio();
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (era !== generation) return;
+    if (clip.turn !== turn) { playNext(); return; }
+    const pcm = clip.pcm!;
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    const buffer = ctx.createBuffer(1, pcm.byteLength >> 1, clip.sampleRate ?? 24000);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = view.getInt16(i * 2, true) / 32768;
+    const trim = ctx.createGain();
+    trim.gain.value = STREAM_TRIM;
+    trim.connect(compressor!);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(trim);
+    // A little headroom before the first part, so network jitter does not open gaps between the rest.
+    const at = Math.max(ctx.currentTime + 0.06, streamEnd);
+    streamEnd = at + buffer.duration;
+    streaming = Boolean(clip.more);
+    scheduled.add(source);
+    current = source;
+    source.onended = () => {
+      scheduled.delete(source);
+      if (source !== current) return;
+      current = null;
+      if (!clip.more) playNext();
+    };
+    source.start(at);
+    // More of this line is on its way: free the queue so it is scheduled the moment it lands.
+    if (clip.more) playNext();
   }
 
   async function playAudio(clip: SpeechClip) {
@@ -294,8 +391,7 @@ export function createVoicePlayer(): VoicePlayer {
       // Silenced, or superseded by a newer reply, while this was decoding.
       if (era !== generation) return;
       if (clip.turn !== turn) { playNext(); return; }
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      const pieces = piecesFor(buffer.getChannelData(0), buffer.sampleRate, clip.text);
       // Every clip trimmed to the same loudness before anything else sees it.
       //
       // A reply is spoken as several chunks and each one is a separate run of
@@ -306,13 +402,27 @@ export function createVoicePlayer(): VoicePlayer {
       // it is, only it happens between two halves of the same thought.
       const trim = ctx.createGain();
       trim.gain.value = levellingFor(buffer);
-      source.connect(trim);
       // Into the head of the chain, not the gain: the compressor has to see the
       // signal at a consistent level to even it out correctly.
       trim.connect(compressor!);
-      source.onended = () => { if (source === current) { current = null; playNext(); } };
-      current = source;
-      source.start();
+      // The pieces in turn, each followed by its pause: silence the mouth closes on.
+      const playPiece = (k: number) => {
+        const piece = pieces[k];
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(trim);
+        source.onended = () => {
+          if (source !== current) return;
+          current = null;
+          const next = () => { pause = undefined; if (era !== generation) return; if (k + 1 < pieces.length) playPiece(k + 1); else playNext(); };
+          if (!piece.pause) { next(); return; }
+          pause = piece.pause;
+          pauseTimer = setTimeout(next, PAUSE_MS[piece.pause]);
+        };
+        current = source;
+        source.start(0, piece.from, piece.to - piece.from);
+      };
+      playPiece(0);
     } catch (error) {
       console.warn('[voice] could not play a clip:', error);
       if (era === generation) playNext();
@@ -395,12 +505,19 @@ export function createVoicePlayer(): VoicePlayer {
     queue = [];
     busy = false;
     synthesising = false;
+    clearTimeout(pauseTimer);
+    pause = undefined;
     if (current) {
       // The handler would otherwise start the next clip of a turn being abandoned.
       current.onended = null;
       try { current.stop(); } catch { /* already finished */ }
       current = null;
     }
+    // Parts of a streamed line already waiting on the audio clock.
+    for (const source of scheduled) { source.onended = null; try { source.stop(); } catch { /* already finished */ } }
+    scheduled.clear();
+    streamEnd = 0;
+    streaming = false;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
@@ -413,7 +530,7 @@ export function createVoicePlayer(): VoicePlayer {
       if (!busy) playNext();
     },
     stop: stopAll,
-    speaking: () => Boolean(current) || synthesising || queue.length > 0,
+    speaking: () => Boolean(current) || synthesising || queue.length > 0 || Boolean(pause) || streaming,
     setDuck(factor) {
       duckFactor = Number.isFinite(factor) && factor > 0 ? Math.min(1, factor) : 1;
       applyGain();
@@ -432,14 +549,14 @@ export function createVoicePlayer(): VoicePlayer {
     },
     read() {
       const target = measure();
-      const speaking = target > 0 || !!current || synthesising;
+      const speaking = target > 0 || !!current || synthesising || !!pause;
       level += (target - level) * (target > level ? ATTACK : RELEASE);
       // Weight is separate from level so that a closed mouth mid-sentence still
       // belongs to speech, and the pose layer does not get it back until she has
       // actually finished talking.
       weight += ((speaking ? 1 : 0) - weight) * WEIGHT_FADE;
       if (weight < 0.001) weight = 0;
-      return { open: level, weight, bands: current ? { ...bands } : undefined };
+      return { open: level, weight, bands: current ? { ...bands } : undefined, pause };
     },
     dispose() {
       stopAll();
@@ -447,4 +564,26 @@ export function createVoicePlayer(): VoicePlayer {
       context = null;
     },
   };
+}
+
+// The chart's talking mouths, by index into whichever set draws them: her screen's traced sprites, her figure's
+// drawn visemes. Closed is the rest mouth of the mood, whatever that is.
+export const MOUTH = { closed: 0, slit: 1, mid: 2, wide: 3, round: 4, roundSmall: 5 } as const;
+// Her synthesised voice is compressed, so its level sits near the top most of a line: the shape goes by the level
+// relative to how loud she has been over the last LOUD_S seconds (rising at once, never below LOUD_FLOOR). The
+// thresholds were tuned on her own voice clips (60 frames a second) to close between syllables about a tenth of
+// the time: hiss over HISS of the whole is a sibilant; a second formant under ROUNDED of the low band is a rounded
+// vowel, over FRONT a front one (ee/eh).
+export const LOUD_S = 1.5, LOUD_FLOOR = 0.3;
+export const SHUT = 0.06, CLOSED = 0.7;
+const MID = 0.85, WIDE = 0.95, ROUND_OPEN = 0.88;
+const HISS = 0.12, ROUNDED = 0.15, FRONT = 0.9;
+/** The chart's mouth for this voice level (`rel`, relative to her recent loudness) and band balance. */
+export function mouthFor(level: number, rel: number, bands?: Bands): number {
+  if (level < SHUT || rel < CLOSED) return MOUTH.closed;
+  const f2 = bands ? bands.mid / Math.max(bands.low, 1e-4) : 0.4;
+  if (bands && bands.high > HISS) return MOUTH.slit;
+  if (f2 < ROUNDED) return rel > ROUND_OPEN ? MOUTH.round : MOUTH.roundSmall;
+  if (f2 > FRONT) return rel > WIDE ? MOUTH.mid : MOUTH.slit;
+  return rel > WIDE ? MOUTH.wide : rel > MID ? MOUTH.mid : MOUTH.slit;
 }

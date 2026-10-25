@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { conversationMayLeave, mayLeaveTheMachine } from '../electron/sensitivity';
+import { conversationMayLeave, mayLeaveTheMachine } from '../electron/contentSafety';
 
 test('naming a secret keeps their message home; her own line only when a value is beside the word', () => {
   assert.equal(mayLeaveTheMachine("what's my wifi password again").safe, false);

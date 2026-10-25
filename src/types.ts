@@ -119,7 +119,7 @@ export interface VoiceReference { clip: string; text: string; }
 export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Partial<Record<EmotionName, VoiceReference>>; voiceId?: string; }
 // turn identifies which reply this belongs to, so clips left over from a reply
 // she has been interrupted out of can be dropped instead of played.
-export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; }
+export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; pcm?: Uint8Array; sampleRate?: number; more?: boolean; }
 // What she can change about how she looks. Discovered from the model's own
 // DisplayInfo rather than hardcoded — see electron/wardrobe.ts.
 export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; labels?: string[]; default?: number; }

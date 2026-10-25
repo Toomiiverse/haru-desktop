@@ -65,7 +65,7 @@ function drive() {
     motionPreference: { matches: false }, reduced: false, frozenAt: null, hairFrame: 0, hairLayers: new Map(),
     engine: { emotion: () => 'neutral' }, LABELS: { neutral: 'Haru feeling neutral' },
     clock: () => 1000, target: () => ({ x: 0 }), scheduleBlink() {}, look() {}, followHair() {},
-    cancelAnimationFrame() {}, requestAnimationFrame: () => 1, EASE_OUT_CSS: 'ease-out',
+    cancelAnimationFrame() {}, requestAnimationFrame: () => 1, EASE_OUT_CSS: 'ease-out', fit() {},
   };
   vm.runInNewContext(stripTypeScriptTypes(code) + '\nglobalThis.controls = { play, tap, drag, stopReaction, onMotionPreference };', context);
   return { ...context.controls, context, created, animations, box, symbols };

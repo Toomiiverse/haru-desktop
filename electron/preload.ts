@@ -39,8 +39,6 @@ type ScreenshotConfig = { enabled: boolean; folder: string; quietMinutes: number
 type VisionConfig = { enabled: boolean; model: string; folder: string };
 type GamingConfig = { enabled: boolean; model: string; quiet: boolean };
 type AniListConfig = { enabled: boolean; username: string };
-type JournalConfig = { enabled: boolean; askHour: number; askUnprompted: boolean };
-type JournalEntry = { id: string; date: string; createdAt: string; updatedAt?: string; text: string; mood?: number; anxiety?: number; energy?: number; sleep?: number; prompted: boolean };
 type RoamConfig = { enabled: boolean; restlessness: number; avoidFullscreen: boolean };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; kind: string; subject?: string; createdAt: string; lastSeenAt: string; mentions: number };
@@ -60,6 +58,30 @@ type VoiceConfig = { engine: string; voice: string; referenceText: string; endpo
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
 contextBridge.exposeInMainWorld('haru', {
+  mail: {
+    status: () => ipcRenderer.invoke('mail:status'),
+    configure: (input: unknown) => ipcRenderer.invoke('mail:configure', input),
+    sync: () => ipcRenderer.invoke('mail:sync'),
+    threads: (offset = 0) => ipcRenderer.invoke('mail:threads', offset),
+    thread: (id: string) => ipcRenderer.invoke('mail:thread', id),
+    saveDraft: (input: unknown) => ipcRenderer.invoke('mail:saveDraft', input),
+    discardDraft: (input: unknown) => ipcRenderer.invoke('mail:discardDraft', input),
+    send: (input: unknown) => ipcRenderer.invoke('mail:send', input),
+    reconcile: (input: unknown) => ipcRenderer.invoke('mail:reconcile', input),
+  },
+  imageEditor: {
+    models: (endpoint: string) => ipcRenderer.invoke('imageEditor:models', endpoint) as Promise<import('./imageEditor').ImageCatalog>,
+    run: (request: import('./imageEditor').AvatarJobRequest) => ipcRenderer.invoke('imageEditor:run', request) as Promise<import('./imageEditor').WardrobeResult>,
+    save: (image: string) => ipcRenderer.invoke('imageEditor:save', image) as Promise<string | null>,
+    appearance: () => ipcRenderer.invoke('imageEditor:appearance'),
+    importAppearance: (image: string, name: string, replace?: string) => ipcRenderer.invoke('imageEditor:importAppearance', image, name, replace),
+    updateAppearance: (change: { primary?: string; notes?: string; remove?: string }) => ipcRenderer.invoke('imageEditor:updateAppearance', change),
+    onAppearanceChanged: (callback: () => void) => { const listener = () => callback(); ipcRenderer.on('imageEditor:appearanceChanged', listener); return () => ipcRenderer.removeListener('imageEditor:appearanceChanged', listener); },
+    selectClothing: (endpoint: string, revision: string, sourceId?: string) => ipcRenderer.invoke('imageEditor:selectClothing', endpoint, revision, sourceId),
+    poses: () => ipcRenderer.invoke('imageEditor:poses'),
+    addPose: (endpoint: string, image: string, name: string) => ipcRenderer.invoke('imageEditor:addPose', endpoint, image, name),
+    removePose: (id: string) => ipcRenderer.invoke('imageEditor:removePose', id),
+  },
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
   listen: {
     isActive: () => ipcRenderer.invoke('listen:active:get') as Promise<boolean>,
@@ -157,21 +179,6 @@ contextBridge.exposeInMainWorld('haru', {
     setPassword: (username: string, password: string) => ipcRenderer.invoke('web:setPassword', username, password) as Promise<boolean>,
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('web:setEnabled', enabled) as Promise<boolean>,
     forgetDevice: (id: string) => ipcRenderer.invoke('web:forgetDevice', id) as Promise<WebDevice[]>,
-  },
-  journal: {
-    list: () => ipcRenderer.invoke('journal:list') as Promise<JournalEntry[]>,
-    save: (entry: Partial<JournalEntry> & { text: string }) => ipcRenderer.invoke('journal:save', entry) as Promise<JournalEntry[]>,
-    remove: (id: string) => ipcRenderer.invoke('journal:remove', id) as Promise<JournalEntry[]>,
-    getConfig: () => ipcRenderer.invoke('journal:getConfig') as Promise<JournalConfig>,
-    setConfig: (config: JournalConfig) => ipcRenderer.invoke('journal:setConfig', config) as Promise<JournalConfig>,
-    stats: (range: string) => ipcRenderer.invoke('journal:stats', range),
-    note: () => ipcRenderer.invoke('journal:note'),
-    trend: () => ipcRenderer.invoke('journal:trend') as Promise<{ days: number; mood?: number; anxiety?: number; entries: number }>,
-    onChange: (callback: (entries: JournalEntry[]) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, entries: JournalEntry[]) => callback(entries);
-      ipcRenderer.on('journal:changed', listener);
-      return () => ipcRenderer.removeListener('journal:changed', listener);
-    },
   },
   anilist: {
     get: () => ipcRenderer.invoke('anilist:get') as Promise<AniListConfig>,
@@ -280,6 +287,12 @@ contextBridge.exposeInMainWorld('haru', {
   },
   ai: {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<ChatResult>,
+    // Her server's reply as it is written, while send() is still waiting for the whole of it.
+    onServerChunk: (callback: (text: string) => void) => {
+      const listener = (_event: unknown, text: string) => callback(text);
+      ipcRenderer.on('ai:serverChunk', listener);
+      return () => ipcRenderer.removeListener('ai:serverChunk', listener);
+    },
     test: (endpoint: string, provider?: string) => ipcRenderer.invoke('ai:test', endpoint, provider) as Promise<string[]>,
     defaultEndpoint: (provider: string) => ipcRenderer.invoke('ai:defaultEndpoint', provider) as Promise<string>,
     verify: (endpoint: string, provider: string, model: string) => ipcRenderer.invoke('ai:verify', endpoint, provider, model) as Promise<{ models: string[]; note: string }>,
@@ -293,6 +306,22 @@ contextBridge.exposeInMainWorld('haru', {
     hasSelfHostedKey: () => ipcRenderer.invoke('ai:hasSelfHostedKey') as Promise<boolean>,
     retort: (disliked: string, config: ProviderConfig) => ipcRenderer.invoke('ai:retort', disliked, config) as Promise<string>,
     gloat: (praised: string, config: ProviderConfig) => ipcRenderer.invoke('ai:gloat', praised, config) as Promise<string>,
+  },
+  call: {
+    start: () => ipcRenderer.invoke('call:start') as Promise<void>,
+    stop: () => ipcRenderer.invoke('call:stop') as Promise<void>,
+    /** One frame of the microphone: 16 kHz mono PCM16. Fire and forget. */
+    frame: (pcm: Uint8Array) => ipcRenderer.send('call:frame', pcm),
+    onState: (callback: (state: { state: 'connecting' | 'live' | 'ended'; reason?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: { state: 'connecting' | 'live' | 'ended'; reason?: string }) => callback(state);
+      ipcRenderer.on('call:state', listener);
+      return () => ipcRenderer.removeListener('call:state', listener);
+    },
+    onSaid: (callback: (line: { who: 'you' | 'her'; text: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, line: { who: 'you' | 'her'; text: string }) => callback(line);
+      ipcRenderer.on('call:said', listener);
+      return () => ipcRenderer.removeListener('call:said', listener);
+    },
   },
   voice: {
     get: () => ipcRenderer.invoke('voice:get') as Promise<VoiceConfig>,
@@ -444,6 +473,7 @@ contextBridge.exposeInMainWorld('haru', {
     perchState: () => ipcRenderer.invoke('companion:perching') as Promise<import('./perching').PerchState>,
     dragging: (active:boolean,drop=false) => ipcRenderer.invoke('companion:dragging',active,drop),
     pointerOver: (over:boolean) => ipcRenderer.invoke('companion:pointerOver',over),
+    feel: (beat: Beat) => ipcRenderer.invoke('companion:feel', beat),
     onPerching: (callback:(state:import('./perching').PerchState)=>void) => {
       const listener=(_event:Electron.IpcRendererEvent,state:import('./perching').PerchState)=>callback(state);
       ipcRenderer.on('companion:perching',listener);return ()=>ipcRenderer.removeListener('companion:perching',listener);
@@ -465,6 +495,36 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, line: string | null) => callback(line);
       ipcRenderer.on('companion:say', listener);
       return () => ipcRenderer.removeListener('companion:say', listener);
+    },
+    // Whether a reply of hers is being written right now (for her portrait to look thoughtful).
+    onThinking: (callback: (thinking: boolean) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, thinking: boolean) => callback(thinking);
+      ipcRenderer.on('portrait:thinking', listener);
+      return () => ipcRenderer.removeListener('portrait:thinking', listener);
+    },
+    // A tool she used, as one line for her screen's code-terminal burst.
+    onTerminal: (callback: (line: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
+      ipcRenderer.on('portrait:terminal', listener);
+      return () => ipcRenderer.removeListener('portrait:terminal', listener);
+    },
+    // Whether he is coding right now, and in what (the window title).
+    onCoding: (callback: (state: { on: boolean; label: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: { on: boolean; label: string }) => callback(state);
+      ipcRenderer.on('portrait:coding', listener);
+      return () => ipcRenderer.removeListener('portrait:coding', listener);
+    },
+    // The lines he just wrote, for her screen to read (electron/codeWatch.ts).
+    onCode: (callback: (hunk: { file: string; lines: string[] }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, hunk: { file: string; lines: string[] }) => callback(hunk);
+      ipcRenderer.on('portrait:code', listener);
+      return () => ipcRenderer.removeListener('portrait:code', listener);
+    },
+    // Spin on her screen (electron/spin.ts): what the player reports, and her HUD's open / command / fold beats.
+    onMusic: (callback: (event: { type: string } & Record<string, unknown>) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: { type: string } & Record<string, unknown>) => callback(event);
+      ipcRenderer.on('portrait:music', listener);
+      return () => ipcRenderer.removeListener('portrait:music', listener);
     },
     // Main is carrying the window; this is how the legs find out.
     onWalking: (callback: (state: { moving: boolean; facing: number }) => void) => {

@@ -4,13 +4,17 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
+import { watchCode } from './codeWatch';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
+import { WebSocket as CallClient } from 'ws';
 import { HaruStore } from './store';
 import { apiUsage, trackedFetch } from './apiusage';
 import { collectSpend, keepSnapshots, type BalanceSnapshot, type ServiceSpend } from './spend';
 import { ActivityReporter } from './activity-reporter';
 import { SERVER_PARTITION, serverOrigin, sendServerChat, serverJson, jsonPost, type ServerRequest } from './server-chat';
+import { createSpin, MUSIC_ACTIONS, type MusicAction } from './spin';
+import { mailClient } from './openmailClient';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
@@ -28,6 +32,7 @@ import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsD
 import { activityInstruction, isJustATool, isNotable, promotedByFullscreen, readActivity, type Activity, type ActivityKind } from './activity';
 import { belongsToPlace, expireHaunts, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
+import { registerImageEditorIPC } from './imageEditor';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
@@ -82,9 +87,7 @@ import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
-import { journalStance } from './journal';
-import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
-import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
+import { entryFor, readEntries, readRating, upsertEntry, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
@@ -95,7 +98,7 @@ import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { behaviourOf, chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, type VoiceReference, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
 import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
 import { readCallConfig, pickFiller } from './call';
@@ -114,7 +117,7 @@ import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formati
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
-import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
+import { conversationMayLeave, mayLeaveTheMachine } from './contentSafety';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
 import { herFrom } from './her';
@@ -565,7 +568,12 @@ function unpackModel(archivePath: string) {
     // Unreadable model3.json still extracts; the loader reports the real problem.
   }
   const encoding = pickNameEncoding(entries, model, references);
-  const destination = path.join(app.getPath('userData'), 'live2d-models', createHash('sha256').update(`${archivePath}:${Date.now()}`).digest('hex').slice(0, 16));
+  // Named by what is in the archive, so importing the same ZIP again lands on the
+  // copy already here instead of unpacking another (it was path + time, and the
+  // folder held three of one model and two of another).
+  const destination = path.join(app.getPath('userData'), 'live2d-models', createHash('sha256').update(readFileSync(archivePath)).digest('hex').slice(0, 16));
+  const unpacked = path.join(destination, decodeEntryName(model.rawEntryName, encoding));
+  if (existsSync(unpacked)) return unpacked;
   mkdirSync(destination, { recursive: true });
   for (const entry of entries) {
     if (entry.isDirectory) continue;
@@ -2650,9 +2658,8 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
   const turnStillCurrent = turn === speechTurn;
   if (!turnStillCurrent) return;
   const chunks = splitForSpeech(text);
-  console.log(`[voice] speaking ${chunks.length} chunk(s) via ${config.engine} as ${emotion.emotion}${classified ? '' : ' (heuristic)'}${reference.clip ? ` using ${path.basename(reference.clip)}` : ''}`);
+  console.log(`[voice] speaking ${chunks.length} chunk(s) via ${desktopServer() ? 'the server' : config.engine} as ${emotion.emotion}${classified ? '' : ' (heuristic)'}${reference.clip ? ` using ${path.basename(reference.clip)}` : ''}`);
   let shoutedChunks = 0;
-  let prepMs = 0;
   let synthMs = 0;
   // Serial on purpose, one request at a time: breeze-server holds a single
   // model slot and rejects a second concurrent request with 409 busy, so a
@@ -2660,44 +2667,27 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
   // already overlaps in practice — the engine synthesises at ~1.2x realtime,
   // so the next chunk is always ready before the previous one has finished
   // playing — which is what the synthMs total below records.
+  // One seed for every chunk of a line, so the pieces are takes of the same performance.
+  const seed = Math.floor(Math.random() * 2 ** 31);
   for (const chunk of chunks) {
     try {
-      // Decided per chunk on the text as written, before the capitals are
-      // flattened: a line she is shouting gets cloned from her angry clip, which
-      // is where the actual volume comes from. spokenCase then hands the engine
-      // a word rather than a run of letters, so it says "stop" instead of
-      // spelling it — the two do different halves of the same job.
-      const shouting = hasShout(chunk);
-      if (shouting) shoutedChunks++;
-      const voice = shouting ? shoutReference(config, reference) : reference;
-      let clip;
-      const prepStarted = Date.now();
-      const say = spokenCase(chunk);
-      prepMs += Date.now() - prepStarted;
-      const chunkSynthStarted = Date.now();
-      try {
-        clip = await synthesise(say, config, voice, voiceAuth(config), emotion.emotion);
-      } catch (first) {
-        // One retry, and only for a timeout.
-        //
-        // Measured on this machine: a cold synthesis took 6.7 seconds and every
-        // one after it took 1.1, because the model was then resident. Under load
-        // — a vision model and a chat model competing for the same card — the
-        // cold call is what runs past thirty seconds and aborts. The retry is
-        // nearly always the warm case, so it costs a second and turns a silent
-        // failure into speech.
-        //
-        // Not retried for anything else: a bad reference path or a rejected
-        // request will fail identically the second time and only doubles the wait.
-        if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
-        console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
-        clip = await synthesise(say, config, voice, voiceAuth(config), emotion.emotion);
+      // With her brain on the server, her voice comes from there too, streamed
+      // as it is made. It reads shouts and capitals itself, so it gets the chunk as written.
+      // When the server cannot speak, the chunk falls through to the local engine below.
+      if (desktopServer() && !serverVoiceResting()) {
+        const started = Date.now();
+        try {
+          if (!(await serverSpeech(turn, chunk, emotion.emotion, seed)) || turn !== speechTurn) return;
+          synthMs += Date.now() - started;
+          continue;
+        } catch (error) {
+          if (!fallsBackLocally(config, error)) throw error;
+        }
       }
-      // Checked after the await, not before: the wait is where a newer reply
-      // lands, and a stale chunk arriving mid-sentence is the audible bug.
-      if (turn !== speechTurn) return;
+      if (hasShout(chunk)) shoutedChunks++;
+      const chunkSynthStarted = Date.now();
+      if (!(await speakChunkLocally(turn, chunk, config, reference, emotion.emotion))) return;
       synthMs += Date.now() - chunkSynthStarted;
-      sendToWindows('speech:clip', { turn, text: chunk, ...(clip ?? {}) } satisfies SpeechClip);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.warn('[voice] synthesis failed:', detail);
@@ -2717,10 +2707,108 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
     const shouted = shoutReference(config, reference).clip;
     console.log(`[voice] ${shoutedChunks} chunk(s) shouted using ${shouted ? path.basename(shouted) : 'the default clip'}`);
   }
-  // Prep is pure string work and must stay off the critical path; the synth
-  // total across chunks is what the serial loop's overlap claim is checked
-  // against — it should be close to the wall time, not a multiple of it.
-  console.log(`[voice] spoke ${chunks.length} chunk(s) — prep ${prepMs}ms, synthesis ${synthMs}ms total`);
+  // The synth total across chunks is what the serial loop's overlap claim is
+  // checked against — it should be close to the wall time, not a multiple of it.
+  console.log(`[voice] spoke ${chunks.length} chunk(s) — synthesis ${synthMs}ms total`);
+}
+
+/**
+ * One chunk in the local engine's voice, played on the desk. Returns false
+ * when a newer turn took over while it was being made.
+ */
+async function speakChunkLocally(turn: number, chunk: string, config: VoiceConfig, reference: VoiceReference, emotion: EmotionName | null) {
+  // Decided per chunk on the text as written, before the capitals are
+  // flattened: a line she is shouting gets cloned from her angry clip, which
+  // is where the actual volume comes from. spokenCase then hands the engine
+  // a word rather than a run of letters, so it says "stop" instead of
+  // spelling it — the two do different halves of the same job.
+  const voice = hasShout(chunk) ? shoutReference(config, reference) : reference;
+  const say = spokenCase(chunk);
+  let clip;
+  try {
+    clip = await synthesise(say, config, voice, voiceAuth(config), emotion);
+  } catch (first) {
+    // One retry, and only for a timeout.
+    //
+    // Measured on this machine: a cold synthesis took 6.7 seconds and every
+    // one after it took 1.1, because the model was then resident. Under load
+    // — a vision model and a chat model competing for the same card — the
+    // cold call is what runs past thirty seconds and aborts. The retry is
+    // nearly always the warm case, so it costs a second and turns a silent
+    // failure into speech.
+    //
+    // Not retried for anything else: a bad reference path or a rejected
+    // request will fail identically the second time and only doubles the wait.
+    if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
+    console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
+    clip = await synthesise(say, config, voice, voiceAuth(config), emotion);
+  }
+  // Checked after the await, not before: the wait is where a newer reply
+  // lands, and a stale chunk arriving mid-sentence is the audible bug.
+  if (turn !== speechTurn) return false;
+  sendToWindows('speech:clip', { turn, text: chunk, ...(clip ?? {}) } satisfies SpeechClip);
+  return true;
+}
+
+// The server's voice, and the local engine behind it. A server that cannot be
+// reached, or answers 5xx, hands the line to this machine's engine instead of
+// leaving her silent — and is left alone for a minute, so a dead server does
+// not cost a 90-second timeout on every line before the fallback speaks.
+const SERVER_VOICE_REST_MS = 60_000;
+let serverVoiceDownAt = 0;
+const serverVoiceResting = () => Date.now() - serverVoiceDownAt < SERVER_VOICE_REST_MS;
+/** Whether this failure is the server being away (not a refusal), and there is a local engine to take over. */
+function fallsBackLocally(config: VoiceConfig, error: unknown) {
+  if (config.engine === 'off') return false;
+  const detail = error instanceof Error ? error.message : String(error);
+  if (!/net::ERR_|ECONNREFUSED|fetch failed|timeout|aborted|^5\d\d/i.test(detail)) return false;
+  serverVoiceDownAt = Date.now();
+  console.warn(`[voice] the server could not speak (${detail.slice(0, 80)}) — using the local voice (${config.engine}) for a minute`);
+  return true;
+}
+
+/**
+ * A server reply spoken as it is written: each sentence goes to her voice the
+ * moment the server finishes it, so she is talking while the rest is still
+ * being written. Returns the feed for those sentences, or null when the desk
+ * does not speak — the caller then hands the finished reply to speak() for
+ * its caption.
+ */
+function speakAsWritten() {
+  const config = getVoiceConfig();
+  if (config.engine === 'off' || !config.desktopEnabled) return null;
+  const turn = ++speechTurn;
+  sendToWindows('speech:stop');
+  const seed = Math.floor(Math.random() * 2 ** 31);
+  const started = Date.now();
+  let line = Promise.resolve(true);
+  let said = 0;
+  return (sentence: string, emotion: string | null) => {
+    const text = speakableText(sentence);
+    if (!text) return;
+    speakingLine = said ? `${speakingLine} ${text}` : text;
+    if (store.get('companion.subtitles', true)) sendToWindows('companion:say', text);
+    const n = ++said;
+    if (n === 1) console.log(`[voice] speaking as it is written, via the server, as ${emotion ?? 'whatever the server reads'}`);
+    // In order and one at a time: breeze-server holds a single slot, and the
+    // audio of each is already playing while the next is made.
+    const local = () => {
+      const mood: EmotionName = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
+      return speakChunkLocally(turn, text, config, referenceFor(config, mood), mood);
+    };
+    line = line.then(async going => {
+      if (!going || turn !== speechTurn) return false;
+      if (serverVoiceResting()) return local();
+      try { return await serverSpeech(turn, text, emotion, seed); }
+      catch (error) { if (!fallsBackLocally(config, error)) throw error; return local(); }
+    }).catch(error => {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn('[voice] synthesis failed:', detail);
+      sendToWindows('voice:failed', `The voice server could not speak that: ${detail.slice(0, 120)}`);
+      return false;
+    });
+    void line.then(going => { if (going && turn === speechTurn) console.log(`[voice] sentence ${n} sent by ${Date.now() - started}ms`); });
+  };
 }
 
 let pokeCount = 0;
@@ -2784,7 +2872,7 @@ async function handlePoke(kind: PokeKind) {
       'Reply with ONE short line, under 20 words, in your own voice. No quotation marks and no stage directions.',
     ].filter(Boolean).join(' ');
     const prod = kind === 'right-click' ? 'They just right-clicked on you.' : 'They just poked you.';
-    const line = await ollamaQuip(system, cutOff ? `${prod} You were half-way through saying this out loud: "${cutOff}"` : prod, config);
+    const line = await ollamaQuip(system, cutOff ? `${prod} You were half-way through saying this out loud: "${cutOff}"` : prod, config, { desk: true });
     // Said out loud and written down: the companion window has nowhere to show
     // text, and a line that only exists as audio is lost with the volume off.
     //
@@ -2944,7 +3032,8 @@ async function isAnswering(endpoint: string, ms = 1500, tries = 1): Promise<bool
 
 async function reviveVoiceServer() {
   const voice = readVoiceConfig(store.get('voice'));
-  if (voice.engine !== 'gpt-sovits') return;
+  // Her voice comes from her server (serverSpeech); a local one would only hold the GPU.
+  if (voice.engine !== 'gpt-sovits' || desktopServer()) return;
   // Somebody else's machine is somebody else's to start.
   if (isRemote(voice.endpoint)) return;
   if (await isAnswering(voice.endpoint, 1500, 3)) { console.log('[voice] the speech server is already up'); return; }
@@ -3047,6 +3136,9 @@ function handleHelperLine(line: string) {
     // the answer was assembled only on the path she speaks from — so asked
     // directly she had nothing and said so.
     currentActivity = activity;
+    // Her screen reads along while he codes (portraitTerminal.ts): told when it starts, stops or the file changes.
+    const coding = activity.kind === 'coding' ? activity.label : '';
+    if (coding !== codingShown) { codingShown = coding; toPortrait('portrait:coding', { on: Boolean(coding), label: coding }); }
     // Steam's own name for it, where Steam has one. The process is called "wdc"
     // and the window says "Telltale Games"; neither is the game.
     foregroundProcess = process;
@@ -3857,6 +3949,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
 }
 
 let currentActivity: Activity | null = null;
+let codingShown = '';
 
 export type GamingConfig = {
   /** Swap to a smaller model while a game is running. */
@@ -4142,7 +4235,7 @@ async function reactToFullscreen(title: string) {
       framing,
       'One or two short lines. Refer to what it actually is if the title makes that obvious. If the title is meaningless, ask what they have put on rather than guessing — and never quote a word back at them as though it were the title unless it appears in the title itself.',
     ].join(' ');
-    const line = await ollamaQuip(system, `The window that just went fullscreen is titled: "${named.slice(0, 160)}"`, config);
+    const line = await ollamaQuip(system, `The window that just went fullscreen is titled: "${named.slice(0, 160)}"`, config, { desk: true });
     console.log(`[helper] fullscreen: ${title.slice(0, 60)}`);
     broadcastBeat({ emotion: 'curious', confidence: 0.9, energy: 0.7, intent: 'tease', focus: 'away' }, 'stare');
     // Something happened on their screen, which is a real event and the one
@@ -5816,7 +5909,6 @@ function availableTools(): ToolAvailability {
     choices: offeringChoices,
     booking: true,
     chats: true,
-    journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
     web: talkingOnWeb,
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
@@ -5958,8 +6050,6 @@ function toolDeps(): ToolDeps {
     net,
     store,
     getCheckIns, setCheckIns,
-    getJournal, writeJournal,
-    noteJournalAsked: (date: string) => { journalAskedOn = date; },
     getKept, addKeptItem, toggleKept, removeKept, updateKept,
     getMemories, setMemories, addMemory,
     setBlocks, blockSources,
@@ -6671,15 +6761,25 @@ async function ollamaQuipLong(system: string, user: string, config: ProviderConf
   return (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim().slice(0, 1600);
 }
 
-async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
+/**
+ * A remark about something that happened at this desk (a poke, a window going
+ * fullscreen, a page she noticed). Pointed at her server the desk has no brain,
+ * so the server composes it: one system prompt, at most one line, no tools.
+ * Only desk events come this way; her own life runs on the server already.
+ */
+async function composePost(conversation: { role: string; content: string }[], config: ProviderConfig, options: { temperature: number; maxTokens?: number }): Promise<{ content?: string }> {
+  if (!desktopServer()) return ollamaPost(conversation, config, { tools: false, ...options });
+  const answer = await serverJson<{ content?: unknown }>(serverRequest, '/api/compose', jsonPost({ messages: conversation.map(({ role, content }) => ({ role, content })), ...options }));
+  return { content: typeof answer.content === 'string' ? answer.content : '' };
+}
+
+async function ollamaQuip(system: string, user: string, config: ProviderConfig, { desk = false } = {}) {
   const once = async (instruction: string) => {
-    const message = await ollamaPost(
-      composerTurns(instruction, user),
-      config,
-      // Hotter than normal chat so repeated reactions do not converge on the same
-      // phrasing, which is the whole complaint with canned lines.
-      { tools: false, temperature: 1 },
-    );
+    // Hotter than normal chat so repeated reactions do not converge on the same
+    // phrasing, which is the whole complaint with canned lines.
+    const message = desk
+      ? await composePost(composerTurns(instruction, user), config, { temperature: 1 })
+      : await ollamaPost(composerTurns(instruction, user), config, { tools: false, temperature: 1 });
     // The first paragraph, not the first line: her one-liners often open
     // "Fine." on a line of its own with the actual line under it, and taking
     // the first line sent "Fine." to the phone as the whole notification.
@@ -7019,93 +7119,6 @@ function tickOffSpoken(said: string) {
 }
 
 /**
- * The day she last raised it. One attempt per day and no more: being asked twice
- * how your day was is how a journal turns into a chore, and the whole feature
- * depends on it staying something you want to answer.
- */
-/**
- * Long enough not to hammer, short enough to catch a gap in the conversation.
- *
- * She asks in the evening, which is exactly when someone is most likely to be
- * mid-exchange with her — so the retry has to be quick enough to find a quiet
- * moment the same night rather than giving up until tomorrow.
- */
-const JOURNAL_RETRY_MS = 6 * 60_000;
-let journalTriedAt = 0;
-/**
- * Survives a restart. Held only in memory it reset on every launch, so a day she
- * had already asked about could be asked about again — and this app is restarted
- * a great deal.
- */
-let journalAskedOn = store.get('journal.askedOn') as string | undefined;
-
-/**
- * Her once-a-day ask. Written as a nudge she composes herself rather than a
- * fixed line, because the same sentence every evening at eight is a notification,
- * not a companion — and it is routed through interject so it obeys the same gap
- * as everything else she says unprompted, and waits until she has stopped
- * talking.
- */
-async function askForJournal() {
-  const config = readJournalConfig(store.get('journal.config'));
-  const now = zonedNow(CHAT_TIMEZONE);
-  const today = localDateKey(now);
-  if (!shouldAsk(config, getJournal(), now, today, journalAskedOn)) return;
-  const provider = store.get('ai.config') as ProviderConfig | undefined;
-  if (!provider?.model) return;
-  // Two different clocks, and conflating them cost several days of asking.
-  //
-  // The day is marked only once the question has actually reached them. It used
-  // to be marked here, before the request — which was right about slow
-  // generations and wrong about everything else: interject refuses a line when
-  // they have spoken in the last few minutes, which at the hour she asks is
-  // most evenings. She would compose the question, have it dropped, and record
-  // the day as done. Silent, and no retry until tomorrow.
-  //
-  // The attempt clock does the job the day-mark was doing badly: it stops a
-  // minute-by-minute retry loop without claiming the asking happened.
-  if (Date.now() - journalTriedAt < JOURNAL_RETRY_MS) return;
-  journalTriedAt = Date.now();
-  const trend = recentTrend(getJournal(), today);
-  const character = getActiveCharacter();
-  const system = [
-    character.identity,
-    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}.`,
-    character.style,
-    unpromptedContext(),
-    trend.entries >= 3 ? `For your own sense of it, they have written ${trend.entries} entries in the last ${trend.days} days — do not mention that number.` : '',
-    // The ask comes after the day, not before it. Given the afternoon's RAM
-    // troubleshooting after the ask, the 9B answered the troubleshooting: a
-    // paragraph on memory training with the question tacked on the end, or
-    // "I told you to look it up yourself" with no question at all
-    // (2026-09-11, 2026-09-12).
-    'That is the day so far, and it is done — do not answer it, continue it or give advice on it. Ask them how their day was and how they are feeling, so it can go in their journal. One or two short lines, in your own voice.',
-    'Ask as though you want to know, not as though a form needs filling in. Do not mention journals, entries, logging, tracking or scores, and do not list the things you want rated.',
-  ].filter(Boolean).join(' ');
-  try {
-    const message = await ollamaPost([{ role: 'system', content: system }], provider, { tools: false, temperature: 0.9, maxTokens: 120 });
-    const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-    if (!line) return;
-    // An ask asks. Handed the day's context the 9B wrote a jab about the car
-    // and the drive with nothing asked, and that went out as the evening's
-    // question (2026-09-10). The retry clock above tries again in a few minutes.
-    if (!/\?/.test(line) && !/\b(?:tell me|talk to me|out with it|spill|go on)\b/i.test(line)) { console.log(`[journal] the ask asked nothing — trying again shortly: ${JSON.stringify(line.slice(0, 80))}`); return; }
-    // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'journal' })) {
-      // Only now. This is the one place that means she actually asked.
-      journalAskedOn = today;
-      store.set('journal.askedOn', today);
-      console.log(`[journal] asked for today's entry (${line.length} chars)`);
-      void speak(line, classifyEmotion(line, provider));
-    } else {
-      console.log('[journal] the ask was dropped — will try again shortly');
-    }
-  } catch (error) {
-    console.warn('[journal] could not compose the ask:', error instanceof Error ? error.message : error);
-  }
-}
-
-/**
  * She noticed you moved. Called from the renderer on a tab change; nearly every
  * call does nothing, which is the intent — see noticing.ts for the budget.
  */
@@ -7141,7 +7154,7 @@ async function noticePage(page: NoticedPage) {
     unpromptedContext(),
   ].join(' ');
   try {
-    const message = await ollamaPost([{ role: 'system', content: system }], config, { tools: false, temperature: 0.9, maxTokens: 80 });
+    const message = await composePost([{ role: 'system', content: system }], config, { temperature: 0.9, maxTokens: 80 });
     const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
     if (!line) return;
     console.log(`[notice] remarked on the ${page} page (${line.length} chars)`);
@@ -8281,8 +8294,6 @@ const promptState = {
     // in motion.
     profile: profileSummary(latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic),
     aniList: aniListSummary(),
-    journalConfig: readJournalConfig(store.get('journal.config')),
-    journal: getJournal(),
     checkInsToday: checkInsOn(getCheckIns(), localDateKey(promptNow)),
     screen: { label: currentActivity?.label, haunt: currentPlace ? getHaunts()[currentPlace] : undefined, scene: sceneNow(), memory: gameMemoryNow() },
     // The spliced ones are in the conversation already; quoting them beside it as well is what made her repeat one.
@@ -8866,17 +8877,191 @@ function desktopServer() { return serverOrigin(store.get('desktop.serverUrl')); 
 // avoid — so the background routes get the patience the foreground cannot.
 const SLOW_ROUTES = /^\/api\/(chat|activity|memory)/;
 
-const serverRequest: ServerRequest = (route, init = {}) => {
+const serverFetch = (origin: string, route: string, init: RequestInit = {}) => session.fromPartition(SERVER_PARTITION).fetch(origin + route, {
+  ...init, credentials: 'include', redirect: 'error',
+  signal: init.signal ?? AbortSignal.timeout(SLOW_ROUTES.test(route) ? 180_000 : 20_000),
+});
+
+// An expired login signs back in once, shared by every request that hit it:
+// behind tailscale serve every client is 127.0.0.1, so each failed try here
+// spends the phone's login budget too. A password the server refused is not
+// tried again this run; her own login page opens in this partition instead.
+// A 401 was never processed, so the retry cannot duplicate a chat.
+let signingIn: Promise<boolean> | null = null;
+let savedPasswordRefused = false;
+let loginWindow: BrowserWindow | null = null;
+// Offered once a run: closing it means "not now", and the poll would otherwise reopen it every ten seconds.
+let loginOffered = false;
+
+function openServerLogin(origin: string) {
+  if (loginOffered) return;
+  loginOffered = true;
+  loginWindow = new BrowserWindow({ width: 460, height: 640, title: 'Sign in to Haru server', icon: appIcon(), webPreferences: { partition: SERVER_PARTITION } });
+  loginWindow.setMenu(null);
+  loginWindow.on('closed', () => { loginWindow = null; });
+  void loginWindow.loadURL(origin + '/');
+}
+
+async function signBackIn(origin: string): Promise<boolean> {
+  const source = readCheckInSource(store.get('checkinSource'));
+  const password = decryptSecret(store.get('checkinSourcePassword') as string | undefined);
+  if (source && password && !savedPasswordRefused) {
+    const signIn = await serverFetch(origin, '/api/login', jsonPost({ username: source.username, password, remember: true, device: 'Haru desktop' }));
+    if (signIn.ok) { console.log('[server] session expired; signed back in'); return true; }
+    if (signIn.status === 401) savedPasswordRefused = true;
+    console.warn('[server] could not sign back in (' + signIn.status + ')');
+  }
+  openServerLogin(origin);
+  return false;
+}
+
+const serverRequest: ServerRequest = async (route, init = {}) => {
   const origin = desktopServer();
   if (!origin || !route.startsWith('/api/')) throw new Error('No Haru server is configured.');
-  return session.fromPartition(SERVER_PARTITION).fetch(origin + route, {
-    ...init, credentials: 'include', redirect: 'error',
-    signal: init.signal ?? AbortSignal.timeout(SLOW_ROUTES.test(route) ? 180_000 : 20_000),
-  });
+  const first = await serverFetch(origin, route, init);
+  if (first.status !== 401 && first.status !== 403) {
+    // The login window's cookie has landed; it has done its job.
+    if (first.ok && loginWindow) { loginWindow.close(); loginOffered = false; console.log('[server] signed in from the login window'); }
+    return first;
+  }
+  if (loginWindow) return first;
+  signingIn ??= signBackIn(origin).finally(() => { signingIn = null; });
+  return (await signingIn) ? serverFetch(origin, route, init) : first;
 };
 
+/**
+ * One chunk in the server's voice — its engine, its clips, the voice the phone
+ * hears — streamed: raw PCM goes to the windows part by part as Breeze makes
+ * it, so the first sound is ~0.3s away instead of the whole chunk's synthesis.
+ * False when the server has her quiet (204); the turn ends there.
+ */
+async function serverSpeech(turn: number, text: string, emotion: string | null, seed: number) {
+  const query = new URLSearchParams({ text, format: 'pcm', seed: String(seed), ...(emotion ? { emotion } : {}) });
+  // Its own ceiling: the default 20s is sized for JSON, not for a chunk being spoken.
+  const response = await serverRequest(`/api/speak?${query}`, { signal: AbortSignal.timeout(90_000) });
+  if (response.status === 204) return false;
+  if (!response.ok || !response.body) throw new Error(`${response.status}: ${(await response.text().catch(() => '')).slice(0, 300)}`);
+  const type = response.headers.get('content-type') ?? '';
+  // An engine that cannot stream sends the clip whole.
+  if (!type.startsWith('audio/pcm')) {
+    const audio = new Uint8Array(await response.arrayBuffer());
+    if (turn === speechTurn) sendToWindows('speech:clip', { turn, text, audio, mime: type || 'audio/wav' } satisfies SpeechClip);
+    return true;
+  }
+  const sampleRate = Number(response.headers.get('x-haru-sample-rate')) || 24000;
+  // One part is held back so the last one sent can say it is the last, and a
+  // byte split from its sample waits for the other half.
+  let held: Uint8Array | null = null;
+  let odd = new Uint8Array(0);
+  const send = (pcm: Uint8Array, more: boolean) => sendToWindows('speech:clip', { turn, text, pcm, sampleRate, more } satisfies SpeechClip);
+  const reader = response.body.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (turn !== speechTurn) { await reader.cancel(); return true; }
+      const bytes = new Uint8Array(odd.length + value.length);
+      bytes.set(odd);
+      bytes.set(value, odd.length);
+      const even = bytes.length & ~1;
+      odd = bytes.slice(even);
+      if (!even) continue;
+      if (held) send(held, true);
+      held = bytes.slice(0, even);
+    }
+  } finally {
+    if (held && turn === speechTurn) send(held, false);
+  }
+  return true;
+}
+
+// A call from the desk: the same socket the phone opens (/api/call/session),
+// signed in with the desk's server cookie. The microphone goes up as 16 kHz
+// PCM16 frames from the chat window; her voice comes down as PCM between
+// audio_start and audio_end and plays through the ordinary speech player.
+// The server does the hearing, the deciding-when-he-has-finished, the
+// talking-over and the voice (localcall.ts) — the desk only carries sound.
+let deskCall: CallClient | null = null;
+let deskCallTurn = 0;
+
+async function startDeskCall(): Promise<void> {
+  if (deskCall) return;
+  const origin = desktopServer();
+  if (!origin) throw new Error('A call needs her server. Set one in Setup first.');
+  const cookies = await session.fromPartition(SERVER_PARTITION).cookies.get({ url: origin });
+  const socket = new CallClient(origin.replace(/^https:/, 'wss:') + '/api/call/session', {
+    headers: { Cookie: cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ') },
+  });
+  deskCall = socket;
+  deskCallTurn = ++speechTurn;
+  sendToWindows('speech:stop');
+  let rate = 24000;
+  // One part held back, so the last part of a line can say it is the last.
+  let held: Uint8Array | null = null;
+  const play = (pcm: Uint8Array, more: boolean) => sendToWindows('speech:clip', { turn: deskCallTurn, text: '', pcm, sampleRate: rate, more } satisfies SpeechClip);
+  const state = (value: 'connecting' | 'live' | 'ended', reason?: string) => sendToWindows('call:state', { state: value, ...(reason ? { reason } : {}) });
+  const end = (reason: string) => {
+    if (deskCall !== socket) return;
+    deskCall = null;
+    if (held) { play(held, false); held = null; }
+    console.log(`[call] the desk's call ended — ${reason}`);
+    state('ended', reason);
+    // A call that ended for a reason other than hanging up says why where it
+    // is seen: a caption and a note in the chat, not only the "!" by the button.
+    if (!/hung up/i.test(reason)) {
+      const why = `The call ended: ${reason}`;
+      sendToWindows('voice:failed', why);
+      if (store.get('companion.subtitles', true)) sendToWindows('companion:say', why);
+    }
+  };
+  state('connecting');
+  socket.on('open', () => socket.send(JSON.stringify({ type: 'hello', pcm: true })));
+  socket.on('unexpected-response', (_req, res) => {
+    end(res.statusCode === 401 ? 'Her server login has expired. Sign in again.' : `Her server refused the call (${res.statusCode}).`);
+    socket.terminate();
+  });
+  socket.on('error', error => end(`The call failed: ${error.message}`));
+  socket.on('close', () => end('hung up'));
+  socket.on('message', (data, isBinary) => {
+    if (isBinary) {
+      const frame = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+      if (held) play(held, true);
+      held = new Uint8Array(frame);
+      return;
+    }
+    let event: { type?: string; text?: string; reason?: string; sampleRate?: number } = {};
+    try { event = JSON.parse(String(data)); } catch { return; }
+    switch (event.type) {
+      case 'ready': console.log('[call] the desk is on a call'); state('live'); break;
+      case 'refused': end(event.reason || 'She would not take the call.'); break;
+      case 'ended': end(event.reason || 'hung up'); break;
+      case 'audio_start': rate = event.sampleRate || 24000; held = null; break;
+      case 'audio_end': if (held) { play(held, false); held = null; } break;
+      // Talked over: what is queued of her goes, and the next line is a new turn.
+      case 'user_interruption': held = null; deskCallTurn = ++speechTurn; sendToWindows('speech:stop'); break;
+      case 'user_message':
+        if (event.text) sendToWindows('call:said', { who: 'you', text: event.text });
+        break;
+      case 'assistant_message':
+      case 'filler':
+        if (!event.text) break;
+        sendToWindows('call:said', { who: 'her', text: event.text });
+        if (store.get('companion.subtitles', true)) sendToWindows('companion:say', event.text);
+        break;
+      case 'error': console.warn(`[call] ${event.text ?? 'her server reported an error'}`); break;
+    }
+  });
+}
+
+function stopDeskCall() {
+  const socket = deskCall;
+  if (!socket) return;
+  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'stop' }));
+  socket.close(1000, 'the desk hung up');
+}
+
 async function serverMessages() {
-  const body = await serverJson<{ messages: { id?: string; role: string; content: string; at?: string; attachments?: unknown }[] }>(serverRequest, '/api/chat?poll=1');
+  const body = await serverJson<{ messages: { id?: string; role: string; content: string; at?: string; attachments?: unknown }[] }>(serverRequest, '/api/chat?poll=1&thread=desk');
   if (!Array.isArray(body.messages)) throw new Error('Haru server did not return its conversation.');
   return body.messages.filter(message => typeof message.content === 'string' && ['user', 'assistant', 'system'].includes(message.role)).map((message, index) => ({
     ...message, id: message.id || `server-${message.at || index}-${message.role}`, time: 'now',
@@ -8884,15 +9069,21 @@ async function serverMessages() {
   }));
 }
 
-async function serverChat(messages: { role: string; content: string; attachments?: Attachment[] }[]) {
+async function serverChat(messages: { role: string; content: string; attachments?: Attachment[] }[], onText?: (text: string) => void) {
   const latest = messages.at(-1);
   if (!latest || latest.role !== 'user') throw new Error('No user message to send.');
   const files = ourFiles(latest.attachments);
   if (files.length !== (latest.attachments?.length ?? 0)) throw new Error('An attachment is no longer available. Attach it again.');
   const reference = messages.at(-2);
   const text = reference?.role === 'system' ? `${reference.content}\n\n${latest.content}` : latest.content;
-  const reply = await sendServerChat(serverRequest, text, files.map(attachment => ({ attachment, bytes: readFileSync(attachment.saved) })));
-  void speak(reply.content);
+  // Her voice starts on the first sentence the server finishes, not on the finished reply.
+  let say: ReturnType<typeof speakAsWritten> | undefined;
+  const reply = await sendServerChat(serverRequest, text, files.map(attachment => ({ attachment, bytes: readFileSync(attachment.saved) })), onText,
+    (sentence, emotion) => { if (say === undefined) say = speakAsWritten(); say?.(sentence, emotion); },
+    // Her music: the tool's name comes before the server has checked it; its checked command lands on the screen
+    // shelf a moment later, so collect it then (and again after the reply) rather than act on the name.
+    tool => { if (tool === 'music') setTimeout(() => void collectScreenPanels(), 400); });
+  if (!say) void speak(reply.content);
   // A refresh failing after a successful send must not invite a duplicate send.
   const history = await serverMessages().catch(() => undefined);
   const authoritative = history?.some(message => message.role === 'assistant' && message.content === reply.content);
@@ -8912,9 +9103,16 @@ let screenCursor = Date.now() - 10 * 60_000;
 async function collectScreenPanels() {
   if (!desktopServer() || !portraitWindow || portraitWindow.isDestroyed()) return;
   try {
-    const { panels } = await serverJson<{ panels: { id: number; title: string; body: string; image: string; seconds: number }[] }>(serverRequest, `/api/screen?since=${screenCursor}`);
+    const { panels, now } = await serverJson<{ panels: { id: number; title: string; body: string; image: string; seconds: number; music?: { action?: unknown; query?: unknown } }[]; now?: number }>(serverRequest, `/api/screen?since=${screenCursor}`);
     for (const panel of panels) {
       screenCursor = Math.max(screenCursor, panel.id);
+      // Her music commands ride the same shelf (server tool `music`). They are acted on, never shown as cards, and one
+      // older than a minute is dropped: the cursor starts ten minutes back, and a stale "next" must not replay.
+      if (panel.music) {
+        const action = String(panel.music.action) as MusicAction;
+        if (MUSIC_ACTIONS.includes(action) && (now ?? Date.now()) - panel.id < 60_000) void spin.run(action, typeof panel.music.query === 'string' ? panel.music.query : '');
+        continue;
+      }
       // A path on this machine becomes a file URL the page can load; a missing one shows nothing rather than a broken image.
       const image = /^https:\/\//i.test(panel.image) ? panel.image : panel.image && existsSync(panel.image) ? pathToFileURL(panel.image).toString() : '';
       portraitWindow.webContents.send('portrait:panel', { ...panel, image });
@@ -11524,6 +11722,24 @@ let lastNightThingAt: number | null = null;
  */
 let readingMangaNow = false;
 
+/** Her screen plays a code-terminal burst for each tool she uses, with a line saying what (portraitTerminal.ts). */
+// Spin on her screen (electron/spin.ts): its reports and her HUD's beats go to the portrait window only.
+const spin = createSpin(event => toPortrait('portrait:music', event));
+function toPortrait(channel: string, payload: unknown): void {
+  if (portraitWindow && !portraitWindow.isDestroyed()) portraitWindow.webContents.send(channel, payload);
+}
+function showToolOnScreen(tool: string, call: { function?: { arguments?: unknown } }): void {
+  let args: Record<string, unknown> = {};
+  try {
+    const raw = call.function?.arguments;
+    args = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw as Record<string, unknown> : {});
+  } catch { args = {}; }
+  // The deed's own words where it has them (the command she ran), else the call itself.
+  const deed = deedFrom(tool, args, false, '');
+  const brief = Object.values(args).filter(v => typeof v === 'string' || typeof v === 'number').join(', ');
+  toPortrait('portrait:terminal', (deed ? `${tool}: ${deed.what}` : `${tool}(${brief})`).slice(0, 64));
+}
+
 /**
  * A tool call, kept if it did something.
  *
@@ -11533,6 +11749,7 @@ let readingMangaNow = false;
  * one down as done would make the ledger lie in the one direction it must not.
  */
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
+  showToolOnScreen(tool, call);
   if (!isADeed(tool)) return;
   // Something of her own to do is the cure for a quiet room (feelings.ts).
   herOwnTimeAt = Date.now();
@@ -13651,7 +13868,8 @@ function webDeps(): WebDeps {
         const voice = readVoiceConfig(store.get('voice'));
         const reason = readListenConfig(store.get('listen')).engine === 'off' ? 'not set up'
           : !voice.webEnabled || voice.engine === 'off' ? 'not set up'
-          : herAsleepNow() ? 'asleep'
+          // Asleep is no reason to refuse: she answers half-awake, as chat does
+          // (knockWhileAsleep). `asleep` still travels for the phone's standby.
           : undefined;
         return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}), ...sleepForPhone() };
       }
@@ -13670,7 +13888,6 @@ function webDeps(): WebDeps {
         if (readListenConfig(store.get('listen')).engine === 'off') throw new Error('Her ears are switched off.');
         const voice = readVoiceConfig(store.get('voice'));
         if (!voice.webEnabled || voice.engine === 'off') throw new Error('She has no voice for a call.');
-        if (herAsleepNow()) throw new Error('She is asleep.');
         let lastFiller = '';
         console.log(`[call] placed at home, ${call.endAfterMs} ms of quiet ends a turn`);
         const local = openLocalCall({
@@ -14092,8 +14309,19 @@ app.whenReady().then(() => {
   // never ran until a model file was requested and then threw on the second
   // request — ipcMain.handle refuses a duplicate channel.
   nativeTheme.themeSource = 'dark';
+  registerImageEditorIPC({ get: key => store.get(key), set: (key, value) => store.set(key, value) });
   ipcMain.handle('usage:get', () => apiUsage.report());
   ipcMain.handle('usage:spend', (_e, force?: boolean) => spendReport(force === true));
+  const mail = mailClient(serverRequest);
+  ipcMain.handle('mail:status', () => mail.status());
+  ipcMain.handle('mail:configure', (_e, input) => mail.configure(input));
+  ipcMain.handle('mail:sync', () => mail.sync());
+  ipcMain.handle('mail:threads', (_e, offset) => mail.threads(offset));
+  ipcMain.handle('mail:thread', (_e, id) => mail.thread(id));
+  ipcMain.handle('mail:saveDraft', (_e, input) => mail.saveDraft(input));
+  ipcMain.handle('mail:discardDraft', (_e, input) => mail.discardDraft(input));
+  ipcMain.handle('mail:send', (_e, input) => mail.send(input));
+  ipcMain.handle('mail:reconcile', (_e, input) => mail.reconcile(input));
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
   // Read back from Windows rather than from the store, so the panel shows what
@@ -14128,7 +14356,8 @@ app.whenReady().then(() => {
     sendToWindows('chat:asidesCleared');
     return [];
   });
-  ipcMain.handle('chat:newConversation', () => { if (desktopServer()) throw new Error('The server keeps one shared conversation.'); return startNewConversation(); });
+  // The desk's own conversation starts again on her server; the phone's is left alone.
+  ipcMain.handle('chat:newConversation', async () => { if (desktopServer()) { await serverJson(serverRequest, '/api/chat/new?thread=desk', jsonPost({})); broadcastChatReset(); return; } return startNewConversation(); });
   // Only ever in flight once: the window asks on mount and again after a reset,
   // and in dev both can land together. Sharing the promise stops two greetings.
   ipcMain.handle('chat:opening', () => {
@@ -14235,7 +14464,16 @@ app.whenReady().then(() => {
   ipcMain.handle('listen:transcribe', async (_e, audio: Uint8Array, mime: string) => {
     const config = readListenConfig(store.get('listen'));
     const vocabulary = wordsToListenFor();
-    const text = await transcribe(audio, mime, config, trackedFetch, remoteAuth(config.endpoint), vocabulary);
+    let text: string;
+    try { text = await transcribe(audio, mime, config, trackedFetch, remoteAuth(config.endpoint), vocabulary); }
+    catch (error) {
+      // The speech server on this machine is not running. Her server hears too,
+      // only further away; without one there is nothing to fall back to.
+      if (!desktopServer() || !/ERR_CONNECTION_REFUSED|ECONNREFUSED|fetch failed/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      const answer = await serverJson<{ text?: unknown }>(serverRequest, '/api/listen', { method: 'POST', headers: { 'content-type': mime || 'audio/webm' }, body: new Uint8Array(audio) });
+      text = typeof answer.text === 'string' ? answer.text : '';
+      console.log('[listen] the local speech server is down — her server heard it');
+    }
     if (looksLikeNothing(text, vocabulary)) {
       console.log(`[listen] ${audio.length} bytes -> nothing worth sending`);
       return '';
@@ -14483,37 +14721,6 @@ app.whenReady().then(() => {
     console.log(`[gaming] ${saved.enabled ? `on — ${saved.model} while playing` : 'off'}${saved.quiet ? ', quiet' : ''}`);
     return saved;
   });
-  ipcMain.handle('journal:list', () => getJournal());
-  ipcMain.handle('journal:getConfig', () => readJournalConfig(store.get('journal.config')));
-  ipcMain.handle('journal:setConfig', (_e, config: JournalConfig) => {
-    const saved = readJournalConfig(config);
-    // Under journal.config, beside journal.entries rather than over them.
-    store.set('journal.config', saved);
-    console.log(`[journal] ${saved.enabled ? `on${saved.askUnprompted ? `, she asks from ${saved.askHour}:00` : ', she waits to be asked'}` : 'off'}`);
-    return saved;
-  });
-  ipcMain.handle('journal:save', (_e, entry: { date?: string; text: string; mood?: number; anxiety?: number; energy?: number; sleep?: number }) => {
-    const date = typeof entry.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : localDateKey(zonedNow(CHAT_TIMEZONE));
-    const entries = upsertEntry(getJournal(), {
-      date,
-      text: typeof entry.text === 'string' ? entry.text : '',
-      mood: readRating(entry.mood),
-      anxiety: readRating(entry.anxiety),
-      energy: readRating(entry.energy),
-      sleep: readRating(entry.sleep),
-      // Typed by hand, so she did not drag it out of them.
-      prompted: false,
-    });
-    setJournal(entries);
-    // Written by hand counts as done for the day; she must not then ask.
-    if (date === localDateKey(zonedNow(CHAT_TIMEZONE))) journalAskedOn = date;
-    console.log(`[journal] saved ${date} by hand: ${String(entry.text ?? '').length} chars`);
-    return entries;
-  });
-  ipcMain.handle('journal:remove', (_e, id: string) => { setJournal(getJournal().filter(entry => entry.id !== id)); return getJournal(); });
-  ipcMain.handle('journal:trend', () => recentTrend(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
-  ipcMain.handle('journal:stats', (_e, range: RangeName) => rangeStats(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE)), range));
-  ipcMain.handle('journal:note', () => haruNote(getJournal(), localDateKey(zonedNow(CHAT_TIMEZONE))));
   ipcMain.handle('anilist:get', () => readAniListConfig(store.get('anilist')));
   ipcMain.handle('anilist:set', (_e, config: AniListConfig) => {
     const saved = readAniListConfig(config);
@@ -14558,10 +14765,13 @@ app.whenReady().then(() => {
   ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); broadcastGoogleStatus(); return googleStatus(store); });
   ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string; attachments?: Attachment[] }[], config: ProviderConfig) => {
-    if (desktopServer()) return serverChat(messages);
+    // Her screen shows her thinking while the reply is written; her voice arriving ends it there.
+    const thinking = (on: boolean) => { if (portraitWindow && !portraitWindow.isDestroyed()) portraitWindow.webContents.send('portrait:thinking', on); };
+    thinking(true);
+    if (desktopServer()) return serverChat(messages, text => { if (!_e.sender.isDestroyed()) _e.sender.send('ai:serverChunk', text); }).finally(() => thinking(false));
     const door = herAsleepNow() ? knockWhileAsleep() : null;
-    if (door) return { content: door, ignored: false, irritation: 0, ego: 0 };
-    return ollamaChat(messages, config);
+    if (door) { thinking(false); return { content: door, ignored: false, irritation: 0, ego: 0 }; }
+    return ollamaChat(messages, config).finally(() => thinking(false));
   });
   // Streaming, for a client that draws the line as it is written rather than
   // waiting for the whole of it. Same generation as ai:send; each stretch is
@@ -14629,8 +14839,15 @@ app.whenReady().then(() => {
   ipcMain.handle('voice:stop', () => stopSpeaking());
   // Reported by the window that owns the audio, since only it knows when a clip
   // has actually finished playing rather than merely been sent.
+  ipcMain.handle('call:start', () => startDeskCall());
+  ipcMain.handle('call:stop', () => stopDeskCall());
+  ipcMain.on('call:frame', (_e, frame: Uint8Array) => {
+    if (deskCall && deskCall.readyState === deskCall.OPEN && frame?.byteLength) deskCall.send(frame);
+  });
   ipcMain.handle('voice:speaking', (_e, speaking: boolean) => {
     speakingNow = Boolean(speaking);
+    // On a call, the server tells her echo from an interruption by whether she is audible.
+    if (deskCall && deskCall.readyState === deskCall.OPEN) deskCall.send(JSON.stringify({ type: 'her', speaking: speakingNow }));
     duckOthers(speakingNow);
     if (speakingNow) return;
     // She finished, so there is no longer a sentence to be cut off in the
@@ -14691,7 +14908,7 @@ app.whenReady().then(() => {
   // than a lazy question, and praise buys back some patience.
   ipcMain.handle('mood:react', async (_e, reaction: 'up' | 'down', id?: string) => {
     if (desktopServer()) {
-      await serverJson(serverRequest, '/api/chat/rate', jsonPost({ id, reaction }));
+      await serverJson(serverRequest, '/api/chat/rate?thread=desk', jsonPost({ id, reaction }));
       return { ...getMood(), comeback: false };
     }
     const taken = takeThumb(reaction);
@@ -14761,6 +14978,12 @@ app.whenReady().then(() => {
     if(!perched)settleOnGround(false);
   });
   ipcMain.handle('companion:poke', (_e, kind: PokeKind) => { void handlePoke(kind === 'right-click' ? 'right-click' : 'poke'); });
+  // Her face reacting to your draft. Face only, like every beat — no vitals —
+  // and no gesture, since a nod per keystroke would be a tic.
+  ipcMain.handle('companion:feel', (_e, beat: { emotion?: unknown } | undefined) => {
+    const emotion = parseEmotion(beat?.emotion);
+    if (emotion) broadcastBeat(emotion);
+  });
   /**
    * She looks up. Answers instantly and on purpose: the line is canned so the
    * box never waits on a model, and only the reply itself is generated.
@@ -14889,6 +15112,8 @@ app.whenReady().then(() => {
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
   createPortraitWindow();
+  // Her screen reads what he is coding as he writes it (codeWatch.ts; portraitTerminal.ts shows the lines).
+  watchCode(path.join(app.getPath('home'), '.claude', 'projects'), hunk => toPortrait('portrait:code', hunk));
   reportCapabilities();
   reportSetup();
   startWindowsHelper();
@@ -14926,9 +15151,6 @@ app.whenReady().then(() => {
   performChatResetIfDue();
   mergeArchiveFragments();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
-  // Same minute tick as the chat reset. shouldAsk does all the deciding, so this
-  // is a cheap check that does nothing on all but one minute of the day.
-  setInterval(() => { void askForJournal(); }, CHAT_RESET_POLL_MS);
   scheduleBackgroundSync();
   }
   startLifeLoop();

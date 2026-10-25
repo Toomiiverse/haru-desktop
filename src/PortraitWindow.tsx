@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createVoicePlayer, type Bands } from './companion/mouth';
+import { CLOSED, LOUD_FLOOR, LOUD_S, MOUTH, SHUT, createVoicePlayer, mouthFor } from './companion/mouth';
 import type { EmotionName } from './types';
 import { DEFAULT_VIEW, type Eye, type View } from './portraitRig';
 import { createHairLayer, createPlateLayer, headShift, type HairLayer, type Head, type PlateLayer } from './portraitHair';
+import { createTerminal, fileFromTitle, TEAR_FILTER } from './portraitTerminal';
+import { createHud } from './portraitHud';
 import irisSprite from '../build/portrait/iris.png';
 import pupilSprite from '../build/portrait/pupil.png';
 import './portrait.css';
@@ -54,6 +56,9 @@ const BLUSH: Partial<Record<EmotionName, number>> = { embarrassed: 1, affectiona
 // lasted the whole mood. It closes about as fast as a blink and opens a little slower.
 const SMILING: EmotionName[] = ['happy', 'affectionate'];
 const SMILE_HOLD_MS = 1600, SMILE_BEAT_MS = 900, SMILE_GAP_MS = 6000, SMILE_CLOSE_MS = 60, SMILE_OPEN_MS = 140;
+// Code-terminal bursts (portraitTerminal.ts): one for each tool she uses, and while he codes, one every CODING_S
+// seconds or so (the first CODING_FIRST_S after he starts), never while she talks, thinks or sleeps.
+const CODING_S = [40, 90], CODING_FIRST_S = [6, 15];
 // Her brow per mood, in view px: `up` raises the whole brow, `inner` drops its inner end (toward her nose) while the
 // outer end stays put; a negative inner raises it, the worried slant. A stressed syllable lifts it BROW_EMPHASIS
 // more, thinking BROW_THINK; it eases between them over about BROW_EASE_MS.
@@ -138,7 +143,6 @@ const MOUTH_CANVAS = { w: 269, h: 277 };
 // (canvas 139, 81).
 const SPEAK = ['M_01', 'M_30', 'M_29', 'M_27', 'M_31', 'M_39'];
 const SPEAK_SIZE = [1, 0.48, 0.48, 0.5, 0.55, 0.55];
-const MOUTH = { closed: 0, slit: 1, mid: 2, wide: 3, round: 4, roundSmall: 5 } as const;
 // Between words her mouth rests in her mood: a closed fanged smile, a smirk, a grimace, gritted teeth, a flat line,
 // a small o, a soft smile, a wavy line, a pout, a cat mouth; neutral keeps the drawn line. Each with its size, as above.
 const REST: Partial<Record<EmotionName, [string, number]>> = {
@@ -149,23 +153,6 @@ const REST: Partial<Record<EmotionName, [string, number]>> = {
 const REST_SHAPES = [...new Map(Object.values(REST).filter(([name]) => !SPEAK.includes(name)).map(([name, size]) => [name, size]))];
 const SHAPES = [...SPEAK, ...REST_SHAPES.map(([name]) => name)], SHAPE_SIZE = [...SPEAK_SIZE, ...REST_SHAPES.map(([, size]) => size)];
 const MOUTH_ANCHOR = { x: 139, y: 81 };
-// Her synthesised voice is compressed, so its level sits near the top most of a line: the shape goes by the level
-// relative to how loud she has been over the last LOUD_S seconds (rising at once, never below LOUD_FLOOR). The
-// thresholds were tuned on her own voice clips (60 frames a second) to close between syllables about a tenth of
-// the time: hiss over HISS of the whole is a sibilant; a second formant under ROUNDED of the low band is a rounded
-// vowel, over FRONT a front one (ee/eh).
-const LOUD_S = 1.5, LOUD_FLOOR = 0.3;
-const SHUT = 0.06, CLOSED = 0.7, MID = 0.85, WIDE = 0.95, ROUND_OPEN = 0.88;
-const HISS = 0.12, ROUNDED = 0.15, FRONT = 0.9;
-/** The chart's mouth for this voice level (`rel`, relative to her recent loudness) and band balance. */
-function mouthFor(level: number, rel: number, bands?: Bands): number {
-  if (level < SHUT || rel < CLOSED) return MOUTH.closed;
-  const f2 = bands ? bands.mid / Math.max(bands.low, 1e-4) : 0.4;
-  if (bands && bands.high > HISS) return MOUTH.slit;
-  if (f2 < ROUNDED) return rel > ROUND_OPEN ? MOUTH.round : MOUTH.roundSmall;
-  if (f2 > FRONT) return rel > WIDE ? MOUTH.mid : MOUTH.slit;
-  return rel > WIDE ? MOUTH.wide : rel > MID ? MOUTH.mid : MOUTH.slit;
-}
 
 // At rest she has one line instead of M_01's traced patches: its centreline (fitted in canvas units), tapering to
 // points at the corners, `thick` times as thick in the middle.
@@ -207,6 +194,8 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
   const thinkingSince = useRef(0);
   const svg = useRef<SVGSVGElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const terminalHost = useRef<HTMLDivElement>(null);
+  const hudHost = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const hair = useRef<HairLayer | null>(null);
   const frontCanvas = useRef<HTMLCanvasElement>(null);
@@ -250,7 +239,22 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
 
   useEffect(() => {
     const player = createVoicePlayer();
+    const terminal = terminalHost.current ? createTerminal(terminalHost.current) : null;
+    // Spin on her screen (portraitHud.ts), called up and worked by her music tool; she sings along to what it plays.
+    const hud = hudHost.current ? createHud(hudHost.current) : null;
+    const drift = { x: 0, y: 0 };
+    const coding = { on: false, label: '', next: 0, hunk: null as { file: string; lines: string[] } | null };
+    const between = ([lo, hi]: number[]) => 1000 * (lo + Math.random() * (hi - lo));
     const off = [
+      // Called optionally: a build running against an older preload has neither, and the portrait must still come up.
+      window.haru?.companion.onTerminal?.(line => terminal?.burst({ line, kind: 'tool' })),
+      window.haru?.companion.onCoding?.(({ on, label }) => {
+        if (on && !coding.on) coding.next = performance.now() + between(CODING_FIRST_S);
+        Object.assign(coding, { on, label });
+      }),
+      // What he just wrote, shown as soon as she is free to; it waits for her to finish talking or thinking.
+      window.haru?.companion.onCode?.(hunk => { coding.hunk = hunk; }),
+      window.haru?.companion.onMusic?.(event => hud?.event(event)),
       window.haru?.voice.onClip(clip => player.play(clip)),
       window.haru?.voice.onStop(() => player.stop()),
       window.haru?.companion.onSay(setCaption),
@@ -287,7 +291,11 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       const root = svg.current;
       if (!root) return;
       const reading = player.read();
-      const voice = reading.open * reading.weight;
+      // Her own voice first; while she is quiet and Spin plays, the song's singing track drives her mouth instead.
+      const song = reading.weight > 0.05 ? null : hud?.sing.read() ?? null;
+      const heard = song ?? reading;
+      const hudBeat = hud?.tick(now, motion, drift);
+      const voice = heard.open * heard.weight;
       mouth += (voice - mouth) * (1 - (1 - (voice > mouth ? MOUTH_ATTACK : MOUTH_RELEASE)) ** (dt / 16.7));
       loud = Math.max(mouth, loud * Math.exp(-dt / (LOUD_S * 1000)), LOUD_FLOOR);
       rel = mouth / loud;
@@ -347,6 +355,12 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
           now + LOOK_AROUND_MS[0] + Math.random() * (LOOK_AROUND_MS[1] - LOOK_AROUND_MS[0]));
         nextLook = glance.until + 1000 * (LOOK_AROUND_S[0] + Math.random() * (LOOK_AROUND_S[1] - LOOK_AROUND_S[0]));
       }
+      // Working the music: she looks at its panel when it opens or acts, and now and then while it plays (re-asserted
+      // every frame, so thinking, pauses and glances do not take her eyes off it). A command gets a small nod; the
+      // song's beat a gentle bob while she is not talking.
+      if (hudBeat?.look) lookAt(hudBeat.look.x, hudBeat.look.y, now + 200);
+      if (hudBeat?.nod && now - lastNod >= 600) { lastNod = now; head.drop.v += HEAD_NOD.drop * 0.7 * motion; head.pitch.v += PITCH.nod * 0.7 * motion; }
+      if (hudBeat?.beat && !talking) head.drop.v += 3.5 * motion;
       // Eyes lead the cursor by a beat; the lag is what makes it a glance.
       const glancing = now < glance.until;
       const target = !glancing ? cursor.current : glance.absolute ? glance : { x: cursor.current.x + glance.x, y: cursor.current.y + glance.y };
@@ -358,8 +372,7 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       }
       const rest = sleeping.current ? 1 : Math.max(LIDS[mood.current] ?? 0, talkLid, thinking ? THINK.lid : 0);
       restLid += (rest - restLid) * 0.08;
-      const blinking = Math.max(0, ...blinks.map(start => blinkShape(now - start)));
-      lid = Math.max(restLid, blinking);
+      lid = Math.max(restLid, ...blinks.map(start => blinkShape(now - start)));
       dilate += ((DILATE[mood.current] ?? 1) + EMPHASIS_DILATE * emphasis - dilate) * 0.05;
       const breath = Math.sin(now / 2200);
       const dx = (gaze.x * view.travel.x).toFixed(1), dy = (gaze.y * view.travel.y).toFixed(1);
@@ -392,7 +405,9 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
       });
       // The mouth shape for her voice level right now.
       const shapes = root.querySelector('[data-mouth]')?.children;
-      let want: number = mouthFor(mouth, rel, reading.bands);
+      let want: number = mouthFor(mouth, rel, heard.bands);
+      // Within a sung line her mouth stays parted, the slit the least it goes, so the shapes flow into each other.
+      if (want === MOUTH.closed && song?.sung) want = MOUTH.slit;
       if (want === MOUTH.closed && !sleeping.current && REST[mood.current]) want = SHAPES.indexOf(REST[mood.current]![0]);
       if (want !== mouthShown && now - mouthAt >= MOUTH_HOLD_MS) { mouthShown = want; mouthAt = now; }
       const fade = 1 - Math.exp(-dt / MOUTH_FADE_MS);
@@ -456,13 +471,23 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
         // Scaling about the pivot (30% above the frame) pushes the picture down by
         // 1.5% and leaves a gap at the top; 4% up splits the overscan evenly.
         const bob = motion * (6 * Math.sin(2 * Math.PI * s / SWAY_S + 1.2) + breath * 2) + head.drop.x;
+        drift.x = head.side.x; drift.y = bob;
         const pivot = `${HEAD_PIVOT * 100}%`;
         frame.current.style.transform = `translateY(-4%) translate(${head.side.x.toFixed(1)}px, ${bob.toFixed(1)}px) rotate(${angle.toFixed(3)}deg) translateY(${pivot}) rotate(${head.roll.x.toFixed(3)}deg) translateY(-${pivot}) scale(${OVERSCAN})`;
-        frame.current.style.filter = sleeping.current ? 'brightness(0.55)' : '';
       }
+      if (terminal && coding.hunk && !talking && !thinking && !sleeping.current) {
+        terminal.burst({ line: coding.hunk.file, lines: coding.hunk.lines, kind: 'coding' });
+        coding.hunk = null; coding.next = now + between(CODING_S);
+      }
+      if (terminal && coding.on && now >= coding.next && !talking && !thinking && !sleeping.current && !terminal.active) {
+        terminal.burst({ line: fileFromTitle(coding.label), kind: 'coding' });
+        coding.next = now + between(CODING_S);
+      }
+      const tearing = terminal?.tick(now, motion) ?? false;
+      if (frame.current) frame.current.style.filter = [sleeping.current ? 'brightness(0.55)' : '', tearing ? `url(#${TEAR_FILTER})` : ''].join(' ').trim();
     };
     raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); off.forEach(fn => fn?.()); player.dispose(); };
+    return () => { cancelAnimationFrame(raf); off.forEach(fn => fn?.()); player.dispose(); terminal?.dispose(); hud?.dispose(); };
   }, [view, plateReady]);
 
   const [fx, fy, fw, fh] = view.frame;
@@ -562,6 +587,10 @@ export function PortraitWindow({ view = DEFAULT_VIEW }: { view?: View }) {
           </svg>
         )}
       </div>
+      {/* On the glass, not on her: it stays put while her head sways. */}
+      <div ref={terminalHost} className="portrait-terminal"/>
+      {/* Spin, Jarvis-style, on the glass above her eyes; the panels and caption stay over it. */}
+      <div ref={hudHost} className="portrait-hud"/>
       <div className="portrait-panels">
         {panels.map(panel => (
           <section key={panel.id} className="portrait-panel">

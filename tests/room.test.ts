@@ -9,7 +9,7 @@ test('the eye-roll is no longer named first or named as the default', () => {
   assert.equal(HER_EMOJI[0], '😏');
   assert.equal(HER_EMOJI.at(-1), '🙄');
   assert.doesNotMatch(EXPRESSIVE, /Most replies carry one/);
-  assert.match(EXPRESSIVE, /None of them is your default/);
+  assert.match(EXPRESSIVE, /None is your default/);
   assert.match(LAST_WORD, /may go in this reply/, 'an emoji is no longer owed on every reply');
   assert.doesNotMatch(LAST_WORD, /one of your emoji goes in this reply/);
 });
@@ -18,7 +18,7 @@ test('an emoji in three of her last four replies is named back to her, with the 
   const stuck = ['Fine. 🙄', 'Whatever. 🙄', 'Go on then.', 'Told you. 🙄'];
   const note = emojiRut(stuck);
   assert.match(note, /You have put 🙄 in 3 of your last 4 replies/);
-  assert.match(note, /Do not use 🙄 in this reply at all/);
+  assert.match(note, /Do not use 🙄 this reply/);
   assert.doesNotMatch(note.split('use one of')[1] ?? '', /🙄/, 'the others are offered, not the one she is stuck on');
   assert.equal(emojiRut(['Fine. 🙄', 'Sure.', 'Right. 😏', 'Hm. 👀']), '', 'no habit, nothing said');
   assert.equal(emojiRut(['Fine. 🙄', 'Yes. 🙄']), '', 'too few replies to call it a habit');
@@ -30,7 +30,7 @@ test('a tic that skips every other reply is still a tic, and four replies was to
   const alternating = ['Fine. 😒', 'Sure.', 'Right. 😒', 'Go on.', 'Told you. 😒', 'Hm.'];
   assert.equal(emojiRut(alternating.slice(-4)), '', 'the old window saw nothing wrong with it');
   assert.match(emojiRut(alternating), /You have put 😒 in 3 of your last 6 replies/);
-  assert.match(emojiRut(alternating), /Do not use 😒 in this reply at all/);
+  assert.match(emojiRut(alternating), /Do not use 😒 this reply/);
   assert.equal(emojiRut(['a 😒', 'b', 'c', 'd 😒', 'e', 'f']), '', 'twice in six is use, not habit');
 });
 
@@ -60,9 +60,9 @@ test('the backstop also catches the one she reaches for every other reply', () =
 });
 
 test('how she writes is about the shape of the message, and does not soften what she is', () => {
-  assert.match(NATURAL, /a throwaway line gets a throwaway line back/);
-  assert.match(NATURAL, /Fragments are fine\. Contractions always\./);
-  assert.match(NATURAL, /not a tax on every message/);
+  assert.match(NATURAL, /a throwaway line can get three words back/);
+  assert.match(NATURAL, /Fragments fine\. Contractions always\./);
+  assert.match(NATURAL, /Once in a while, not every reply/);
   assert.match(NATURAL, /No bullet points, no headings/);
   assert.match(NATURAL, /Never sound like support staff/);
   assert.doesNotMatch(NATURAL, /\b(kind|gentle|polite|nice|warm|supportive)\b/i, 'nothing here makes her nicer');
@@ -81,7 +81,7 @@ test('room to go on about something comes from her evening and her mood, not fro
   assert.match(room, /You have been on Chainsaw Man, you have things to say about it/);
   assert.match(room, /the rule about matching the length of their message does not apply/);
   assert.match(room, /Several sentences at the least, more if you have it, however little they typed/);
-  assert.match(room, /Do not apologise for the length, do not announce that you are about to go on/);
+  assert.match(room, /Do not apologise for the length, do not announce you are about to go on/);
   assert.doesNotMatch(room, /bullet|summar/i, 'a rant is not a structured answer either');
   assert.equal(roomToRant({ ...wound, roll: 0.99 }), '', 'a chance, not a rule');
   assert.equal(roomToRant({ ...wound, sinceLastMs: RANT_COOLDOWN_MS - 1 }), '', 'not twice in ninety minutes');
@@ -114,9 +114,7 @@ test('a question about one of her things, or about what she makes of something, 
   assert.equal(askingAboutHer('remind me at 6', subjects), '');
   assert.equal(askingAboutHer('', subjects), '');
   const note = herSubjectNote('Chainsaw Man');
-  assert.match(note, /Stay on it/);
-  assert.match(note, /No telling them to go to bed/);
-  assert.match(note, /not one order, not even at the end/);
+  assert.match(note, /Answer the subject they actually raised in your own voice/);
   assert.match(note, /about you, not about them/);
 });
 
@@ -169,16 +167,15 @@ test('when they name her thing themselves she takes the room without a roll, and
 });
 
 
-test('"just wanted to talk to you" is taken at face value, not seen through', () => {
+test('"just wanted to talk to you" is recognised, and how to take it is hers to decide', () => {
   for (const said of ['Nothing - just wanting to talk to you', 'nothing much, i just wanted to chat', 'just checking in', 'I only wanted to talk to you', 'missed you', 'no reason, just felt like talking']) {
     assert.ok(justTalking(said), said);
   }
   for (const said of ['I just want to finish this build', 'talk to the customer for me', 'just wanting the 9060 xt', 'nothing']) {
     assert.ok(!justTalking(said), said);
   }
-  assert.match(JUST_TALKING_NOTE, /not an excuse/);
-  assert.match(JUST_TALKING_NOTE, /Do not ask what they really want/);
-  assert.match(JUST_TALKING_NOTE, /do not put a clock on it/);
+  assert.match(JUST_TALKING_NOTE, /They said they just want to talk to you/);
+  assert.match(JUST_TALKING_NOTE, /Decide how you want to approach it/);
 });
 
 test('a reply about her cannot end by handing the subject back as a question', () => {
@@ -188,8 +185,7 @@ test('a reply about her cannot end by handing the subject back as a question', (
   assert.doesNotMatch(out, /out with it|actually want|avoiding the mop/);
   assert.equal(dropClosingOrder('Reze is the better written one. What did you make of her?'), 'Reze is the better written one. What did you make of her?', 'asking what they thought of it is the subject, not a pivot');
   assert.equal(dropClosingOrder("We're going in circles. I answered that. If you want to talk, say something new. Otherwise go finish cleaning."), "We're going in circles. I answered that. If you want to talk, say something new.", '"otherwise go finish" is an order');
-  assert.match(herSubjectNote('Chainsaw Man'), /^They are asking you about Chainsaw Man — about you, not about them\. First and most of all: this reply ends on the subject/);
-  assert.match(herSubjectNote('Chainsaw Man'), /not one order, not even at the end/i);
+  assert.match(herSubjectNote('Chainsaw Man'), /^They are asking you about Chainsaw Man — about you, not about them. Answer the subject/);
 });
 
 test('her voice note for a hosted brain describes the register and quotes none of what it rules out', () => {
@@ -199,8 +195,8 @@ test('her voice note for a hosted brain describes the register and quotes none o
     assert.ok(!HOSTED_VOICE.toLowerCase().includes(line), `quotes: ${line}`);
   }
   assert.match(HOSTED_VOICE, /^Before you answer: you are Haru/);
-  assert.match(HOSTED_VOICE, /do not reassure him about himself/);
-  assert.match(HOSTED_VOICE, /fewer words, not softer ones/);
+  assert.match(HOSTED_VOICE, /You do not have to reassure, pep-talk, coach, or check on him/);
+  assert.match(HOSTED_VOICE, /fewer words, harsher words, or no words/);
   assert.ok(!HOSTED_VOICE.startsWith('[') && !HOSTED_VOICE.endsWith(']'), 'main.ts wraps it with the label rule');
 });
 

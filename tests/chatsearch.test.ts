@@ -118,7 +118,7 @@ test('recall unasked: only exchanges sharing a specific word, and the note write
 
 // Asserted rather than declared: `minecraft` is not in every tree this runs in.
 const NOTHING = {
-  choices: false, journal: false, anilist: false, web: false,
+  choices: false, anilist: false, web: false, screen: false,
   search: { enabled: false, readPages: false, transcripts: false },
   knowledge: false, browser: false, claude: false, system: { enabled: false, level: 0 },
   hands: false, desktop: { launch: false, power: false }, knockedAwake: false, minecraft: false,

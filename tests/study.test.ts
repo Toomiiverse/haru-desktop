@@ -15,7 +15,9 @@ test('study requests survive server transport and isolate study exchanges after 
       calls.push(route);
       if (route.startsWith('/api/attach?')) return Response.json({ attachment: file });
       assert.deepEqual(JSON.parse(String(init?.body)), { text, attachments: [file] });
-      return Response.json({ reply: 'Here is the concept.' });
+      return new Response(`data: ${JSON.stringify({ done: true, reply: 'Here is the concept.' })}
+
+`);
     }, text, [{ attachment: { ...file, saved: 'C:/notes.pdf' }, bytes: new Uint8Array([1]) }]);
     assert.equal(calls.length, 2);
     const turn = (id: string, role: Message['role'], content: string): Message => ({ id, role, content, time: 'now' });

@@ -1,22 +1,24 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Activity, ArrowUp, Settings2, UserRound, BookOpen, Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, ServiceSpend, UsageRow, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import { Activity, ArrowUp, Settings2, UserRound, BookOpen, Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Phone, PhoneOff, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, ForgettingEntry, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, ServiceSpend, UsageRow, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, clockInZone, datesInView, dayLabel, rangeLabel, shiftISODate, todayInZone, toISODate, weekOf, type CalendarView } from './date';
-import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
+import { startListening, startRecording, startStreaming, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
 import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
 import { randomWait } from './retorts';
 import { studyRequest } from './study';
+import { AppearanceSettings } from './AppearanceSettings';
+import { Mail as MailIcon } from 'lucide-react';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the avatar renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export type Page = 'chat' | 'study' | 'asides' | 'character' | 'profile' | 'settings' | 'journal' | 'services';
+export type Page = 'chat' | 'study' | 'asides' | 'character' | 'profile' | 'settings' | 'services' | 'mail';
 
 // Keep the everyday pages together and personal settings below them.
 const TABS: { page: Page; label: string; icon: typeof NotebookPen }[] = [
   { page: 'chat', label: 'Conversation', icon: MessageSquare },
   { page: 'study', label: 'Study', icon: BookOpen },
+  { page: 'mail', label: 'Mail', icon: MailIcon },
   { page: 'asides', label: 'Asides', icon: Quote },
-  { page: 'journal', label: 'Journal', icon: NotebookPen },
   { page: 'services', label: 'Services', icon: Activity },
   { page: 'profile', label: 'You & memory', icon: UserRound },
   { page: 'character', label: 'Character', icon: Sparkles },
@@ -51,317 +53,6 @@ const MEMORY_GROUPS: [MemoryKind, string][] = [
   ['fact', 'Other things'],
 ];
 
-const SCALE_MAX = 10;
-
-/**
- * A face per rating, five steps across the scale.
- *
- * Kaomoji rather than icons: the app already wears its Japanese on its sleeve
- * (はる in the corner), they carry far more expression per character than a
- * line-art face, and they cost nothing to render or animate. Anxiety runs the
- * other way — its bad end is the top of the scale — so it gets its own row
- * rather than a reversed lookup, which would be unreadable a month from now.
- */
-const FACES: Record<'mood' | 'anxiety' | 'energy' | 'sleep', string[]> = {
-  mood:    ['(╥﹏╥)', '(・_・;)', '(・_・)', '(◕‿◕)', '(★ω★)'],
-  anxiety: ['(－ω－)', '(・_・)', '(・_・;)', '(°ロ°)', '(ﾉ˚Д˚)ﾉ'],
-  energy:  ['(_ _).zZ', '(－_－)', '(・_・)', '(๑>ᴗ<๑)', '(ﾉ>ω<)ﾉ'],
-  sleep:   ['(×_×)', '(－_－)', '(・_・)', '(￣ω￣)', '(´｡• ω •｡`)'],
-};
-
-const RATINGS: { key: 'mood' | 'anxiety' | 'energy' | 'sleep'; label: string; low: string; high: string; inverted?: boolean }[] = [
-  { key: 'mood', label: 'Mood', low: 'awful', high: 'great' },
-  { key: 'anxiety', label: 'Anxiety', low: 'calm', high: 'awful', inverted: true },
-  { key: 'energy', label: 'Energy', low: 'empty', high: 'full' },
-  { key: 'sleep', label: 'Slept', low: 'badly', high: 'well' },
-];
-
-function faceFor(key: keyof typeof FACES, value: number | undefined) {
-  if (value === undefined) return '( ˘_˘ )';
-  return FACES[key][Math.min(4, Math.floor((value / SCALE_MAX) * 4.999))];
-}
-
-/**
- * Five steps, named, the way the concept's check-in does it.
- *
- * The store keeps 0–10 and always will — the charts, averages and the thresholds
- * she reacts to are all built on it — so these are five points on that scale
- * rather than a different scale. Picking beats dragging for this: a slider asks
- * you to decide whether today is a 6 or a 7, which is a question nobody can
- * answer honestly, while five named faces ask something you actually know.
- */
-const STEPS = [1, 3, 5, 7, 9];
-
-const WORDS: Record<'mood' | 'anxiety' | 'energy' | 'sleep', string[]> = {
-  mood:    ['Really struggling', 'Low', 'Okay', 'Good', 'Amazing'],
-  anxiety: ['Calm', 'Settled', 'Tense', 'Anxious', 'Overwhelmed'],
-  energy:  ['Empty', 'Low', 'Okay', 'Good', 'Buzzing'],
-  sleep:   ['Terrible', 'Poor', 'Okay', 'Good', 'Great'],
-};
-
-/** Which of the five a stored 0–10 belongs to. */
-function stepOf(value: number | undefined) {
-  if (value === undefined) return -1;
-  let best = 0;
-  for (let i = 1; i < STEPS.length; i++) if (Math.abs(STEPS[i] - value) < Math.abs(STEPS[best] - value)) best = i;
-  return best;
-}
-
-function CheckInRow({ field, value, onChange }: { field: typeof RATINGS[number]; value: number | undefined; onChange(value: number | undefined): void }) {
-  const chosen = stepOf(value);
-  return <div className="checkin-row">
-    <div className="checkin-head">
-      <span className="rating-label">{field.label}</span>
-      {chosen >= 0 && <span className="checkin-word">{WORDS[field.key][chosen]}</span>}
-      <button className="rating-clear" title="Leave this one unanswered" onClick={() => onChange(undefined)} disabled={value === undefined}>×</button>
-    </div>
-    <div className="checkin-faces" role="radiogroup" aria-label={field.label}>
-      {STEPS.map((step, index) => {
-        const picked = chosen === index;
-        return <button key={step} type="button" role="radio" aria-checked={picked}
-          aria-label={`${field.label}: ${WORDS[field.key][index]}`}
-          title={WORDS[field.key][index]}
-          className={`checkin-face${picked ? ' picked' : ''}${field.inverted ? ' inverted' : ''}`}
-          onClick={() => onChange(step)}>
-          <span className="checkin-kao">{FACES[field.key][index]}</span>
-          <em>{WORDS[field.key][index]}</em>
-        </button>;
-      })}
-    </div>
-  </div>;
-}
-
-function RatingRow({ field, value, onChange }: { field: typeof RATINGS[number]; value: number | undefined; onChange(value: number | undefined): void }) {
-  // Keyed on the face so React remounts the span whenever it changes, which is
-  // what restarts the pop animation. Keying on the number would fire it on every
-  // step of a drag, which reads as a twitch rather than a reaction.
-  const face = faceFor(field.key, value);
-  return <div className="rating-row">
-    <span className="rating-label">{field.label}</span>
-    <span key={face} className={field.inverted ? 'rating-face inverted' : 'rating-face'}>{face}</span>
-    <input type="range" min={0} max={SCALE_MAX} step={1} value={value ?? 5}
-      className={field.inverted ? 'inverted' : ''}
-      aria-label={`${field.label}, ${value ?? 'not answered'} out of ${SCALE_MAX}`}
-      onChange={event => onChange(Number(event.target.value))}/>
-    <span className={value === undefined ? 'rating-value muted' : 'rating-value'}>{value === undefined ? '–' : value}<em>/{SCALE_MAX}</em></span>
-    <button className="rating-clear" title="Leave this one unanswered" onClick={() => onChange(undefined)} disabled={value === undefined}>×</button>
-    <span className="rating-ends">{field.low} → {field.high}</span>
-  </div>;
-}
-
-const RANGE_LABELS: { range: JournalRange; label: string }[] = [
-  { range: 'week', label: 'Week' },
-  { range: 'fortnight', label: 'Fortnight' },
-  { range: 'month', label: 'Month' },
-];
-
-/**
- * Mood and anxiety over the window, as bars on a shared baseline.
- *
- * Every day in the range gets a slot whether or not it was written, so gaps read
- * as gaps. A chart drawn only from entries would join three scattered days into
- * a confident line and quietly misrepresent how often someone wrote.
- */
-function JournalChart({ stats, field, inverted }: { stats: JournalStats; field: JournalField; inverted?: boolean }) {
-  const width = 100;
-  const gap = stats.series.length > 20 ? 0.6 : 1.4;
-  const slot = width / stats.series.length;
-  return <svg className="journal-chart" viewBox={`0 0 ${width} 40`} preserveAspectRatio="none" role="img"
-    aria-label={`${field} across ${stats.days} days`}>
-    {[10, 20, 30].map(y => <line key={y} x1="0" x2={width} y1={y} y2={y} className="grid"/>)}
-    {stats.series.map((point, index) => {
-      const value = point[field];
-      const height = value === undefined ? 0 : Math.max(1.2, (value / SCALE_MAX) * 36);
-      return <rect key={point.date} x={index * slot + gap / 2} width={Math.max(0.8, slot - gap)}
-        y={40 - height} height={height || 1}
-        className={value === undefined ? 'bar missing' : inverted ? 'bar inverted' : 'bar'}>
-        <title>{`${point.date}: ${value ?? 'nothing recorded'}`}</title>
-      </rect>;
-    })}
-  </svg>;
-}
-
-function StatBlock({ label, stats, inverted }: { label: string; stats?: JournalFieldStats; inverted?: boolean }) {
-  if (!stats?.rated) return <div className="stat empty"><span className="stat-label">{label}</span><span className="stat-none">not tracked</span></div>;
-  // For anxiety a fall is the good direction, so the arrow's meaning is flipped
-  // rather than its colour being reused to mean the opposite thing.
-  const rising = (stats.change ?? 0) > 0.35;
-  const falling = (stats.change ?? 0) < -0.35;
-  const good = inverted ? falling : rising;
-  const bad = inverted ? rising : falling;
-  return <div className="stat">
-    <span className="stat-label">{label}</span>
-    <span className="stat-avg">{stats.average!.toFixed(1)}<em>/{SCALE_MAX}</em></span>
-    <span className="stat-range">{stats.lowest}–{stats.highest} · {stats.rated} day{stats.rated === 1 ? '' : 's'}</span>
-    {(good || bad) && <span className={good ? 'stat-change good' : 'stat-change bad'}>{rising ? '▲' : '▼'} {Math.abs(stats.change!).toFixed(1)}</span>}
-  </div>;
-}
-
-/** Debounce, so typing saves itself without a write on every keystroke. */
-const AUTOSAVE_MS = 900;
-
-export function JournalDrawer({ onClose }: { onClose(): void }) {
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [config, setConfig] = useState<JournalConfig | null>(null);
-  const [stats, setStats] = useState<JournalStats | null>(null);
-  const [note, setNote] = useState<HaruNote | null>(null);
-  const [range, setRange] = useState<JournalRange>('fortnight');
-  const [text, setText] = useState('');
-  const [ratings, setRatings] = useState<Partial<Record<JournalField, number>>>({});
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [loaded, setLoaded] = useState(false);
-  const today = new Date().toLocaleDateString('en-CA');
-  // Nothing is written until the first real edit, so opening the page and
-  // leaving does not create an empty entry and quietly start a "streak".
-  const touched = useRef(false);
-
-  const refresh = useCallback(async () => {
-    if (!window.haru) return;
-    const [list, s, n] = await Promise.all([window.haru.journal.list(), window.haru.journal.stats(range), window.haru.journal.note()]);
-    setEntries(list); setStats(s); setNote(n);
-  }, [range]);
-
-  useEffect(() => {
-    if (!window.haru) { setLoaded(true); return; }
-    void window.haru.journal.getConfig().then(setConfig);
-    void window.haru.journal.list().then(list => {
-      const todays = list.find(entry => entry.date === today);
-      if (todays) { setText(todays.text); setRatings({ mood: todays.mood, anxiety: todays.anxiety, energy: todays.energy, sleep: todays.sleep }); }
-      setLoaded(true);
-    });
-    return window.haru.journal.onChange(() => { void refresh(); });
-  }, [today, refresh]);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  // Autosave. Switching tabs used to lose whatever was half-typed, because the
-  // page unmounts and the only way to keep anything was to have pressed a
-  // button — which is a poor bargain for a diary.
-  useEffect(() => {
-    if (!touched.current || !window.haru) return;
-    setStatus('saving');
-    const timer = setTimeout(() => {
-      void window.haru!.journal.save({ date: today, text, ...ratings }).then(() => {
-        setStatus('saved');
-        void refresh();
-      });
-    }, AUTOSAVE_MS);
-    return () => clearTimeout(timer);
-  }, [text, ratings, today, refresh]);
-
-  const edit = (change: () => void) => { touched.current = true; change(); };
-  const past = entries.filter(entry => entry.date !== today);
-  const todaysEntry = entries.find(entry => entry.date === today);
-
-  return <section className="page journal">
-    <div className="journal-main">
-      <div className="field">
-        <h2>Today</h2>
-        <p>How the day went and how you are feeling. Saves itself as you type — she can add to it when you tell her about your day, but she never reads it back to you.</p>
-        <textarea className="journal-text" rows={7} value={text} placeholder="However much or little you want. It does not have to be tidy."
-          onChange={event => edit(() => setText(event.target.value))}/>
-        <p className="checkin-ask">How are you feeling today?</p>
-        <div className="ratings">
-          {RATINGS.map(field => <CheckInRow key={field.key} field={field} value={ratings[field.key]}
-            onChange={value => edit(() => setRatings(current => ({ ...current, [field.key]: value })))}/>)}
-        </div>
-        <p className={status === 'saved' ? 'autosave saved' : 'autosave'}>
-          {status === 'saving' ? 'Saving…' : status === 'saved' ? <><Check size={12}/> Saved automatically</> : 'Saves automatically'}
-        </p>
-      </div>
-
-      {stats && <div className="field">
-        <div className="chart-head">
-          <h2>How it has been going</h2>
-          <div className="range-tabs">
-            {RANGE_LABELS.map(option => <button key={option.range}
-              className={range === option.range ? 'range selected' : 'range'}
-              onClick={() => setRange(option.range)}>{option.label}</button>)}
-          </div>
-        </div>
-        <p className="status-note">{stats.written} of the last {stats.days} days written{stats.streak > 0 && `, ${stats.streak} in a row right now`}.</p>
-        <div className="stat-grid">
-          <StatBlock label="Mood" stats={stats.fields.mood}/>
-          <StatBlock label="Anxiety" stats={stats.fields.anxiety} inverted/>
-          <StatBlock label="Energy" stats={stats.fields.energy}/>
-          <StatBlock label="Slept" stats={stats.fields.sleep}/>
-        </div>
-        <div className="chart-row"><span className="rating-label">Mood</span><JournalChart stats={stats} field="mood"/></div>
-        <div className="chart-row"><span className="rating-label">Anxiety</span><JournalChart stats={stats} field="anxiety" inverted/></div>
-        <p className="status-note">Self-rated numbers, nothing more — no score, no interpretation. Gaps are days with nothing recorded.</p>
-      </div>}
-
-      <div className="field">
-        <h2>Everything else{past.length > 0 && <span className="kept-count">{past.length}</span>}</h2>
-        {loaded && !entries.length && <p className="status-note">Nothing written yet. She will ask once in the evening if you let her, or you can just type here whenever.</p>}
-        {past.map(entry => <article key={entry.id} className="journal-entry">
-          <header>
-            <strong>{new Date(`${entry.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</strong>
-            <span className="journal-marks">
-              {entry.mood !== undefined && <em title="Mood">{faceFor('mood', entry.mood)} {entry.mood}</em>}
-              {entry.anxiety !== undefined && <em title="Anxiety" className="inverted">{faceFor('anxiety', entry.anxiety)} {entry.anxiety}</em>}
-              {entry.prompted && <em title="She asked for this one">asked</em>}
-            </span>
-            <button className="remove-model" onClick={() => window.haru?.journal.remove(entry.id).then(() => void refresh())}><Trash2 size={12}/></button>
-          </header>
-          {entry.text && <p>{entry.text}</p>}
-        </article>)}
-      </div>
-
-      {config && <div className="field">
-        <h2>How she asks</h2>
-        <label className="check-row">
-          <input type="checkbox" checked={config.enabled} onChange={event => window.haru?.journal.setConfig({ ...config, enabled: event.target.checked }).then(setConfig)}/>
-          <span>Keep a journal</span>
-        </label>
-        {config.enabled && <>
-          <label className="check-row">
-            <input type="checkbox" checked={config.askUnprompted} onChange={event => window.haru?.journal.setConfig({ ...config, askUnprompted: event.target.checked }).then(setConfig)}/>
-            <span>Let her ask once in the evening</span>
-          </label>
-          {config.askUnprompted && <div className="form-grid">
-            <label className="stack"><span>Not before</span>
-              <input type="range" min={12} max={23} step={1} value={config.askHour}
-                onChange={event => window.haru?.journal.setConfig({ ...config, askHour: Number(event.target.value) }).then(setConfig)}/>
-            </label>
-            <span className="status-note">{config.askHour}:00. Once a day and no more — if you do not answer, she drops it until tomorrow.</span>
-          </div>}
-        </>}
-      </div>}
-    </div>
-
-    {/* The column where the calendar sits on the chat page, so the two pages feel
-        like the same app rather than two screens that happen to share a top bar. */}
-    <aside className="journal-side">
-      {note && <div className={`haru-note ${note.tone}`}>
-        <span className="haru-note-face">{{ proud: '(๑˃ᴗ˂)ﻭ', pleased: '(◕‿◕)', watching: '(・_・)', grumpy: '(￣ヘ￣)' }[note.tone]}</span>
-        <p>{note.text}</p>
-      </div>}
-
-      <div className="side-block">
-        <h3>Today</h3>
-        {todaysEntry ? <>
-          <div className="today-faces">
-            {RATINGS.filter(field => todaysEntry[field.key] !== undefined).map(field =>
-              <span key={field.key} className="today-face" title={`${field.label} ${todaysEntry[field.key]}/${SCALE_MAX}`}>
-                {faceFor(field.key, todaysEntry[field.key])}
-                <em>{field.label} {todaysEntry[field.key]}</em>
-              </span>)}
-          </div>
-          {todaysEntry.text
-            ? <p className="today-text">{todaysEntry.text}</p>
-            : <p className="status-note">Ratings only so far — nothing written down.</p>}
-        </> : <p className="status-note">Nothing yet today.</p>}
-      </div>
-
-      {stats && <div className="side-block">
-        <h3>Streak</h3>
-        <p className="streak-count">{stats.streak}<em>{stats.streak === 1 ? 'day' : 'days'}</em></p>
-        <p className="status-note">{stats.written} of the last {stats.days} days have something in them.</p>
-      </div>}
-    </aside>
-  </section>;
-}
 export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [profile, setProfile] = useState<Profile>({ nickname: '', occupation: '', about: '' });
   const [speakerName, setSpeakerName] = useState('');
@@ -589,7 +280,17 @@ function setKeyFor(haru: NonNullable<typeof window.haru>, slot: ReturnType<typeo
     : haru.ai.setSelfHostedKey(key);
 }
 
-export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string, provider?: string): Promise<string[]>; onClose(): void }) {
+/** A named brain worth switching to in one click. It only fills the same fields
+ *  that can be typed by hand — nothing here is a mode the rest of the panel
+ *  cannot still override. */
+type BrainPreset = { name: string; note: string; provider: ProviderConfig['provider']; endpoint: string; model: string };
+
+const BRAIN_PRESETS: BrainPreset[] = [
+  { name: 'Venice', note: 'hosted · qwen-3-6-plus', provider: 'venice', endpoint: 'https://api.venice.ai/api/v1', model: 'qwen-3-6-plus' },
+  { name: 'Cydonia 24B', note: 'local · this machine', provider: 'ollama', endpoint: 'http://localhost:11434', model: 'hf.co/mradermacher/Cydonia-24B-v4.3-i1-GGUF:Q4_K_M' },
+];
+
+export function SettingsDrawer({ config, onSave, onTest, onClose, server = false }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string, provider?: string): Promise<string[]>; onClose(): void; server?: boolean }) {
   const [endpoint, setEndpoint] = useState(config.endpoint);
   const [model, setModel] = useState(config.model);
   const [status, setStatus] = useState<{ state: 'idle' | 'testing' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
@@ -641,8 +342,17 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
     if (suggested && known.includes(endpoint.trim())) setEndpoint(suggested);
     onSave({ ...config, provider: next, endpoint: suggested && known.includes(endpoint.trim()) ? suggested : endpoint, model });
   }
+  /** A named brain: one click, and it lands in the fields below as if typed. */
+  function applyPreset(preset: BrainPreset) {
+    setEndpoint(preset.endpoint);
+    setModel(preset.model);
+    onSave({ ...config, provider: preset.provider, endpoint: preset.endpoint, model: preset.model });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
 
-  return <section className="page settings-page"><details className="settings-group" open><summary><span><strong>Brain & conversation</strong><small>Choose where Haru thinks and how she answers.</small></span><ChevronDown size={18}/></summary><div className="field"><h2>Where she thinks</h2><p>Ollama runs on this machine and nothing leaves it. The others are companies you send the conversation to.</p>
+  return <section className="page settings-page">{server ? <details className="settings-group" open><summary><span><strong>Brain & conversation</strong><small>She thinks on her Haru server.</small></span><ChevronDown size={18}/></summary><div className="field"><p>This desktop talks to her server, which chooses her models, her second brain and her nudges. Change them there; nothing set here would be used.</p></div></details> : <details className="settings-group" open><summary><span><strong>Brain & conversation</strong><small>Choose where Haru thinks and how she answers.</small></span><ChevronDown size={18}/></summary><div className="field"><h2>Where she thinks</h2><p>Ollama runs on this machine and nothing leaves it. The others are companies you send the conversation to.</p>
+    <div className="form-grid brain-presets"><span className="status-note">Switch brain:</span>{BRAIN_PRESETS.map(preset => <button key={preset.name} type="button" className={config.provider === preset.provider && config.model === preset.model ? 'solid' : 'ghost'} title={`${preset.note} — ${preset.model}`} onClick={() => applyPreset(preset)}>{preset.name}</button>)}</div>
     <div className="form-grid">
       <select aria-label="AI provider" value={config.provider} onChange={event => void chooseProvider(event.target.value as ProviderConfig['provider'])}>
         <option value="ollama">Ollama — on this machine</option>
@@ -664,11 +374,12 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><SecondBrainField/><NudgeField/></details>
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><SecondBrainField/><NudgeField/></details>}
+    <details className="settings-group" id="haru-appearance" open><summary><span><strong>Haru’s appearance</strong><small>Her saved 2D avatar and extra wardrobe reference views.</small></span><ChevronDown size={18}/></summary><AppearanceSettings/></details>
     <details className="settings-group"><summary><span><strong>Voice & listening</strong><small>How she sounds, and how she hears you.</small></span><ChevronDown size={18}/></summary><VoiceField registerSave={registerVoiceSave}/><ListenField/></details>
     <details className="settings-group"><summary><span><strong>Your desktop</strong><small>Appearance, movement and startup.</small></span><ChevronDown size={18}/></summary><ThemeField/><RoamField/><StartupField/></details>
-    <details className="settings-group"><summary><span><strong>Awareness & files</strong><small>Manage what Haru can see and read.</small></span><ChevronDown size={18}/></summary><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/></details>
-    <details className="settings-group"><summary><span><strong>Connected services</strong><small>Calendar, search, media and your other devices.</small></span><ChevronDown size={18}/></summary><SearchField/><AniListField/><GoogleCalendarField/><WebField/><CheckInSourceField/><JellyfinField/></details>
+    <details className="settings-group"><summary><span><strong>Awareness & files</strong><small>Manage what Haru can see and read.</small></span><ChevronDown size={18}/></summary><VisionField/><AttachmentsField/><ScreenshotField/>{!server && <WatchingField/>}<DesktopField/><GamingField/></details>
+    <details className="settings-group"><summary><span><strong>Connected services</strong><small>Calendar, search, media and your other devices.</small></span><ChevronDown size={18}/></summary>{server ? <div className="field"><p className="status-note">Web search, watching you play and reaching her from your phone are run by her Haru server.</p></div> : <SearchField/>}<AniListField/><GoogleCalendarField/>{!server && <WebField/>}<CheckInSourceField/><JellyfinField/></details>
     <div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
@@ -2551,6 +2262,50 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
   // bug this replaced.
   const [muted, setMuted] = useState(false);
 
+  // A call: the microphone streams to her server until hung up, and she answers
+  // aloud as she thinks (see startDeskCall in main). The wake word and the
+  // reply window stand down for it — one owner of the microphone at a time.
+  const [call, setCall] = useState<'off' | 'connecting' | 'live'>('off');
+  const onCall = call !== 'off';
+  const callMic = useRef<{ stop(): void; level(): number } | null>(null);
+  useEffect(() => {
+    if (!window.haru) return;
+    return window.haru.call.onState(({ state: next, reason }) => {
+      if (next === 'connecting') { setCall('connecting'); return; }
+      if (next === 'live') {
+        setCall('live');
+        if (callMic.current) return;
+        startStreaming(frame => window.haru!.call.frame(frame))
+          .then(mic => { callMic.current = mic; })
+          .catch(() => { setError('No microphone, or permission was refused.'); void window.haru!.call.stop(); });
+        return;
+      }
+      callMic.current?.stop();
+      callMic.current = null;
+      setCall('off');
+      setLevel(0);
+      if (reason && reason !== 'hung up' && !/desk hung up/.test(reason)) setError(reason);
+    });
+  }, []);
+  useEffect(() => () => { callMic.current?.stop(); void window.haru?.call.stop(); }, []);
+  useEffect(() => {
+    if (call !== 'live') return;
+    let frame = 0;
+    const tick = () => { setLevel(callMic.current?.level() ?? 0); frame = requestAnimationFrame(tick); };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [call]);
+  async function toggleCall() {
+    setError(null);
+    if (onCall) { await window.haru!.call.stop(); return; }
+    setCall('connecting');
+    try { await window.haru!.call.start(); }
+    catch (problem) {
+      setCall('off');
+      setError(problem instanceof Error ? problem.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(problem));
+    }
+  }
+
   // Answering to her name. Kept in a ref rather than state so the utterance
   // handler, which outlives any one render, always sees the current settings.
   const armed = useRef(false);
@@ -2567,7 +2322,7 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
   const [heard, setHeard] = useState(false);
 
   useEffect(() => {
-    if (!window.haru || !config || config.engine === 'off' || !config.wakeWord || muted) return;
+    if (!window.haru || !config || config.engine === 'off' || !config.wakeWord || muted || onCall) return;
     let listener: Listener | null = null;
     let cancelled = false;
     // A bare "Haru?" opens a window for the next thing said, and closes again if
@@ -2645,7 +2400,7 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
       if (openMic.current === listener) openMic.current = null;
       listener?.stop();
     };
-  }, [config?.engine, config?.wakeWord, config?.autoSend, muted]);
+  }, [config?.engine, config?.wakeWord, config?.autoSend, muted, onCall]);
 
   // She spoke first and has stopped, so the next thing said is an answer.
   //
@@ -2654,7 +2409,7 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
   // name. Without it, the microphone is opened for the length of the window and
   // closed again — a few seconds at a moment she chose, rather than always.
   useEffect(() => {
-    if (!window.haru || !config || config.engine === 'off' || !config.replyWindow || muted) return;
+    if (!window.haru || !config || config.engine === 'off' || !config.replyWindow || muted || onCall) return;
     let temporary: Listener | null = null;
     let shut: ReturnType<typeof setTimeout> | undefined;
     let gone = false;
@@ -2711,7 +2466,7 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
     });
 
     return () => { gone = true; close(); unsubscribe?.(); };
-  }, [config?.engine, config?.replyWindow, config?.wakeWord, config?.autoSend, muted]);
+  }, [config?.engine, config?.replyWindow, config?.wakeWord, config?.autoSend, muted, onCall]);
 
   // A sound for the microphone opening and closing.
   //
@@ -2800,7 +2555,17 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
   }
 
   const listening = state === 'recording' || heard;
+  const callLabel = call === 'live' ? 'On a call — press to hang up' : call === 'connecting' ? 'Calling her…' : 'Call her — talk and she answers aloud';
+  if (onCall) return <>
+    <button type="button" className={`mic mic-recording mic-call`} onClick={toggleCall} title={error ?? callLabel} aria-label={callLabel}>
+      {call === 'connecting' ? <span className="mic-thinking"/> : <><PhoneOff size={15}/><span className="mic-level" style={{ transform: `scaleY(${0.25 + level * 0.75})` }}/></>}
+    </button>
+    {error && <span className="mic-error" title={error}>!</span>}
+  </>;
   return <>
+    <button type="button" className="mic mic-idle" onClick={toggleCall} disabled={state !== 'idle'} title={error ?? callLabel} aria-label={callLabel}>
+      <Phone size={15}/>
+    </button>
     <button type="button" className={`mic mic-${shown}${config.wakeWord && !muted ? ' mic-armed' : ''}${muted ? ' mic-muted' : ''}`} onClick={toggle} disabled={state === 'thinking'} title={error ?? label} aria-label={label}>
       {state === 'thinking'
         ? <span className="mic-thinking"/>

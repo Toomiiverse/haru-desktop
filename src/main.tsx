@@ -10,6 +10,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { CompanionWindow } from './CompanionWindow';
 import { PortraitWindow } from './PortraitWindow';
+import { BodyPreview } from './BodyPreview';
 import './styles.css';
 import './live2d.css';
 import './svgAvatar.css';
@@ -18,4 +19,4 @@ const view = new URLSearchParams(window.location.search).get('view');
 const isCompanion = view === 'companion';
 if (isCompanion || view === 'portrait') document.documentElement.dataset.view = view;
 
-createRoot(document.getElementById('root')!).render(<StrictMode>{isCompanion ? <CompanionWindow /> : view === 'portrait' ? <PortraitWindow /> : <App />}</StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode>{isCompanion ? <CompanionWindow /> : view === 'portrait' ? <PortraitWindow /> : view === 'body' ? <BodyPreview /> : <App />}</StrictMode>);

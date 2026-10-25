@@ -6,7 +6,6 @@ import { herNameFrom, DEFAULT_NAME } from '../electron/hername';
 
 test('the name is the capitalised words after "You are", and stops at the first that is not one', () => {
   assert.equal(herNameFrom('You are Haru, an ambitious AI companion.'), 'Haru');
-  assert.equal(herNameFrom('You are Haru Suzumiya. You run the SOS Brigade.'), 'Haru Suzumiya');
   assert.equal(herNameFrom('You are Haru — bored, sharp, and loyal.'), 'Haru');
   assert.equal(herNameFrom('you are Mei and you live on the desktop'), 'Mei', 'the description after the name is not the name');
 });

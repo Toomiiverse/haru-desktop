@@ -12,7 +12,8 @@ import { idleMotion } from './companion/idle';
 import { desktopAnchor } from './companion/placement';
 import { referenceClip } from './companion/referenceClips';
 import { randomWait } from './retorts';
-import type { Emotion, Vitals, VoiceConfig } from './types';
+import { typingMood } from './companion/typingMood';
+import type { Beat, Emotion, Vitals, VoiceConfig } from './types';
 import { speedFor } from '../electron/roam';
 
 // Only used until the first life tick arrives, a few seconds after launch.
@@ -356,7 +357,7 @@ export function CompanionWindow() {
   // next few seconds rather than latching until the next message.
   const emotion = useRef<{ value: Emotion; until: number; holdMs: number } | null>(null);
   const gesture = useRef<{ name: Gesture; startedAt: number } | null>(null);
-  useEffect(() => window.haru?.life.onEmotion(({ emotion: value, gesture: name }) => {
+  const applyBeat = useCallback(({ emotion: value, gesture: name }: Beat) => {
     const expression = expressionForEmotion(value, expressions.current);
     const holdMs = emotionHoldMs(value, expression);
     emotion.current = { value, until: performance.now() + holdMs, holdMs };
@@ -368,7 +369,8 @@ export function CompanionWindow() {
     svgHandle.current?.expression(svgExpression);
     if (name) svgHandle.current?.play(name);
     if (!referenceClip(expression)) vrmHandle.current?.play(value.emotion);
-  }), []);
+  }, []);
+  useEffect(() => window.haru?.life.onEmotion(applyBeat), [applyBeat]);
 
   // Without this she keeps whichever face she last pulled — one happy reply and
   // she sat on heart eyes indefinitely. Expressions are a beat, not a state.
@@ -528,6 +530,23 @@ export function CompanionWindow() {
   const [asking, setAsking] = useState(false);
   engaged.current = asking || !!caption;
   const [draft, setDraft] = useState('');
+  // She reads along while you type. Settles a beat after the last key so she
+  // does not flicker through every half-word, and only re-pulls a face when the
+  // feeling changes or the last one has faded.
+  const typedFeeling = useRef<string | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const beat = typingMood(draft);
+      if (!beat) { typedFeeling.current = null; return; }
+      const fresh = emotion.current && performance.now() < emotion.current.until;
+      if (beat.emotion.emotion === typedFeeling.current && fresh) return;
+      typedFeeling.current = beat.emotion.emotion;
+      // Round-tripped through main rather than applied here, so the portrait
+      // window pulls the same face; it comes back to this window via onEmotion.
+      if (window.haru) void window.haru.companion.feel(beat); else applyBeat(beat);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [draft, applyBeat]);
   const [waiting, setWaiting] = useState(false);
   // Picked once when the question goes out rather than per render, so it does not
   // shuffle under you while you are reading it.

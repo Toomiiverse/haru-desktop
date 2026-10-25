@@ -27,8 +27,6 @@ function state(overrides: Partial<PromptState> = {}): PromptState {
     character: { identity: IDENTITY, style: STYLE },
     profile: PROFILE,
     aniList: ANILIST,
-    journalConfig: { enabled: false, askHour: 20, askUnprompted: false },
-    journal: [],
     checkInsToday: [],
     screen: {},
     asides: [],
@@ -219,7 +217,7 @@ test('a day the list disagrees with becomes the subject, and outranks the put-of
 
 test('a short follow-up is read as continuing the thread, and never echoed back as an opener', () => {
   const prompt = chatSystemPrompt(state());
-  const continuity = prompt.indexOf('Read the last few turns before answering');
+  const continuity = prompt.indexOf('Read the last few turns');
   assert.notEqual(continuity, -1, 'the continuity rule never made it into the prompt');
   assert.ok(prompt.includes('an echo cannot'));
   assert.ok(continuity > prompt.indexOf(IDENTITY), 'it must come after the persona, or a small model forgets it');

@@ -21,7 +21,7 @@ import type { ToolCall } from '../electron/provider';
 
 const EVERYTHING: ToolAvailability = {
   choices: true,
-  journal: true,
+  screen: true,
   anilist: true,
   web: false,
   search: { enabled: true, readPages: true, transcripts: true },
@@ -41,7 +41,7 @@ const EVERYTHING: ToolAvailability = {
 
 const NOTHING: ToolAvailability = {
   choices: false,
-  journal: false,
+  screen: false,
   anilist: false,
   web: false,
   search: { enabled: false, readPages: false, transcripts: false },
@@ -69,9 +69,6 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     store: { get: () => undefined, getBlocks: () => [], transaction: (run) => run() },
     getCheckIns: () => ({ entries: [] }),
     setCheckIns: () => {},
-    getJournal: () => [],
-    writeJournal: () => undefined,
-    noteJournalAsked: () => {},
     getKept: () => [],
     addKeptItem: (item) => ({ id: 'new', done: false, ...item }),
     toggleKept: () => {},
@@ -142,7 +139,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
   // something chatTools can actually put on the table.
   const reachable = new Set(offered(EVERYTHING));
   const handled = [
-    'note_check_in', 'save_journal_entry', 'look_up_anime', 'convert_picture',
+    'note_check_in', 'show_on_screen', 'look_up_anime', 'convert_picture',
     'claude_session',
     'open_app', 'close_app', 'power', 'read_web_page', 'read_video_transcript', 'offer_choices', 'search_web',
     'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace', 'core_memory_rethink',
@@ -161,7 +158,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
 test('switched off means not on the table', () => {
   const bare = offered(NOTHING);
   for (const name of ['search_web', 'read_web_page', 'read_video_transcript', 'look_up_knowledge', 'look_up_anime',
-                      'save_journal_entry', 'offer_choices', 'open_app', 'close_app', 'power',
+                      'show_on_screen', 'offer_choices', 'open_app', 'close_app', 'power',
                       'get_system_info', 'restart_haru']) {
     assert.ok(!bare.includes(name), `${name} should not be offered when it is switched off`);
   }

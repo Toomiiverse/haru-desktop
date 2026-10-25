@@ -154,6 +154,10 @@ export type SpeechClip = {
   text: string;
   audio?: Uint8Array;
   mime?: string;
+  /** Streamed instead: one part of the line's raw s16le PCM, and whether more of it follows. */
+  pcm?: Uint8Array;
+  sampleRate?: number;
+  more?: boolean;
 };
 
 // Long enough for a slow first synthesis on CPU — GPT-SoVITS takes a few seconds

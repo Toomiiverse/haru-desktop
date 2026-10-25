@@ -24,7 +24,38 @@ export async function serverJson<T>(request: ServerRequest, route: string, init?
 export const jsonPost = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 // Only this turn crosses the network. The server owns its history and routing.
-export async function sendServerChat(request: ServerRequest, text: string, files: { attachment: Attachment; bytes: Uint8Array }[]) {
+/** Her reply as the server writes it (server-sent events: text, sentence, tool, done, error, pending). */
+export async function readStreamedReply(response: Response, onText: (text: string) => void, onSentence?: (sentence: string, emotion: string | null) => void, onTool?: (name: string) => void): Promise<{ reply: string; ignored?: boolean }> {
+  if (response.status === 401 || response.status === 403) throw new Error('Haru server login has expired. Sign in to the server again.');
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error || `Haru server returned ${response.status}.`);
+  }
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
+      const event = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      if (!event.startsWith('data: ')) continue;   // a heartbeat
+      const data = JSON.parse(event.slice(6));
+      // A tool she is about to use (its name only, sent before the server checks or runs it).
+      if (typeof data.tool === 'string' && data.tool) onTool?.(data.tool);
+      if (typeof data.text === 'string' && data.text) onText(data.text);
+      // A finished sentence, for her voice to start on while the rest is written.
+      if (typeof data.sentence === 'string' && data.sentence) onSentence?.(data.sentence, typeof data.emotion === 'string' ? data.emotion : null);
+      if (data.done) return { reply: data.reply, ignored: data.ignored };
+      if (data.error) throw new Error(data.error);
+      if (data.pending) throw new Error('Haru server is still answering. Check the conversation before sending again.');
+    }
+  }
+  throw new Error('Haru server stopped mid-reply. Check the conversation before sending again.');
+}
+
+export async function sendServerChat(request: ServerRequest, text: string, files: { attachment: Attachment; bytes: Uint8Array }[], onText: (text: string) => void = () => {}, onSentence?: (sentence: string, emotion: string | null) => void, onTool?: (name: string) => void) {
   if (files.length > 6) throw new Error('Attach up to six files per message.');
   if (!text.trim() && !files.length) throw new Error('Write a message or attach a file.');
   const uploaded: Attachment[] = [];
@@ -43,7 +74,7 @@ export async function sendServerChat(request: ServerRequest, text: string, files
     throw error;
   }
   // Never retry a send automatically: a lost response may still have been saved.
-  const answer = await serverJson<{ reply: string; ignored?: boolean }>(request, '/api/chat', jsonPost({ text, attachments: uploaded }));
+  const answer = await readStreamedReply(await request('/api/chat/stream?thread=desk', jsonPost({ text, attachments: uploaded })), onText, onSentence, onTool);
   if (typeof answer.reply !== 'string') throw new Error('Haru server returned an invalid reply. Check the conversation before sending again.');
   return { content: answer.reply, ignored: Boolean(answer.ignored), irritation: 0, ego: 0 };
 }
