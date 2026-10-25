@@ -128,7 +128,8 @@ export function createTerminal(host: HTMLElement): Terminal {
       // The eye band's rows are kept for the real lines when there are any; the rest are dealt out shuffled.
       band = real ? all.filter(y => y >= REAL_ROWS[0] && y <= REAL_ROWS[1]) : [];
       rows = all.filter(y => !band.includes(y)).sort(() => Math.random() - 0.5);
-      const pick = [...CODE].sort(() => Math.random() - 0.5).slice(0, 6 + Math.round(Math.random() * 2));
+      // No more than there are free rows: a line past them goes anywhere, the eye band included, over his lines.
+      const pick = [...CODE].sort(() => Math.random() - 0.5).slice(0, Math.min(rows.length, 6 + Math.round(Math.random() * 2)));
       for (let k = 0; k < 4; k++) addLine(scramble('x'.repeat(3 + Math.floor(Math.random() * 6)), 0), 'tiny', 100 + 120 * k, false, true);
       pick.forEach((text, k) => addLine(text, (['large', 'medium', 'medium', 'tiny'] as const)[k % 4], 300 + (LINES_BY - 300) * k / pick.length));
       if (real) addReal(real, LINES_BY + 200);
